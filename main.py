@@ -122,7 +122,7 @@ def try_get_hls(original_url: str) -> str | None:
 def dashboard():
     """Render the main dashboard with a card for each stream."""
     subfolders = get_subfolders()
-    return render_template("dashboard.html", subfolders=subfolders, stream_settings=settings)
+    return render_template("index.html", subfolders=subfolders, stream_settings=settings)
 
 
 @app.route("/stream/<stream_id>")
