@@ -51,7 +51,8 @@ browser at `http://your‑server:PORT/`.
 To pull in new changes from GitHub and restart the running service,
 use the provided `update.sh` script. The script prompts for the
 installation directory and systemd service name, fetches the latest
-code, updates Python dependencies, and restarts the service.
+code, discards any local modifications so the working tree matches the
+remote branch, updates Python dependencies, and restarts the service.
 
 ```
 chmod +x update.sh
