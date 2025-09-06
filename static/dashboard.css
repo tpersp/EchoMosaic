@@ -1,4 +1,12 @@
-/* Additional styles for the dynamic EchoMosaic dashboard */
+/* Dark themed styles for the EchoMosaic dashboard */
+
+body {
+  background: #121212;
+  color: #eee;
+  font-family: Arial, sans-serif;
+  margin: 0;
+  padding: 1rem;
+}
 
 .controls {
   margin-bottom: 1rem;
@@ -7,8 +15,12 @@
   align-items: center;
 }
 
+.controls button,
 .controls select {
-  margin-left: 0.5rem;
+  background: #2a2a2a;
+  color: #eee;
+  border: 1px solid #444;
+  padding: 0.25rem 0.5rem;
 }
 
 .dashboard-grid {
@@ -16,33 +28,53 @@
   grid-gap: 1rem;
 }
 
-.cols-1 {
-  grid-template-columns: repeat(1, 1fr);
-}
-.cols-2 {
-  grid-template-columns: repeat(2, 1fr);
-}
-.cols-3 {
-  grid-template-columns: repeat(3, 1fr);
-}
-.cols-4 {
-  grid-template-columns: repeat(4, 1fr);
-}
+.cols-1 { grid-template-columns: repeat(1, 1fr); }
+.cols-2 { grid-template-columns: repeat(2, 1fr); }
+.cols-3 { grid-template-columns: repeat(3, 1fr); }
+.cols-4 { grid-template-columns: repeat(4, 1fr); }
 
 /* Stream card adjustments */
 .stream-card {
-  border: 1px solid #ccc;
+  border: 1px solid #333;
   padding: 0.5rem;
   position: relative;
+  background: #1e1e1e;
+  color: #eee;
 }
 .stream-card h2 {
   margin-top: 0;
+}
+.stream-card h2 a {
+  color: #fff;
+  text-decoration: none;
+}
+.stream-card input,
+.stream-card select,
+.stream-card button {
+  background: #2a2a2a;
+  color: #eee;
+  border: 1px solid #444;
 }
 .remove-stream {
   position: absolute;
   top: 0.25rem;
   right: 0.25rem;
   font-size: 0.8rem;
+  background: #444;
+  color: #eee;
+  border: none;
+}
+
+/* Thumbnail picker */
+.image-picker .picker-thumbnail {
+  width: 60px;
+  height: 60px;
+  object-fit: cover;
+  cursor: pointer;
+  margin: 2px;
+}
+.image-picker .selected-thumb {
+  outline: 2px solid #fff;
 }
 
 /* Notepad floating window */
@@ -51,12 +83,13 @@
   bottom: 1rem;
   right: 1rem;
   width: 250px;
-  background: #f8f8f8;
-  border: 1px solid #ccc;
+  background: #1e1e1e;
+  border: 1px solid #444;
   box-shadow: 0 2px 4px rgba(0,0,0,0.2);
   padding: 0.5rem;
   transition: transform 0.3s;
   max-height: 300px;
+  color: #eee;
 }
 .notepad.collapsed {
   transform: translateY(calc(100% - 1.5rem));
@@ -71,9 +104,15 @@
   width: 100%;
   height: 150px;
   box-sizing: border-box;
+  background: #2a2a2a;
+  color: #eee;
+  border: 1px solid #444;
 }
 .notepad button {
   margin-top: 0.5rem;
+  background: #2a2a2a;
+  color: #eee;
+  border: 1px solid #444;
 }
 
 /* Notification styling */
