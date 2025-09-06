@@ -26,7 +26,7 @@
     {# Generate a card for each stream dynamically #}
     {% for stream_id, conf in stream_settings.items() %}
     <div class="stream-card" data-stream="{{ stream_id }}">
-      <h2>{{ stream_id|capitalize }}</h2>
+      <h2><a href="{{ url_for('render_stream', stream_id=stream_id) }}" target="_blank">{{ stream_id|capitalize }}</a></h2>
       <button class="remove-stream" data-stream="{{ stream_id }}">Remove</button>
 
       <!-- Folder Selection -->
