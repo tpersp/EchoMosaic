@@ -26,5 +26,12 @@
     {% endfor %}
   {% endif %}
 </div>
+<script src="https://cdn.socket.io/4.0.1/socket.io.min.js"></script>
+<script>
+const socket = io();
+['streams_changed', 'mosaic_refresh'].forEach(ev => {
+  socket.on(ev, () => { location.reload(); });
+});
+</script>
 </body>
 </html>
