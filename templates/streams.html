@@ -6,7 +6,7 @@
   <link rel="stylesheet" href="{{ url_for('static', filename='streams.css') }}">
 </head>
 <body>
-<div id="mosaic" class="mosaic-grid cols-{{ mosaic_settings.cols }}">
+<div id="mosaic" class="mosaic-grid layout-{{ mosaic_settings.layout }} cols-{{ mosaic_settings.cols }} stream-count-{{ stream_settings|length }}">
   {% for stream_id, conf in stream_settings.items() %}
   <div class="mosaic-cell">
     <iframe src="{{ url_for('render_stream', stream_id=stream_id) }}" allow="autoplay" loading="lazy"></iframe>

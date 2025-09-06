@@ -3,7 +3,7 @@
 body {
   background: #121212;
   color: #eee;
-  font-family: Arial, sans-serif;
+  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
   margin: 0;
   padding: 1rem;
 }
@@ -21,6 +21,12 @@ body {
   color: #eee;
   border: 1px solid #444;
   padding: 0.25rem 0.5rem;
+  border-radius: 4px;
+  transition: background 0.2s, border 0.2s;
+}
+
+.controls button:hover {
+  background: #3a3a3a;
 }
 
 .dashboard-grid {
@@ -40,6 +46,8 @@ body {
   position: relative;
   background: #1e1e1e;
   color: #eee;
+  border-radius: 4px;
+  box-shadow: 0 0 6px rgba(0,0,0,0.4);
 }
 .stream-card h2 {
   margin-top: 0;
@@ -54,6 +62,12 @@ body {
   background: #2a2a2a;
   color: #eee;
   border: 1px solid #444;
+  border-radius: 4px;
+  transition: background 0.2s, border 0.2s;
+}
+
+.stream-card button:hover {
+  background: #3a3a3a;
 }
 .remove-stream {
   position: absolute;

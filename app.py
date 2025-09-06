@@ -14,7 +14,10 @@ IMAGE_DIR = "/mnt/viewers"  # Adjust if needed
 
 def default_mosaic_config():
     """Return the default configuration for the mosaic /stream page."""
-    return {"cols": 2}
+    # ``layout`` controls how streams are arranged. ``grid`` uses the
+    # classic column based approach while other values enable custom
+    # layouts (e.g. horizontal or vertical stacking).
+    return {"cols": 2, "layout": "grid"}
 
 
 def default_stream_config():
@@ -45,6 +48,10 @@ def save_settings(data):
 settings = load_settings()
 if "_mosaic" not in settings:
     settings["_mosaic"] = default_mosaic_config()
+else:
+    # Backwards compatibility for older settings files
+    settings["_mosaic"].setdefault("layout", "grid")
+    settings["_mosaic"].setdefault("cols", 2)
 
 
 def get_subfolders():
@@ -177,7 +184,9 @@ def update_stream_settings(stream_id):
 @app.route("/mosaic-settings", methods=["POST"])
 def update_mosaic_settings():
     data = request.json or {}
-    settings["_mosaic"] = {"cols": int(data.get("cols", 2))}
+    layout = data.get("layout", "grid")
+    cols = int(data.get("cols", settings.get("_mosaic", {}).get("cols", 2)))
+    settings["_mosaic"] = {"layout": layout, "cols": cols}
     save_settings(settings)
     return jsonify({"status": "success", "mosaic": settings["_mosaic"]})
 
