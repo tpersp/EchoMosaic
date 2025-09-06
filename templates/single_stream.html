@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>{{ stream_id|capitalize }}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='stream.css') }}">
+</head>
+<body>
+<div id="container"></div>
+<script src="https://cdn.socket.io/4.0.1/socket.io.min.js"></script>
+<script>
+const streamId = "{{ stream_id }}";
+const socket = io();
+let rotationTimer = null;
+
+function render(config) {
+  const container = document.getElementById('container');
+  if (rotationTimer) {
+    clearInterval(rotationTimer);
+    rotationTimer = null;
+  }
+  container.innerHTML = '';
+
+  if (config.mode === 'livestream' && config.stream_url) {
+    fetch(`/stream/live?stream_id=${encodeURIComponent(streamId)}`)
+      .then(r => r.json())
+      .then(data => {
+        if (data.embed_type === 'youtube') {
+          const params = `?autoplay=1&mute=${config.yt_mute?1:0}&cc_load_policy=${config.yt_cc?1:0}`;
+          const iframe = document.createElement('iframe');
+          iframe.src = `https://www.youtube.com/embed/${data.embed_id}${params}`;
+          iframe.allow = 'autoplay';
+          container.appendChild(iframe);
+        } else if (data.embed_type === 'twitch') {
+          const iframe = document.createElement('iframe');
+          iframe.src = `https://player.twitch.tv/?channel=${data.embed_id}&parent=${location.hostname}&autoplay=true`;
+          iframe.allow = 'autoplay';
+          container.appendChild(iframe);
+        } else if (data.embed_type === 'hls') {
+          const video = document.createElement('video');
+          video.src = data.hls_url;
+          video.autoplay = true;
+          video.controls = true;
+          container.appendChild(video);
+        } else {
+          const iframe = document.createElement('iframe');
+          iframe.src = data.original_url;
+          container.appendChild(iframe);
+        }
+      });
+  } else if (config.mode === 'specific' && config.selected_image) {
+    const img = document.createElement('img');
+    img.src = `/stream/image/${config.selected_image}`;
+    container.appendChild(img);
+  } else if (config.mode === 'random') {
+    const folder = config.folder || 'all';
+    fetch(`/images?folder=${encodeURIComponent(folder)}`)
+      .then(r => r.json())
+      .then(imgs => {
+        if (!imgs.length) {
+          container.textContent = 'No images available';
+          return;
+        }
+        function showRandom() {
+          const path = imgs[Math.floor(Math.random() * imgs.length)];
+          container.innerHTML = '';
+          const img = document.createElement('img');
+          img.src = `/stream/image/${path}`;
+          container.appendChild(img);
+        }
+        showRandom();
+        rotationTimer = setInterval(showRandom, (config.duration || 5) * 1000);
+      });
+  } else {
+    container.textContent = 'No content configured';
+  }
+}
+
+function load() {
+  fetch(`/get-settings/${encodeURIComponent(streamId)}`)
+    .then(r => r.json())
+    .then(conf => render(conf));
+}
+
+socket.on('refresh', data => {
+  if (data.stream_id === streamId) {
+    render(data.config);
+  }
+});
+
+load();
+</script>
+</body>
+</html>
