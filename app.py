@@ -9,7 +9,7 @@ app = Flask(__name__)
 socketio = SocketIO(app)
 
 SETTINGS_FILE = "settings.json"
-IMAGE_DIR = "/mnt/piviewers"  # Adjust if needed
+IMAGE_DIR = "/mnt/viewers"  # Adjust if needed
 
 def load_settings():
     if os.path.exists(SETTINGS_FILE):
