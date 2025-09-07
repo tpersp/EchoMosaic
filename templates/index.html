@@ -3,24 +3,20 @@
 <head>
   <meta charset="UTF-8"/>
   <title>EchoMosaic Dashboard</title>
-  <link rel="stylesheet" href="{{ url_for('static', filename='dashboard.css') }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='dashboard.css') }}">
 </head>
 <body>
+<header class="top-bar">
+  <h1>EchoMosaic</h1>
+  <nav>
+    <a href="{{ url_for('app_settings') }}">Settings</a>
+  </nav>
+</header>
 <div class="container">
-  <h1>EchoMosaic Dashboard</h1>
 
   <div class="controls">
     <button id="add-stream">Add Stream</button>
-    <a href="{{ url_for('app_settings') }}">Settings</a>
-    <label>Dashboard Layout:
-      <select id="layout-select">
-        <option value="1">1 column</option>
-        <option value="2" selected>2 columns</option>
-        <option value="3">3 columns</option>
-        <option value="4">4 columns</option>
-      </select>
-    </label>
     <label>Stream Layout:
       <select id="mosaic-layout-select" data-current-cols="{{ mosaic_settings.cols }}">
         <option value="grid" data-cols="1" {% if mosaic_settings.layout == 'grid' and mosaic_settings.cols == 1 %}selected{% endif %}>Grid 1 column</option>
@@ -65,7 +61,7 @@
     <button id="open-mosaic">View Streams</button>
   </div>
 
-  <div id="dashboard-grid" class="dashboard-grid cols-2">
+  <div id="dashboard-grid" class="dashboard-grid">
     {# Generate a card for each stream dynamically #}
     {% for stream_id, conf in stream_settings.items() %}
     <div class="stream-card" data-stream="{{ stream_id }}">
@@ -146,8 +142,6 @@
 <script>
   const socket = io();
   const notification = document.getElementById('notification');
-  const grid = document.getElementById('dashboard-grid');
-  const layoutSelect = document.getElementById('layout-select');
   const addStreamBtn = document.getElementById('add-stream');
   const mosaicLayoutSelect = document.getElementById('mosaic-layout-select');
   const pipOptions = document.getElementById('pip-options');
@@ -164,20 +158,6 @@
       notification.classList.remove('show');
     }, 3000);
   }
-
-  // Adjust grid layout
-  const savedCols = localStorage.getItem('dashboardCols');
-  if (savedCols) {
-    layoutSelect.value = savedCols;
-    grid.classList.remove('cols-1','cols-2','cols-3','cols-4');
-    grid.classList.add('cols-' + savedCols);
-  }
-  layoutSelect.addEventListener('change', () => {
-    const cols = layoutSelect.value;
-    grid.classList.remove('cols-1','cols-2','cols-3','cols-4');
-    grid.classList.add('cols-' + cols);
-    localStorage.setItem('dashboardCols', cols);
-  });
 
   function sendMosaicSettings() {
     const opt = mosaicLayoutSelect.selectedOptions[0];
