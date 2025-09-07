@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-# This installation script automates the setup of the EchoView Dashboard
+# This installation script automates the setup of the EchoMosaic
 # application. It performs the following steps:
 #   1. Installs system packages required for Python and virtual environments.
 #   2. Copies the application files to a dedicated installation directory.
@@ -16,8 +16,8 @@ default_user="$(whoami)"
 read -r -p "Enter the user account that should run the service [${default_user}]: " SERVICE_USER
 SERVICE_USER="${SERVICE_USER:-$default_user}"
 
-# Prompt for installation directory (default: /opt/echoview-dashboard)
-default_install_dir="/opt/echoview-dashboard"
+# Prompt for installation directory (default: /opt/echomosaic)
+default_install_dir="/opt/echomosaic"
 read -r -p "Enter installation directory [${default_install_dir}]: " INSTALL_DIR
 INSTALL_DIR="${INSTALL_DIR:-$default_install_dir}"
 
@@ -71,7 +71,7 @@ if [[ "$mount_answer" =~ ^[Yy]$ ]]; then
   echo
   echo "Auth options:"
   echo "  1) guest (no username/password)  [default]"
-  echo "  2) username/password (stored in /etc/samba/creds-evdash)"
+  echo "  2) username/password (stored in /etc/samba/creds-echomosaic)"
   read -r -p "Choose authentication [1/2]: " AUTH_CHOICE
   AUTH_CHOICE="${AUTH_CHOICE:-1}"
 
@@ -81,7 +81,7 @@ if [[ "$mount_answer" =~ ^[Yy]$ ]]; then
   BASE_OPTS="uid=$USER_ID,gid=$GROUP_ID,iocharset=utf8,file_mode=0644,dir_mode=0755,noperm,vers=3.0,x-systemd.automount,_netdev,noauto"
 
   if [[ "$AUTH_CHOICE" == "2" ]]; then
-    CRED_FILE="/etc/samba/creds-evdash"
+    CRED_FILE="/etc/samba/creds-echomosaic"
     read -r -p "Username: " CIFS_USER
     read -r -s -p "Password: " CIFS_PASS; echo
     read -r -p "Domain (optional, ENTER to skip): " CIFS_DOMAIN
@@ -94,7 +94,7 @@ if [[ "$mount_answer" =~ ^[Yy]$ ]]; then
     sudo chmod 600 "$CRED_FILE"
     MOUNT_OPTS="credentials=$CRED_FILE,$BASE_OPTS"
   else
-    MOUNT_OPTS="guest,$BASE_OPTS"
+    MOUNT_OPTS="guest,username=guest,password=,$BASE_OPTS"
   fi
 
   echo "Creating mount dir: $MOUNT_POINT"
@@ -135,11 +135,11 @@ fi
 
 
 echo "\nCreating systemd service…"
-SERVICE_NAME="echoview-dashboard.service"
+SERVICE_NAME="echomosaic.service"
 SERVICE_PATH="/etc/systemd/system/${SERVICE_NAME}"
 sudo tee "$SERVICE_PATH" > /dev/null <<EOF
 [Unit]
-Description=EchoView Dashboard Web Application
+Description=EchoMosaic Web Application
 After=network.target
 
 [Service]
@@ -160,4 +160,4 @@ sudo systemctl enable "$SERVICE_NAME"
 sudo systemctl restart "$SERVICE_NAME"
 
 echo "\nInstallation complete!"
-echo "The EchoView Dashboard should now be accessible at http://<your-host>:$PORT/"
+echo "The EchoMosaic Dashboard should now be accessible at http://<your-host>:$PORT/"
