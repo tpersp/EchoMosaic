@@ -571,10 +571,16 @@ def groups_collection():
     data = request.get_json(silent=True) or {}
     name = (data.get("name") or "").strip()
     streams = data.get("streams") or []
+    layout = data.get("layout") or None
     if not name:
         return jsonify({"error": "Name required"}), 400
     settings.setdefault("_groups", {})
-    settings["_groups"][name] = [s for s in streams if s in settings]
+    cleaned = [s for s in streams if s in settings]
+    # Store as object with streams + optional layout
+    if layout and isinstance(layout, dict):
+        settings["_groups"][name] = {"streams": cleaned, "layout": layout}
+    else:
+        settings["_groups"][name] = cleaned
     save_settings(settings)
     return jsonify({"status": "ok", "group": {name: settings["_groups"][name]}})
 
@@ -593,14 +599,27 @@ def groups_delete(name):
 @app.route("/stream/group/<name>")
 def stream_group(name):
     groups = settings.get("_groups", {})
-    group = groups.get(name)
-    if not group and name.lower() == "default":
+    group_def = groups.get(name)
+    if not group_def and name.lower() == "default":
         # Dynamic default group = all configured streams
-        group = [k for k in settings.keys() if not k.startswith("_")]
-    if not group:
+        group_def = [k for k in settings.keys() if not k.startswith("_")]
+    if not group_def:
         return f"No group '{name}'", 404
-    streams = {k: settings[k] for k in group if k in settings}
-    mosaic = settings.get("_mosaic", default_mosaic_config())
+    # Support both legacy list and new object
+    if isinstance(group_def, dict):
+        members = group_def.get("streams", [])
+        g_layout = group_def.get("layout") or {}
+    else:
+        members = list(group_def)
+        g_layout = {}
+    streams = {k: settings[k] for k in members if k in settings}
+    # Build mosaic from group layout if provided, else default
+    mosaic = default_mosaic_config()
+    if g_layout:
+        # safe merge
+        for k in ["layout", "cols", "pip_main", "pip_pip", "pip_corner", "pip_size"]:
+            if k in g_layout:
+                mosaic[k] = g_layout[k]
     return render_template("streams.html", stream_settings=streams, mosaic_settings=mosaic)
 
 if __name__ == "__main__":

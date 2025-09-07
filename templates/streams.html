@@ -7,7 +7,7 @@
   <link rel="stylesheet" href="{{ url_for('static', filename='streams.css') }}">
 </head>
 <body>
-<div id="mosaic" class="mosaic-grid">
+<div id="mosaic" class="mosaic-grid layout-{{ mosaic_settings.layout }} cols-{{ mosaic_settings.cols }} stream-count-{{ stream_settings|length }}{% if mosaic_settings.layout == 'pip' %} corner-{{ mosaic_settings.pip_corner }}{% endif %}"{% if mosaic_settings.layout == 'pip' %} style="--pip-size: {{ mosaic_settings.pip_size|default(25) }}%;"{% endif %}>
   {% if mosaic_settings.layout == 'pip' %}
     {% if mosaic_settings.pip_main %}
     <div class="mosaic-cell main">
