@@ -41,6 +41,32 @@
       });
   }
   document.addEventListener('DOMContentLoaded', loadUpdateInfo);
+  async function loadUpdateHistory() {
+    const list = document.getElementById('history-list');
+    if (!list) return;
+    list.innerHTML = '<li style="opacity:0.8; padding:6px 8px;">Loading…</li>';
+    try {
+      const res = await fetch('/update_history', { headers: { 'X-API-Key': '{{ config.get("API_KEY", "") }}' }});
+      const data = await res.json();
+      const items = (data.history||[]).slice().reverse();
+      if (!items.length) { list.innerHTML = '<li style="opacity:0.8; padding:6px 8px;">No updates recorded yet.</li>'; return; }
+      list.innerHTML = '';
+      items.forEach(ent => {
+        const li = document.createElement('li');
+        li.style.padding = '6px 8px';
+        li.style.borderBottom = '1px solid var(--border)';
+        const ts = ent.timestamp ? new Date(ent.timestamp).toLocaleString() : '';
+        const branch = ent.branch || '';
+        const from = ent.from_desc || '(none)';
+        const to = ent.to_desc || '(unknown)';
+        li.textContent = `${ts} [${branch}] ${from} → ${to}`;
+        list.appendChild(li);
+      });
+    } catch (e) {
+      list.innerHTML = '<li style="color:#f66; padding:6px 8px;">Failed to load history</li>';
+    }
+  }
+  document.addEventListener('DOMContentLoaded', loadUpdateHistory);
   </script>
 </head>
 <body>
@@ -64,6 +90,13 @@
       <div style="display:flex; gap:0.5rem; flex-wrap:wrap;">
         <button id="update-btn" onclick="triggerUpdate()" disabled>Update Now</button>
         <button id="rollback-btn" onclick="triggerRollback()" disabled>Rollback</button>
+      </div>
+    </div>
+
+    <div style="margin: 1rem 0; padding: 0.75rem; border:1px solid var(--border); border-radius:4px; background: var(--surface-alt);">
+      <h3 style="margin-top:0;">Update History</h3>
+      <div id="history" style="max-height: 280px; overflow-y: auto; border:1px solid var(--border); border-radius:4px; background: var(--surface);">
+        <ul id="history-list" style="list-style:none; margin:0; padding:0;"></ul>
       </div>
     </div>
 

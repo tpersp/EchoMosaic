@@ -11,6 +11,7 @@ A running list of ideas and future improvements. Add new items anywhere below.
 - [ ] Show a live thumbnail preview for each stream’s current content directly on the dashboard (so you can see all streams at a glance before opening them).
 - [ ] Add a settings backup/export feature so custom streams/folders/tags can be quickly restored or moved to another device.
 - [x] add prettier update feature so user isn't hit with "This site can’t be reached <site/ip> refused to connect.
+- [ ] add server sided rendering as an option if possible. so it feels more like a proper stream as everyone who opens the site sees the same thing at the same time.
 
 
 Notes
