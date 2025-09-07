@@ -90,6 +90,12 @@
           </select>
         </div>
 
+        <!-- Include in Global /stream -->
+        <div class="form-row">
+          <label for="include-{{ stream_id }}">Show on global /stream</label>
+          <input id="include-{{ stream_id }}" type="checkbox" class="include-global-chk" data-stream="{{ stream_id }}" {% if conf.include_in_global %}checked{% endif %}>
+        </div>
+
         <!-- Duration -->
         <div class="form-row duration-container" {% if conf.mode != 'random' %} style="display:none;" {% endif %}>
           <label for="duration-{{ stream_id }}">Duration (sec)</label>
@@ -392,6 +398,7 @@
       const ccChk = card.querySelector('.yt-cc-chk');
       const muteChk = card.querySelector('.yt-mute-chk');
       const qualityInput = card.querySelector('.yt-quality-input');
+      const includeChk = card.querySelector('.include-global-chk');
       if (ccChk) {
         ccChk.addEventListener('change', e => {
           saveSettings(streamId, { yt_cc: e.target.checked });
@@ -405,6 +412,11 @@
       if (qualityInput) {
         qualityInput.addEventListener('change', e => {
           saveSettings(streamId, { yt_quality: e.target.value });
+        });
+      }
+      if (includeChk) {
+        includeChk.addEventListener('change', e => {
+          saveSettings(streamId, { include_in_global: e.target.checked });
         });
       }
       // Reload images button
