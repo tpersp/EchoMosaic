@@ -9,6 +9,7 @@ app = Flask(__name__)
 socketio = SocketIO(app)
 
 SETTINGS_FILE = "settings.json"
+CONFIG_FILE = "config.json"
 IMAGE_DIR = "/mnt/viewers"  # Adjust if needed
 
 
@@ -51,6 +52,13 @@ def load_settings():
 def save_settings(data):
     with open(SETTINGS_FILE, "w") as f:
         json.dump(data, f, indent=4)
+
+
+def load_config():
+    if os.path.exists(CONFIG_FILE):
+        with open(CONFIG_FILE, "r") as f:
+            return json.load(f)
+    return {}
 
 settings = load_settings()
 if "_mosaic" not in settings:
@@ -276,6 +284,41 @@ def get_images():
     folder = request.args.get("folder", "all")
     imgs = list_images(folder)
     return jsonify(imgs)
+
+
+@app.route("/settings")
+def app_settings():
+    cfg = load_config()
+    return render_template("settings.html", config=cfg)
+
+
+@app.route("/update_app", methods=["POST"])
+def update_app():
+    cfg = load_config()
+    api_key = cfg.get("API_KEY")
+    if api_key and request.headers.get("X-API-Key") != api_key:
+        return "Unauthorized", 401
+    repo_path = cfg.get("INSTALL_DIR", os.getcwd())
+    branch = cfg.get("UPDATE_BRANCH", "main")
+    service_name = cfg.get("SERVICE_NAME", "echomosaic.service")
+    try:
+        subprocess.check_call(["git", "fetch"], cwd=repo_path)
+        subprocess.check_call(["git", "checkout", branch], cwd=repo_path)
+        subprocess.check_call(["git", "reset", "--hard", f"origin/{branch}"], cwd=repo_path)
+    except subprocess.CalledProcessError as e:
+        return f"Git update failed: {e}", 500
+    try:
+        subprocess.check_call([
+            f"{repo_path}/venv/bin/pip",
+            "install",
+            "--upgrade",
+            "-r",
+            "requirements.txt",
+        ], cwd=repo_path)
+    except subprocess.CalledProcessError:
+        pass
+    subprocess.Popen(["sudo", "systemctl", "restart", service_name])
+    return render_template("update_status.html", message="Soft update complete. Restarting service...")
 
 if __name__ == "__main__":
     socketio.run(app, host="0.0.0.0", port=5000, debug=True)

@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <title>EchoMosaic Settings</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <script>
+  function triggerUpdate() {
+    fetch('/update_app', {
+      method: 'POST',
+      headers: {
+        'X-API-Key': '{{ config.get("API_KEY", "") }}'
+      }
+    })
+    .then(res => res.text())
+    .then(html => {
+      document.body.innerHTML = html;
+    })
+    .catch(err => alert('Update failed: ' + err));
+  }
+  </script>
+</head>
+<body>
+  <div class="container">
+    <h1>Settings</h1>
+    <p><strong>Install Dir:</strong> {{ config.INSTALL_DIR }}</p>
+    <p><strong>Service Name:</strong> {{ config.SERVICE_NAME }}</p>
+    <p><strong>Update Branch:</strong> {{ config.UPDATE_BRANCH }}</p>
+    <button onclick="triggerUpdate()">Update Now</button>
+    <p><a href="{{ url_for('dashboard') }}">Back to Dashboard</a></p>
+  </div>
+</body>
+</html>
