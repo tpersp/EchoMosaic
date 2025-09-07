@@ -14,6 +14,36 @@
 </header>
 <div class="container">
 
+  <!-- Group Manager Card -->
+  <div class="stream-card" id="group-manager">
+    <div class="card-header">
+      <h2>Groups</h2>
+    </div>
+    <div class="group-section">
+      <h3>Default group: "Stream"</h3>
+      <p style="margin-top:0; opacity:0.9;">Controls which streams appear on the global /stream page.</p>
+      <div id="gm-stream-default" class="group-list"></div>
+      <div style="margin-top:0.5rem; display:flex; gap:0.5rem; flex-wrap:wrap;">
+        <button id="gm-stream-select-all" type="button">Select All</button>
+        <button id="gm-stream-select-none" type="button">Select None</button>
+        <button id="gm-save-stream" type="button">Save "Stream"</button>
+      </div>
+    </div>
+    <hr style="border-color: var(--border); border-top: 0; opacity:0.4;"/>
+    <div class="group-section">
+      <h3>Create or Update Group</h3>
+      <div style="margin-bottom:0.5rem;">
+        <label>Group name: <input id="gm-group-name" type="text" placeholder="e.g., Favorites"></label>
+        <button id="gm-save-group" type="button">Save Group</button>
+      </div>
+      <div id="gm-streams-list" class="group-list"></div>
+    </div>
+    <div class="group-section">
+      <h3>Existing Groups</h3>
+      <div id="gm-groups-list" class="group-chips"></div>
+    </div>
+  </div>
+
   <div class="controls">
     <button id="add-stream">Add Stream</button>
     <label>Stream Layout:
@@ -176,6 +206,15 @@
   const openMosaicBtn = document.getElementById('open-mosaic');
   const openGroupBtn = document.getElementById('open-group');
   const groupSelect = document.getElementById('group-select');
+  // Group Manager elements
+  const gmDefaultList = document.getElementById('gm-stream-default');
+  const gmSelectAll = document.getElementById('gm-stream-select-all');
+  const gmSelectNone = document.getElementById('gm-stream-select-none');
+  const gmSaveStream = document.getElementById('gm-save-stream');
+  const gmName = document.getElementById('gm-group-name');
+  const gmSaveGroup = document.getElementById('gm-save-group');
+  const gmStreamsList = document.getElementById('gm-streams-list');
+  const gmGroupsList = document.getElementById('gm-groups-list');
 
   function showNotification(msg) {
     notification.textContent = msg;
@@ -227,6 +266,101 @@
   if (openMosaicBtn) {
     openMosaicBtn.addEventListener('click', () => {
       window.open('/stream', '_blank');
+    });
+  }
+
+  // Group manager logic
+  function makeEl(tag, attrs = {}, children = []) {
+    const e = document.createElement(tag);
+    Object.entries(attrs).forEach(([k,v]) => { if (k==='class') e.className=v; else if (k==='style') e.style.cssText=v; else e.setAttribute(k,v); });
+    children.forEach(c => e.appendChild(typeof c==='string' ? document.createTextNode(c) : c));
+    return e;
+  }
+  async function loadGroupsUI() {
+    try {
+      const [streamsMeta, groups] = await Promise.all([
+        fetch('/streams_meta').then(r=>r.json()),
+        fetch('/groups').then(r=>r.json())
+      ]);
+      // Populate default 'Stream' membership list
+      if (gmDefaultList) {
+        gmDefaultList.innerHTML = '';
+        const defaultMembers = new Set(groups['Stream'] || []);
+        Object.keys(streamsMeta).forEach(id => {
+          const chk = makeEl('input', {type:'checkbox', value:id});
+          chk.checked = defaultMembers.has(id);
+          const lbl = makeEl('label', {}, [chk, ' ', (streamsMeta[id].label || id)]);
+          const wrap = makeEl('div', {class:'group-item'}, [lbl]);
+          gmDefaultList.appendChild(wrap);
+        });
+      }
+      // Populate streams list for create/update
+      if (gmStreamsList) {
+        gmStreamsList.innerHTML = '';
+        Object.keys(streamsMeta).forEach(id => {
+          const chk = makeEl('input', {type:'checkbox', value:id});
+          const lbl = makeEl('label', {}, [chk, ' ', (streamsMeta[id].label || id)]);
+          const wrap = makeEl('div', {class:'group-item'}, [lbl]);
+          gmStreamsList.appendChild(wrap);
+        });
+      }
+      // Populate existing groups chips (exclude 'Stream' from delete)
+      if (gmGroupsList) {
+        gmGroupsList.innerHTML = '';
+        Object.keys(groups).forEach(name => {
+          const view = makeEl('a', {href:`/stream/group/${encodeURIComponent(name)}`, target:'_blank', class:'chip-link'}, [name]);
+          if (name === 'Stream') {
+            const chip = makeEl('div', {class:'group-chip'}, [view, makeEl('span', {class:'chip-badge'}, ['default'])]);
+            gmGroupsList.appendChild(chip);
+          } else {
+            const del = makeEl('button', {class:'chip-del'}, ['Delete']);
+            del.addEventListener('click', async () => {
+              if (!confirm(`Delete group ${name}?`)) return;
+              await fetch(`/groups/${encodeURIComponent(name)}`, {method:'DELETE'});
+              loadGroupsUI();
+            });
+            const chip = makeEl('div', {class:'group-chip'}, [view, del]);
+            gmGroupsList.appendChild(chip);
+          }
+        });
+      }
+    } catch (e) { console.error('Failed to load groups UI', e); }
+  }
+  function selectedIds(container) {
+    return Array.from(container.querySelectorAll('input[type="checkbox"]:checked')).map(c=>c.value);
+  }
+  if (gmSelectAll && gmDefaultList) {
+    gmSelectAll.addEventListener('click', ()=>{
+      gmDefaultList.querySelectorAll('input[type="checkbox"]').forEach(c=>c.checked=true);
+    });
+  }
+  if (gmSelectNone && gmDefaultList) {
+    gmSelectNone.addEventListener('click', ()=>{
+      gmDefaultList.querySelectorAll('input[type="checkbox"]').forEach(c=>c.checked=false);
+    });
+  }
+  if (gmSaveStream && gmDefaultList) {
+    gmSaveStream.addEventListener('click', async ()=>{
+      const ids = selectedIds(gmDefaultList);
+      await fetch('/groups', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({name:'Stream', streams: ids})});
+      showNotification('Updated global Stream group');
+      loadGroupsUI();
+    });
+  }
+  if (gmSaveGroup && gmStreamsList) {
+    gmSaveGroup.addEventListener('click', async ()=>{
+      const name = (gmName.value||'').trim();
+      if (!name) { alert('Enter a group name'); return; }
+      const ids = selectedIds(gmStreamsList);
+      const res = await fetch('/groups', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({name, streams: ids})});
+      if (res.ok) {
+        gmName.value = '';
+        gmStreamsList.querySelectorAll('input[type="checkbox"]').forEach(c=>c.checked=false);
+        loadGroupsUI();
+        showNotification('Saved group');
+      } else {
+        alert('Failed to save group');
+      }
     });
   }
 

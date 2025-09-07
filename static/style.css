@@ -134,6 +134,16 @@ a {
   grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
 }
 
+/* Group manager styles */
+.group-section { margin-bottom: 0.5rem; }
+.group-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 6px; }
+.group-item { border: 1px solid var(--border); padding: 6px; border-radius: 4px; background: var(--surface); }
+.group-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.group-chip { border: 1px solid var(--border); padding: 4px 6px; border-radius: 16px; background: var(--surface); display: inline-flex; align-items: center; gap: 6px; }
+.chip-link { color: var(--accent); text-decoration: none; }
+.chip-badge { font-size: 0.75rem; opacity: 0.8; }
+.chip-del { font-size: 0.75rem; padding: 0.15rem 0.4rem; }
+
 /* Stream card adjustments */
 .stream-card {
   border: 1px solid var(--border);

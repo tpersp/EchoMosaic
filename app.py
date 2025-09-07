@@ -527,12 +527,26 @@ def streams_meta():
 @app.route("/groups", methods=["GET", "POST"])
 def groups_collection():
     if request.method == "GET":
-        return jsonify(settings.get("_groups", {}))
+        # Include a virtual, undeletable 'Stream' group that mirrors include_in_global
+        existing = dict(settings.get("_groups", {}))
+        stream_group = [k for k, v in settings.items() if not k.startswith("_") and v.get("include_in_global", True)]
+        existing["Stream"] = stream_group
+        return jsonify(existing)
     data = request.get_json(silent=True) or {}
     name = (data.get("name") or "").strip()
     streams = data.get("streams") or []
     if not name:
         return jsonify({"error": "Name required"}), 400
+    # Special handling for the built-in 'Stream' group: update include_in_global
+    if name.lower() == "stream":
+        ids = set([s for s in streams if s in settings])
+        for k, v in settings.items():
+            if k.startswith("_") or not isinstance(v, dict):
+                continue
+            v["include_in_global"] = (k in ids)
+        save_settings(settings)
+        return jsonify({"status": "ok", "group": {"Stream": sorted(ids)}})
+    # Regular named group
     settings.setdefault("_groups", {})
     settings["_groups"][name] = [s for s in streams if s in settings]
     save_settings(settings)
@@ -541,6 +555,8 @@ def groups_collection():
 
 @app.route("/groups/<name>", methods=["DELETE"])
 def groups_delete(name):
+    if name.lower() == "stream":
+        return jsonify({"error": "Cannot delete the default 'Stream' group"}), 400
     if "_groups" in settings and name in settings["_groups"]:
         del settings["_groups"][name]
         save_settings(settings)
