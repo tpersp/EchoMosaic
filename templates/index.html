@@ -128,6 +128,12 @@
   // Group Manager elements
   const groupTiles = document.getElementById('group-tiles');
 
+  // Build a set of taken stream name slugs for client-side validation
+  const takenSlugs = {};
+  {% for sid, conf in stream_settings.items() %}
+  takenSlugs['{{ (conf.label if conf.label else sid)|slugify }}'] = '{{ sid }}';
+  {% endfor %}
+
   function showNotification(msg) {
     notification.textContent = msg;
     notification.classList.add('show');
@@ -251,16 +257,20 @@
     const colsWrap = makeEl('span', {class:'tile-cols-wrap'}, [' Columns: ', colsInput]);
     layoutRow.appendChild(colsWrap);
     // PIP options
-    const pipWrap = makeEl('span', {class:'tile-pip-wrap', style:'display:none;'}, []);
+    const pipWrap = makeEl('div', {class:'tile-pip-wrap', style:'display:none;'}, []);
     const pipMain = makeEl('select', {class:'tile-pip-main'}, []);
     const pipPip = makeEl('select', {class:'tile-pip-pip'}, []);
     const pipCorner = makeEl('select', {class:'tile-pip-corner'}, []);
     ['top-left','top-right','bottom-left','bottom-right'].forEach(c => pipCorner.appendChild(makeEl('option', {value:c}, [c])));
     const pipSize = makeEl('input', {type:'number', min:'10', max:'50', class:'tile-pip-size', value: gLayout.pip_size || 25}, []);
-    pipWrap.appendChild(document.createTextNode(' Main: ')); pipWrap.appendChild(pipMain);
-    pipWrap.appendChild(document.createTextNode(' Corner: ')); pipWrap.appendChild(pipCorner);
-    pipWrap.appendChild(document.createTextNode(' PIP: ')); pipWrap.appendChild(pipPip);
-    pipWrap.appendChild(document.createTextNode(' Size%: ')); pipWrap.appendChild(pipSize);
+    const rowMain = makeEl('div', {class:'pip-row'}, [ makeEl('label', {}, ['Main: ']), pipMain ]);
+    const rowPip = makeEl('div', {class:'pip-row'}, [ makeEl('label', {}, ['PIP: ']), pipPip ]);
+    const rowCorner = makeEl('div', {class:'pip-row'}, [ makeEl('label', {}, ['Corner: ']), pipCorner ]);
+    const rowSize = makeEl('div', {class:'pip-row'}, [ makeEl('label', {}, ['Size: ']), pipSize ]);
+    pipWrap.appendChild(rowMain);
+    pipWrap.appendChild(rowPip);
+    pipWrap.appendChild(rowCorner);
+    pipWrap.appendChild(rowSize);
     layoutRow.appendChild(pipWrap);
     body.appendChild(layoutRow);
     // Bulk row (Add all / Remove all) above the combo
@@ -297,17 +307,29 @@
       title.textContent = (tile.querySelector('.tile-name')?.value?.trim() || name || 'New Group') + ` (${count})`;
     }
     function refreshPipSelects() {
-      function fill(sel, selected) {
-        sel.innerHTML='';
-        Array.from(members).forEach(id => {
-          const o = makeEl('option', {value:id}, [labelOf(id)]);
-          if (selected && selected===id) o.selected = true;
-          sel.appendChild(o);
-        });
-      }
-      fill(pipMain, gLayout.pip_main && members.has(gLayout.pip_main) ? gLayout.pip_main : Array.from(members)[0]);
-      fill(pipPip, gLayout.pip_pip && members.has(gLayout.pip_pip) ? gLayout.pip_pip : Array.from(members)[1]);
-      // corner
+      const mem = Array.from(members);
+      let mainSel = gLayout.pip_main && members.has(gLayout.pip_main) ? gLayout.pip_main : (mem[0] || '');
+      let pipSel = gLayout.pip_pip && members.has(gLayout.pip_pip) ? gLayout.pip_pip : (mem.find(x=>x!==mainSel) || '');
+      // ensure different
+      if (pipSel === mainSel) pipSel = mem.find(x=>x!==mainSel) || '';
+      // fill main
+      pipMain.innerHTML = '';
+      mem.forEach(id => {
+        const o = makeEl('option', {value:id}, [labelOf(id)]);
+        if (id === mainSel) o.selected = true;
+        // prevent selecting pip in main as well
+        if (id === pipSel) o.disabled = true;
+        pipMain.appendChild(o);
+      });
+      // fill pip (disable main selection)
+      pipPip.innerHTML = '';
+      mem.forEach(id => {
+        const o = makeEl('option', {value:id}, [labelOf(id)]);
+        if (id === pipSel) o.selected = true;
+        if (id === mainSel) o.disabled = true;
+        pipPip.appendChild(o);
+      });
+      // corner and size
       Array.from(pipCorner.options).forEach(opt => opt.selected = (opt.value === (gLayout.pip_corner || 'bottom-right')));
       pipSize.value = gLayout.pip_size || 25;
     }
@@ -388,6 +410,8 @@
       updateLayoutVisibility();
     });
     layoutSelect.addEventListener('change', updateLayoutVisibility);
+    pipMain.addEventListener('change', () => { gLayout.pip_main = pipMain.value; if (gLayout.pip_main === gLayout.pip_pip) { gLayout.pip_pip = Array.from(members).find(x=>x!==gLayout.pip_main) || ''; } refreshPipSelects(); });
+    pipPip.addEventListener('change', () => { gLayout.pip_pip = pipPip.value; if (gLayout.pip_main === gLayout.pip_pip) { gLayout.pip_main = Array.from(members).find(x=>x!==gLayout.pip_pip) || ''; } refreshPipSelects(); });
     const btns = makeEl('div', {class:'tile-buttons'}, []);
     const save = makeEl('button', {class:'tile-save'}, ['Save']);
     const cancel = makeEl('button', {class:'tile-cancel'}, ['Cancel']);
@@ -414,6 +438,11 @@
     save.addEventListener('click', async () => {
       const nameVal = (tile.querySelector('.tile-name').value || '').trim();
       if (!nameVal) { alert('Enter a group name'); return; }
+      // preemptive duplicate check (case-insensitive), allow same-name when editing
+      const wanted = nameVal.toLowerCase();
+      if (wanted === 'default') { showNotification("'default' is a reserved group name"); return; }
+      const exists = Object.keys(gmCurrentGroups || {}).some(g => g.toLowerCase() === wanted && g !== (name || ''));
+      if (exists) { showNotification('A group with this name already exists'); return; }
       const ids = Array.from(members);
       // Build layout payload
       const layoutVal = layoutSelect.value;
@@ -428,13 +457,19 @@
       const res = await fetch('/groups', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({name: nameVal, streams: ids, layout: payloadLayout})});
       if (res.ok) {
         showNotification('Saved group');
+        // If renamed, delete the old group name
+        if (name && nameVal !== name) {
+          try { await fetch(`/groups/${encodeURIComponent(name)}`, {method:'DELETE'}); } catch (e) {}
+        }
         // Collapse after save (and handle rename)
         if (name && nameVal !== name) markOpen(name, false);
         markOpen(nameVal, false);
         tile.classList.remove('expanded');
         loadGroupsUI();
       } else {
-        alert('Failed to save group');
+        let msg = 'Failed to save group';
+        try { const j = await res.json(); if (j && j.error) msg = j.error; } catch (e) {}
+        alert(msg);
       }
     });
     cancel.addEventListener('click', () => { body.hidden = true; tile.classList.remove('expanded'); });
@@ -529,6 +564,7 @@
         }
       } else {
         console.error(data.error || 'Unknown error updating settings.');
+        showNotification(data.error || 'Error updating settings');
       }
     })
     .catch(err => console.error('Error saving settings:', err));
@@ -667,6 +703,17 @@
           const current = a ? a.textContent.trim() : streamId;
           const next = prompt('Rename stream', current);
           if (next === null) return; // cancelled
+          // preemptive duplicate check
+          const currentSlug = slugify(current || streamId);
+          const nextSlug = slugify(next || '');
+          if (!nextSlug) { showNotification('Name cannot be empty'); return; }
+          if (takenSlugs[nextSlug] && takenSlugs[nextSlug] !== streamId) {
+            showNotification('Another stream already uses this name');
+            return;
+          }
+          // Update map to new slug
+          if (takenSlugs[currentSlug] === streamId) { delete takenSlugs[currentSlug]; }
+          takenSlugs[nextSlug] = streamId;
           saveSettings(streamId, { label: next });
           if (a) {
             a.textContent = next || streamId;
