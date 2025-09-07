@@ -1,51 +1,26 @@
-/* Dark themed styles for the EchoMosaic dashboard */
-
-body {
-  background: #121212;
-  color: #eee;
-  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-  margin: 0;
-  padding: 1rem;
-}
+/* Layout rules specific to the dashboard */
 
 .controls {
   margin-bottom: 1rem;
   display: flex;
-  gap: 1rem;
+  flex-wrap: wrap;
+  gap: 0.5rem;
   align-items: center;
-}
-
-.controls button,
-.controls select {
-  background: #2a2a2a;
-  color: #eee;
-  border: 1px solid #444;
-  padding: 0.25rem 0.5rem;
-  border-radius: 4px;
-  transition: background 0.2s, border 0.2s;
-}
-
-.controls button:hover {
-  background: #3a3a3a;
 }
 
 .dashboard-grid {
   display: grid;
-  grid-gap: 1rem;
+  gap: 1rem;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
 }
-
-.cols-1 { grid-template-columns: repeat(1, 1fr); }
-.cols-2 { grid-template-columns: repeat(2, 1fr); }
-.cols-3 { grid-template-columns: repeat(3, 1fr); }
-.cols-4 { grid-template-columns: repeat(4, 1fr); }
 
 /* Stream card adjustments */
 .stream-card {
-  border: 1px solid #333;
+  border: 1px solid var(--border);
   padding: 0.5rem;
   position: relative;
-  background: #1e1e1e;
-  color: #eee;
+  background: var(--surface);
+  color: var(--text);
   border-radius: 4px;
   box-shadow: 0 0 6px rgba(0,0,0,0.4);
 }
@@ -53,29 +28,16 @@ body {
   margin-top: 0;
 }
 .stream-card h2 a {
-  color: #fff;
+  color: var(--text);
   text-decoration: none;
-}
-.stream-card input,
-.stream-card select,
-.stream-card button {
-  background: #2a2a2a;
-  color: #eee;
-  border: 1px solid #444;
-  border-radius: 4px;
-  transition: background 0.2s, border 0.2s;
-}
-
-.stream-card button:hover {
-  background: #3a3a3a;
 }
 .remove-stream {
   position: absolute;
   top: 0.25rem;
   right: 0.25rem;
   font-size: 0.8rem;
-  background: #444;
-  color: #eee;
+  background: var(--surface-alt);
+  color: var(--text);
   border: none;
 }
 
@@ -88,7 +50,7 @@ body {
   margin: 2px;
 }
 .image-picker .selected-thumb {
-  outline: 2px solid #fff;
+  outline: 2px solid var(--accent);
 }
 
 /* Notepad floating window */
@@ -97,13 +59,13 @@ body {
   bottom: 1rem;
   right: 1rem;
   width: 250px;
-  background: #1e1e1e;
-  border: 1px solid #444;
+  background: var(--surface);
+  border: 1px solid var(--border);
   box-shadow: 0 2px 4px rgba(0,0,0,0.2);
   padding: 0.5rem;
   transition: transform 0.3s;
   max-height: 300px;
-  color: #eee;
+  color: var(--text);
 }
 .notepad.collapsed {
   transform: translateY(calc(100% - 1.5rem));
@@ -118,15 +80,6 @@ body {
   width: 100%;
   height: 150px;
   box-sizing: border-box;
-  background: #2a2a2a;
-  color: #eee;
-  border: 1px solid #444;
-}
-.notepad button {
-  margin-top: 0.5rem;
-  background: #2a2a2a;
-  color: #eee;
-  border: 1px solid #444;
 }
 
 /* Notification styling */
