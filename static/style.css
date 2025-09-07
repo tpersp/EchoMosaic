@@ -108,10 +108,16 @@ a {
   border: 1px solid var(--border);
   padding: 0.5rem;
   position: relative;
+  overflow: visible;
+  z-index: 0;
   background: var(--surface);
   color: var(--text);
   border-radius: 4px;
   box-shadow: 0 0 6px rgba(0,0,0,0.4);
+}
+
+.stream-card:focus-within {
+  z-index: 10;
 }
 .stream-card h2 {
   margin-top: 0;
