@@ -42,6 +42,8 @@ def default_stream_config():
         "yt_mute": True,
         "yt_quality": "auto",
         "include_in_global": True,
+        "label": "",
+        "color": "#4fa3ff",
     }
 
 
@@ -79,9 +81,14 @@ else:
 for k, v in list(settings.items()):
     if not k.startswith("_") and isinstance(v, dict):
         v.setdefault("include_in_global", True)
+        v.setdefault("label", k.capitalize())
+        v.setdefault("color", "#4fa3ff")
 
 # Ensure notes key exists
 settings.setdefault("_notes", "")
+
+# Ensure groups key exists
+settings.setdefault("_groups", {})
 
 
 def get_subfolders():
@@ -135,11 +142,13 @@ def dashboard():
     subfolders = get_subfolders()
     streams = {k: v for k, v in settings.items() if not k.startswith("_")}
     mosaic = settings.get("_mosaic", default_mosaic_config())
+    groups = sorted(list(settings.get("_groups", {}).keys()))
     return render_template(
         "index.html",
         subfolders=subfolders,
         stream_settings=streams,
         mosaic_settings=mosaic,
+        groups=groups,
     )
 
 
@@ -167,6 +176,7 @@ def add_stream():
         new_id = f"stream{idx}"
         if new_id not in settings:
             settings[new_id] = default_stream_config()
+            settings[new_id]["label"] = new_id.capitalize()
             save_settings(settings)
             socketio.emit("streams_changed", {"action": "added", "stream_id": new_id})
             return jsonify({"stream_id": new_id})
@@ -198,7 +208,7 @@ def update_stream_settings(stream_id):
 
     # We'll add new keys for YouTube: "yt_cc", "yt_mute", "yt_quality"
     for key in ["mode", "folder", "selected_image", "duration", "stream_url",
-                "yt_cc", "yt_mute", "yt_quality", "include_in_global"]:
+                "yt_cc", "yt_mute", "yt_quality", "include_in_global", "label", "color"]:
         if key in data:
             val = data[key]
             if key == "stream_url":
@@ -476,6 +486,55 @@ def update_view():
     # A simple progress UI that will kick off the update via fetch
     cfg = load_config()
     return render_template("update_progress.html", api_key=cfg.get("API_KEY", ""))
+
+
+# --- Stream groups and metadata ---
+@app.route("/streams_meta", methods=["GET"])
+def streams_meta():
+    meta = {}
+    for k, v in settings.items():
+        if k.startswith("_"):
+            continue
+        meta[k] = {
+            "label": v.get("label", k),
+            "color": v.get("color", "#4fa3ff"),
+            "include_in_global": v.get("include_in_global", True),
+        }
+    return jsonify(meta)
+
+
+@app.route("/groups", methods=["GET", "POST"])
+def groups_collection():
+    if request.method == "GET":
+        return jsonify(settings.get("_groups", {}))
+    data = request.get_json(silent=True) or {}
+    name = (data.get("name") or "").strip()
+    streams = data.get("streams") or []
+    if not name:
+        return jsonify({"error": "Name required"}), 400
+    settings.setdefault("_groups", {})
+    settings["_groups"][name] = [s for s in streams if s in settings]
+    save_settings(settings)
+    return jsonify({"status": "ok", "group": {name: settings["_groups"][name]}})
+
+
+@app.route("/groups/<name>", methods=["DELETE"])
+def groups_delete(name):
+    if "_groups" in settings and name in settings["_groups"]:
+        del settings["_groups"][name]
+        save_settings(settings)
+        return jsonify({"status": "deleted"})
+    return jsonify({"error": "not found"}), 404
+
+
+@app.route("/stream/group/<name>")
+def stream_group(name):
+    group = settings.get("_groups", {}).get(name)
+    if not group:
+        return f"No group '{name}'", 404
+    streams = {k: settings[k] for k in group if k in settings}
+    mosaic = settings.get("_mosaic", default_mosaic_config())
+    return render_template("streams.html", stream_settings=streams, mosaic_settings=mosaic)
 
 if __name__ == "__main__":
     socketio.run(app, host="0.0.0.0", port=5000, debug=True)
