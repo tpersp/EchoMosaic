@@ -74,10 +74,7 @@
     {% for stream_id, conf in stream_settings.items() %}
     <div class="stream-card" data-stream="{{ stream_id }}">
       <div class="card-header">
-        <div class="title-with-color">
-          <span class="color-dot" style="background: {{ conf.color if conf.color else '#4fa3ff' }}"></span>
-          <h2><a href="{{ url_for('render_stream', stream_id=stream_id) }}" target="_blank">{{ conf.label if conf.label else stream_id|capitalize }}</a></h2>
-        </div>
+        <h2><a class="stream-link" href="{{ url_for('render_stream', name=(conf.label if conf.label else stream_id)|slugify) }}" target="_blank">{{ conf.label if conf.label else stream_id|capitalize }}</a></h2>
         <button class="remove-stream" data-stream="{{ stream_id }}" aria-label="Remove stream {{ stream_id }}">Remove</button>
       </div>
 
@@ -108,11 +105,6 @@
           <input id="label-{{ stream_id }}" type="text" class="label-input" data-stream="{{ stream_id }}" value="{{ conf.label if conf.label else stream_id|capitalize }}" placeholder="Display name">
         </div>
 
-        <!-- Color Tag -->
-        <div class="form-row">
-          <label for="color-{{ stream_id }}">Color</label>
-          <input id="color-{{ stream_id }}" type="color" class="color-input" data-stream="{{ stream_id }}" value="{{ conf.color if conf.color else '#4fa3ff' }}">
-        </div>
 
         <!-- Include in Global /stream -->
         <div class="form-row">
@@ -448,7 +440,6 @@
       const qualityInput = card.querySelector('.yt-quality-input');
       const includeChk = card.querySelector('.include-global-chk');
       const labelInput = card.querySelector('.label-input');
-      const colorInput = card.querySelector('.color-input');
       if (ccChk) {
         ccChk.addEventListener('change', e => {
           saveSettings(streamId, { yt_cc: e.target.checked });
@@ -469,19 +460,19 @@
           saveSettings(streamId, { include_in_global: e.target.checked });
         });
       }
+      function slugify(s){
+        return (s||'').toLowerCase().trim().replace(/[^a-z0-9]+/g,'-').replace(/-+/g,'-').replace(/^-|-$/g,'');
+      }
       if (labelInput) {
         labelInput.addEventListener('change', e => {
           saveSettings(streamId, { label: e.target.value });
           // update header text immediately
-          const h2 = card.querySelector('.card-header h2 a');
-          if (h2) h2.textContent = e.target.value || streamId;
-        });
-      }
-      if (colorInput) {
-        colorInput.addEventListener('change', e => {
-          saveSettings(streamId, { color: e.target.value });
-          const dot = card.querySelector('.color-dot');
-          if (dot) dot.style.background = e.target.value;
+          const a = card.querySelector('.card-header h2 a.stream-link');
+          if (a) {
+            a.textContent = e.target.value || streamId;
+            const slug = slugify(e.target.value || streamId);
+            a.href = '/stream/' + encodeURIComponent(slug);
+          }
         });
       }
       // Reload images button

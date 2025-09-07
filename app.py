@@ -6,6 +6,7 @@ import subprocess
 import time
 import shutil
 from datetime import datetime
+import re
 
 app = Flask(__name__, static_folder="static", static_url_path="/static")
 socketio = SocketIO(app)
@@ -43,7 +44,6 @@ def default_stream_config():
         "yt_quality": "auto",
         "include_in_global": True,
         "label": "",
-        "color": "#4fa3ff",
     }
 
 
@@ -82,7 +82,6 @@ for k, v in list(settings.items()):
     if not k.startswith("_") and isinstance(v, dict):
         v.setdefault("include_in_global", True)
         v.setdefault("label", k.capitalize())
-        v.setdefault("color", "#4fa3ff")
 
 # Ensure notes key exists
 settings.setdefault("_notes", "")
@@ -159,13 +158,36 @@ def mosaic_streams():
     mosaic = settings.get("_mosaic", default_mosaic_config())
     return render_template("streams.html", stream_settings=streams, mosaic_settings=mosaic)
 
-@app.route("/stream/<stream_id>")
-def render_stream(stream_id):
-    if stream_id not in settings:
-        return f"No stream '{stream_id}'", 404
-    conf = settings[stream_id]
+def _slugify(name: str) -> str:
+    name = (name or "").strip().lower()
+    name = re.sub(r"[^a-z0-9]+", "-", name)
+    name = re.sub(r"-+", "-", name).strip("-")
+    return name or ""
+
+@app.template_filter('slugify')
+def jinja_slugify(s):
+    return _slugify(s)
+
+@app.route("/stream/<name>")
+def render_stream(name):
+    # Accept either stream id or slugified label
+    key = None
+    if name in settings:
+        key = name
+    else:
+        wanted = _slugify(name)
+        for sid, conf in settings.items():
+            if sid.startswith("_"):
+                continue
+            label = conf.get("label") or sid
+            if _slugify(label) == wanted:
+                key = sid
+                break
+    if not key or key not in settings:
+        return f"No stream '{name}'", 404
+    conf = settings[key]
     images = list_images(conf.get("folder", "all"))
-    return render_template("single_stream.html", stream_id=stream_id, config=conf, images=images)
+    return render_template("single_stream.html", stream_id=key, config=conf, images=images)
 
 
 @app.route("/streams", methods=["POST"])
@@ -208,7 +230,7 @@ def update_stream_settings(stream_id):
 
     # We'll add new keys for YouTube: "yt_cc", "yt_mute", "yt_quality"
     for key in ["mode", "folder", "selected_image", "duration", "stream_url",
-                "yt_cc", "yt_mute", "yt_quality", "include_in_global", "label", "color"]:
+                "yt_cc", "yt_mute", "yt_quality", "include_in_global", "label"]:
         if key in data:
             val = data[key]
             if key == "stream_url":
@@ -497,7 +519,6 @@ def streams_meta():
             continue
         meta[k] = {
             "label": v.get("label", k),
-            "color": v.get("color", "#4fa3ff"),
             "include_in_global": v.get("include_in_global", True),
         }
     return jsonify(meta)
