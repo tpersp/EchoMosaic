@@ -168,14 +168,11 @@
   }
   let gmOpenSet = new Set();
   let gmCurrentGroups = {};
-  async function loadOpenSet() {
-    try {
-      const d = await fetch('/groups_ui').then(r=>r.json());
-      gmOpenSet = new Set((d && d.open) || []);
-    } catch (e) { gmOpenSet = new Set(); }
+  function loadOpenSet() {
+    try { gmOpenSet = new Set(JSON.parse(localStorage.getItem('gmOpen') || '[]')); } catch (e) { gmOpenSet = new Set(); }
   }
-  async function persistOpenSet() {
-    try { await fetch('/groups_ui', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({open: Array.from(gmOpenSet)})}); } catch (e) {}
+  function persistOpenSet() {
+    try { localStorage.setItem('gmOpen', JSON.stringify(Array.from(gmOpenSet))); } catch (e) {}
   }
   function markOpen(name, open) {
     if (!name) return;
@@ -186,10 +183,10 @@
 
   async function loadGroupsUI() {
     try {
+      loadOpenSet();
       const [streamsMeta, groupsData] = await Promise.all([
         fetch('/streams_meta').then(r=>r.json()),
-        fetch('/groups').then(r=>r.json()),
-        loadOpenSet()
+        fetch('/groups').then(r=>r.json())
       ]);
       const groups = groupsData || {};
       gmCurrentGroups = groups;
@@ -368,12 +365,12 @@
   const gmCollapseAll = document.getElementById('gm-collapse-all');
   if (gmExpandAll) gmExpandAll.addEventListener('click', async () => {
     Object.keys(gmCurrentGroups).forEach(name => gmOpenSet.add(name));
-    await persistOpenSet();
+    persistOpenSet();
     loadGroupsUI();
   });
   if (gmCollapseAll) gmCollapseAll.addEventListener('click', async () => {
     gmOpenSet.clear();
-    await persistOpenSet();
+    persistOpenSet();
     loadGroupsUI();
   });
 

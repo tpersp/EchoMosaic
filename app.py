@@ -86,7 +86,6 @@ settings.setdefault("_notes", "")
 
 # Ensure groups key exists
 settings.setdefault("_groups", {})
-settings.setdefault("_group_ui", {"open": []})
 
 
 def get_subfolders():
@@ -547,18 +546,6 @@ def groups_delete(name):
     return jsonify({"error": "not found"}), 404
 
 
-@app.route("/groups_ui", methods=["GET", "POST"])
-def groups_ui_state():
-    """Persist UI state for groups (e.g., expanded tiles)."""
-    if request.method == "GET":
-        return jsonify(settings.get("_group_ui", {"open": []}))
-    data = request.get_json(silent=True) or {}
-    open_list = data.get("open")
-    if not isinstance(open_list, list):
-        return jsonify({"error": "Invalid payload"}), 400
-    settings.setdefault("_group_ui", {})["open"] = [s for s in open_list if isinstance(s, str)]
-    save_settings(settings)
-    return jsonify({"status": "ok"})
 
 
 @app.route("/stream/group/<name>")
