@@ -18,10 +18,6 @@
   <div class="stream-card" id="group-manager">
     <div class="card-header">
       <h2>Groups</h2>
-      <div class="card-actions">
-        <button id="gm-expand-all" type="button">Expand All</button>
-        <button id="gm-collapse-all" type="button">Collapse All</button>
-      </div>
     </div>
     <div class="group-section">
       <div id="group-tiles" class="group-tiles"></div>
@@ -241,80 +237,96 @@
     body.appendChild(nameRow);
     // Add row with dropdown to add members
     const addRow = makeEl('div', {class:'tile-row tile-add-row'}, []);
-    const searchInput = makeEl('input', {type:'text', class:'tile-add-search', placeholder:'Search…'}, []);
-    const addSelect = makeEl('select', {class:'tile-add-select'}, []);
+    const dlId = `dl-${Math.random().toString(36).slice(2)}`;
+    const combo = makeEl('input', {type:'text', class:'tile-combo', placeholder:'Search or select…', list: dlId}, []);
+    const datalist = makeEl('datalist', {id: dlId}, []);
     const addBtn = makeEl('button', {class:'tile-add-btn', type:'button'}, ['Add']);
     const addAllBtn = makeEl('button', {class:'tile-addall-btn', type:'button'}, ['Add all']);
     const removeAllBtn = makeEl('button', {class:'tile-removeall-btn', type:'button'}, ['Remove all']);
-    addRow.appendChild(makeEl('label', {}, ['Add: ']));
-    addRow.appendChild(searchInput);
-    addRow.appendChild(addSelect);
+    addRow.appendChild(combo);
     addRow.appendChild(addBtn);
     addRow.appendChild(addAllBtn);
     addRow.appendChild(removeAllBtn);
     body.appendChild(addRow);
+    body.appendChild(datalist);
     // Chips container for current members
     const chips = makeEl('div', {class:'member-chips'}, []);
     body.appendChild(chips);
     // helpers to refresh UI
     function labelOf(id) { return (streamsMeta[id]?.label || id) + ''; }
+    function candidates(query) {
+      const q = (query||'').toLowerCase();
+      return Object.keys(streamsMeta)
+        .filter(id => !members.has(id))
+        .filter(id => labelOf(id).toLowerCase().includes(q))
+        .sort((a,b) => labelOf(a).localeCompare(labelOf(b)));
+    }
     function refreshTitleCount() {
       const count = members.size;
       title.textContent = (tile.querySelector('.tile-name')?.value?.trim() || name || 'New Group') + ` (${count})`;
     }
-    function refreshSelect() {
-      addSelect.innerHTML = '';
-      const placeholder = makeEl('option', {value:''}, ['Select stream']);
-      placeholder.disabled = true; placeholder.selected = true;
-      addSelect.appendChild(placeholder);
-      const q = (searchInput.value||'').toLowerCase();
-      const candidates = Object.keys(streamsMeta)
-        .filter(id => !members.has(id))
-        .filter(id => labelOf(id).toLowerCase().includes(q))
-        .sort((a,b) => labelOf(a).localeCompare(labelOf(b)));
-      candidates.forEach(id => {
-        const opt = makeEl('option', {value:id}, [labelOf(id)]);
-        addSelect.appendChild(opt);
+    function refreshDatalist() {
+      datalist.innerHTML = '';
+      candidates(combo.value).forEach(id => {
+        datalist.appendChild(makeEl('option', {value: labelOf(id)}, []));
       });
     }
     function refreshChips() {
       chips.innerHTML = '';
+      const list = makeEl('ul', {class:'member-list'}, []);
       const sorted = Array.from(members).sort((a,b) => labelOf(a).localeCompare(labelOf(b)));
       sorted.forEach(id => {
-        const chip = makeEl('span', {class:'member-chip'}, [labelOf(id)]);
-        const rm = makeEl('button', {class:'chip-remove', title:'Remove'}, ['×']);
+        const li = makeEl('li', {class:'member-item'}, []);
+        const nameSpan = makeEl('span', {class:'member-name'}, [labelOf(id)]);
+        const rm = makeEl('button', {class:'member-remove', title:'Remove'}, ['Remove']);
         rm.addEventListener('click', () => {
           members.delete(id);
-          refreshSelect();
+          refreshDatalist();
           refreshChips();
         });
-        chip.appendChild(rm);
-        chips.appendChild(chip);
+        li.appendChild(nameSpan);
+        li.appendChild(rm);
+        list.appendChild(li);
       });
+      chips.appendChild(list);
       refreshTitleCount();
     }
-    refreshSelect();
+    refreshDatalist();
     refreshChips();
-    searchInput.addEventListener('input', refreshSelect);
+    combo.addEventListener('input', refreshDatalist);
+    combo.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); addBtn.click(); } });
+    function resolveSingleSelection() {
+      const q = combo.value.trim();
+      if (!q) return null;
+      // try exact label match first
+      const byLabel = candidates('').find(id => labelOf(id).toLowerCase() === q.toLowerCase());
+      if (byLabel && !members.has(byLabel)) return byLabel;
+      // fallback: if only one candidate matches substring, use it
+      const cands = candidates(q);
+      if (cands.length === 1) return cands[0];
+      // also allow exact id match
+      if (!members.has(q) && streamsMeta[q]) return q;
+      return null;
+    }
     addBtn.addEventListener('click', () => {
-      const id = addSelect.value;
+      const id = resolveSingleSelection();
       if (!id) return;
       members.add(id);
-      refreshSelect();
+      combo.value = '';
+      refreshDatalist();
       refreshChips();
     });
     addAllBtn.addEventListener('click', () => {
-      const q = (searchInput.value||'').toLowerCase();
-      Object.keys(streamsMeta)
-        .filter(id => !members.has(id))
-        .filter(id => labelOf(id).toLowerCase().includes(q))
-        .forEach(id => members.add(id));
-      refreshSelect();
+      const q = combo.value;
+      candidates(q).forEach(id => members.add(id));
+      combo.value = '';
+      refreshDatalist();
       refreshChips();
     });
     removeAllBtn.addEventListener('click', () => {
       members.clear();
-      refreshSelect();
+      combo.value = '';
+      refreshDatalist();
       refreshChips();
     });
     const btns = makeEl('div', {class:'tile-buttons'}, []);
@@ -345,9 +357,9 @@
       const res = await fetch('/groups', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({name: nameVal, streams: ids})});
       if (res.ok) {
         showNotification('Saved group');
-        // Update persisted open state for rename/new
+        // Collapse after save (and handle rename)
         if (name && nameVal !== name) markOpen(name, false);
-        markOpen(nameVal, true);
+        markOpen(nameVal, false);
         loadGroupsUI();
       } else {
         alert('Failed to save group');
@@ -359,20 +371,6 @@
     if (nameInputEl) nameInputEl.addEventListener('input', () => { refreshTitleCount(); });
     return tile;
   }
-
-  // Expand/Collapse All controls
-  const gmExpandAll = document.getElementById('gm-expand-all');
-  const gmCollapseAll = document.getElementById('gm-collapse-all');
-  if (gmExpandAll) gmExpandAll.addEventListener('click', async () => {
-    Object.keys(gmCurrentGroups).forEach(name => gmOpenSet.add(name));
-    persistOpenSet();
-    loadGroupsUI();
-  });
-  if (gmCollapseAll) gmCollapseAll.addEventListener('click', async () => {
-    gmOpenSet.clear();
-    persistOpenSet();
-    loadGroupsUI();
-  });
 
   // initial load
   document.addEventListener('DOMContentLoaded', loadGroupsUI);

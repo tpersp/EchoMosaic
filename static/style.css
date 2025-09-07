@@ -148,12 +148,14 @@ a {
 .tile-body { margin-top: 6px; }
 .tile-row { margin-bottom: 6px; }
 .tile-buttons { display: flex; gap: 6px; margin-top: 6px; }
-.tile-add-row { display:flex; align-items:center; gap:8px; }
-.tile-add-select { min-width: 200px; }
-.tile-add-search { min-width: 160px; }
-.member-chips { display:flex; flex-wrap:wrap; gap:6px; max-height: 180px; overflow-y: auto; border: 1px solid var(--border); border-radius: 4px; padding: 6px; background: var(--surface-alt); }
-.member-chip { display:inline-flex; align-items:center; gap:6px; border:1px solid var(--border); border-radius:16px; padding: 2px 6px; background: var(--surface); }
-.chip-remove { font-size: 0.75rem; padding: 0 6px; line-height: 1.2; }
+.tile-add-row { display:grid; grid-template-columns: 1fr auto auto auto; gap:8px; align-items:center; }
+.tile-combo { width: 100%; min-width: 200px; }
+.member-chips { max-height: 220px; overflow-y: auto; border: 1px solid var(--border); border-radius: 4px; padding: 6px; background: var(--surface-alt); }
+.member-list { list-style: none; margin: 0; padding: 0; }
+.member-item { display:flex; align-items:center; justify-content: space-between; gap: 8px; padding: 4px 6px; border-bottom: 1px solid var(--border); }
+.member-item:last-child { border-bottom: 0; }
+.member-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.member-remove { font-size: 0.75rem; padding: 0.2rem 0.5rem; }
 
 /* Stream card adjustments */
 .stream-card {
@@ -209,6 +211,7 @@ a {
 
 @media (max-width: 600px) {
   .form-grid { grid-template-columns: 1fr; }
+  .tile-add-row { grid-template-columns: 1fr; }
 }
 
 /* Thumbnail picker */
