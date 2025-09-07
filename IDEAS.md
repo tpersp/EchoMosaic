@@ -10,7 +10,7 @@ A running list of ideas and future improvements. Add new items anywhere below.
 - [ ] Low-bandwidth mode: auto-reduces image resolution for remote access.
 - [ ] Show a live thumbnail preview for each stream’s current content directly on the dashboard (so you can see all streams at a glance before opening them).
 - [ ] Add a settings backup/export feature so custom streams/folders/tags can be quickly restored or moved to another device.
-- [ ] add prettier update feature so user isn't hit with "This site can’t be reached <site/ip> refused to connect.
+- [x] add prettier update feature so user isn't hit with "This site can’t be reached <site/ip> refused to connect.
 
 
 Notes

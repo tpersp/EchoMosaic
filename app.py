@@ -508,6 +508,11 @@ def update_view():
     return render_template("update_progress.html", api_key=cfg.get("API_KEY", ""))
 
 
+@app.route("/health")
+def health():
+    return jsonify({"status": "ok"})
+
+
 # --- Stream groups and metadata ---
 @app.route("/streams_meta", methods=["GET"])
 def streams_meta():

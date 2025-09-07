@@ -29,6 +29,7 @@
       <li>Applying update</li>
       <li>Updating dependencies</li>
       <li>Restarting service</li>
+      <li>Waiting for restart</li>
     </ul>
     <p id="status" style="margin-top:0.5rem; opacity:0.9;">Starting…</p>
   </div>
@@ -55,7 +56,8 @@
       'Switching to update branch…',
       'Applying updates…',
       'Updating dependencies…',
-      'Restarting service…'
+      'Restarting service…',
+      'Waiting for restart…'
     ];
     let t = 0;
     function tick() { if (t < msgs.length) { advance(msgs[t++]); setTimeout(tick, 900); } }
@@ -71,22 +73,50 @@
         const isError = lower.includes('failed') || lower.includes('unauthorized') || lower.includes('error');
         if (isError) {
           statusEl.textContent = 'Update encountered an error. See details below.';
-          // show returned HTML so the message is visible
           const detail = document.createElement('div');
           detail.style.marginTop = '0.75rem';
           detail.innerHTML = txt;
           document.querySelector('.container').appendChild(detail);
           return;
         }
-        // push bar to end and mark all steps done
-        while (i < steps.length - 1) { advance(); }
-        bar.style.width = '100%';
-        statusEl.textContent = 'Update complete. Redirecting to dashboard…';
-        setTimeout(() => { window.location.href = '/'; }, 2500);
+        // Start restart wait loop
+        waitForRestart();
       })
       .catch(err => {
         statusEl.textContent = 'Update failed: ' + err;
       });
+
+    function waitForRestart() {
+      // Move to last step UI-wise
+      while (i < steps.length - 1) { advance('Waiting for restart…'); }
+      const start = Date.now();
+      let attempts = 0;
+      const maxWaitMs = 120000; // 2 minutes
+      const tick = async () => {
+        attempts++;
+        statusEl.textContent = `Waiting for restart… (attempt ${attempts})`;
+        try {
+          const res = await fetch('/health', { cache: 'no-store' });
+          if (res.ok) {
+            bar.style.width = '100%';
+            statusEl.textContent = 'Back online. Redirecting…';
+            setTimeout(() => { window.location.href = '/'; }, 1200);
+            return;
+          }
+        } catch (e) { /* ignore; server may be down */ }
+        if (Date.now() - start > maxWaitMs) {
+          statusEl.textContent = 'Taking longer than usual. You can try refreshing the dashboard.';
+          const link = document.createElement('a');
+          link.href = '/';
+          link.textContent = 'Go to Dashboard';
+          link.style.marginLeft = '8px';
+          statusEl.appendChild(link);
+          return;
+        }
+        setTimeout(tick, Math.min(5000, 500 + attempts * 200));
+      };
+      setTimeout(tick, 1000);
+    }
   </script>
 </body>
 </html>
