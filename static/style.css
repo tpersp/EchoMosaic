@@ -148,6 +148,12 @@ a {
 .tile-body { margin-top: 6px; }
 .tile-row { margin-bottom: 6px; }
 .tile-buttons { display: flex; gap: 6px; margin-top: 6px; }
+.tile-add-row { display:flex; align-items:center; gap:8px; }
+.tile-add-select { min-width: 200px; }
+.tile-add-search { min-width: 160px; }
+.member-chips { display:flex; flex-wrap:wrap; gap:6px; max-height: 180px; overflow-y: auto; border: 1px solid var(--border); border-radius: 4px; padding: 6px; background: var(--surface-alt); }
+.member-chip { display:inline-flex; align-items:center; gap:6px; border:1px solid var(--border); border-radius:16px; padding: 2px 6px; background: var(--surface); }
+.chip-remove { font-size: 0.75rem; padding: 0 6px; line-height: 1.2; }
 
 /* Stream card adjustments */
 .stream-card {
