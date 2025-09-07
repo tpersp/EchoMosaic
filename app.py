@@ -5,7 +5,7 @@ import json
 import subprocess
 import time
 
-app = Flask(__name__, static_folder="static", static_url_path="/static")
+app = Flask(__name__)
 socketio = SocketIO(app)
 
 SETTINGS_FILE = "settings.json"
@@ -302,16 +302,13 @@ def update_app():
     branch = cfg.get("UPDATE_BRANCH", "main")
     service_name = cfg.get("SERVICE_NAME", "echomosaic.service")
     if not os.path.isdir(repo_path):
-        return render_template(
-            "update_status.html",
-            message=f"Repository path '{repo_path}' not found. Check INSTALL_DIR in config.json",
-        ), 500
+        return f"Repository path '{repo_path}' not found", 500
     try:
         subprocess.check_call(["git", "fetch"], cwd=repo_path)
         subprocess.check_call(["git", "checkout", branch], cwd=repo_path)
         subprocess.check_call(["git", "reset", "--hard", f"origin/{branch}"], cwd=repo_path)
     except (subprocess.CalledProcessError, OSError) as e:
-        return render_template("update_status.html", message=f"Git update failed: {e}"), 500
+        return f"Git update failed: {e}", 500
     try:
         subprocess.check_call([
             f"{repo_path}/venv/bin/pip",
@@ -326,9 +323,7 @@ def update_app():
         subprocess.Popen(["sudo", "systemctl", "restart", service_name])
     except OSError:
         pass
-    return render_template(
-        "update_status.html", message="Soft update complete. Restarting service..."
-    )
+    return render_template("update_status.html", message="Soft update complete. Restarting service...")
 
 if __name__ == "__main__":
     socketio.run(app, host="0.0.0.0", port=5000, debug=True)
