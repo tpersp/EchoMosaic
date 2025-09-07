@@ -42,7 +42,6 @@ def default_stream_config():
         "yt_cc": False,
         "yt_mute": True,
         "yt_quality": "auto",
-        "include_in_global": True,
         "label": "",
     }
 
@@ -80,7 +79,6 @@ else:
 # Backfill defaults for existing stream entries
 for k, v in list(settings.items()):
     if not k.startswith("_") and isinstance(v, dict):
-        v.setdefault("include_in_global", True)
         v.setdefault("label", k.capitalize())
 
 # Ensure notes key exists
@@ -153,8 +151,8 @@ def dashboard():
 
 @app.route("/stream")
 def mosaic_streams():
-    streams = {k: v for k, v in settings.items()
-               if not k.startswith("_") and v.get("include_in_global", True)}
+    # Dynamic global view: include all streams ("online" assumed as configured)
+    streams = {k: v for k, v in settings.items() if not k.startswith("_")}
     mosaic = settings.get("_mosaic", default_mosaic_config())
     return render_template("streams.html", stream_settings=streams, mosaic_settings=mosaic)
 
@@ -230,7 +228,7 @@ def update_stream_settings(stream_id):
 
     # We'll add new keys for YouTube: "yt_cc", "yt_mute", "yt_quality"
     for key in ["mode", "folder", "selected_image", "duration", "stream_url",
-                "yt_cc", "yt_mute", "yt_quality", "include_in_global", "label"]:
+                "yt_cc", "yt_mute", "yt_quality", "label"]:
         if key in data:
             val = data[key]
             if key == "stream_url":
@@ -527,26 +525,12 @@ def streams_meta():
 @app.route("/groups", methods=["GET", "POST"])
 def groups_collection():
     if request.method == "GET":
-        # Include a virtual, undeletable 'Stream' group that mirrors include_in_global
-        existing = dict(settings.get("_groups", {}))
-        stream_group = [k for k, v in settings.items() if not k.startswith("_") and v.get("include_in_global", True)]
-        existing["Stream"] = stream_group
-        return jsonify(existing)
+        return jsonify(settings.get("_groups", {}))
     data = request.get_json(silent=True) or {}
     name = (data.get("name") or "").strip()
     streams = data.get("streams") or []
     if not name:
         return jsonify({"error": "Name required"}), 400
-    # Special handling for the built-in 'Stream' group: update include_in_global
-    if name.lower() == "stream":
-        ids = set([s for s in streams if s in settings])
-        for k, v in settings.items():
-            if k.startswith("_") or not isinstance(v, dict):
-                continue
-            v["include_in_global"] = (k in ids)
-        save_settings(settings)
-        return jsonify({"status": "ok", "group": {"Stream": sorted(ids)}})
-    # Regular named group
     settings.setdefault("_groups", {})
     settings["_groups"][name] = [s for s in streams if s in settings]
     save_settings(settings)
@@ -555,8 +539,6 @@ def groups_collection():
 
 @app.route("/groups/<name>", methods=["DELETE"])
 def groups_delete(name):
-    if name.lower() == "stream":
-        return jsonify({"error": "Cannot delete the default 'Stream' group"}), 400
     if "_groups" in settings and name in settings["_groups"]:
         del settings["_groups"][name]
         save_settings(settings)
