@@ -237,18 +237,21 @@
       makeEl('label', {}, ['Name: ', makeEl('input', {type:'text', class:'tile-name', value: name || ''}, [])])
     ]);
     body.appendChild(nameRow);
-    // Add row with dropdown to add members
+    // Bulk row (Add all / Remove all) above the combo
+    const bulkRow = makeEl('div', {class:'tile-row tile-bulk-row'}, []);
+    const addAllBtn = makeEl('button', {class:'tile-addall-btn', type:'button'}, ['Add all']);
+    const removeAllBtn = makeEl('button', {class:'tile-removeall-btn', type:'button'}, ['Remove all']);
+    bulkRow.appendChild(addAllBtn);
+    bulkRow.appendChild(removeAllBtn);
+    body.appendChild(bulkRow);
+    // Add row with combined search/select + Add
     const addRow = makeEl('div', {class:'tile-row tile-add-row'}, []);
     const dlId = `dl-${Math.random().toString(36).slice(2)}`;
     const combo = makeEl('input', {type:'text', class:'tile-combo', placeholder:'Search or select…', list: dlId}, []);
     const datalist = makeEl('datalist', {id: dlId}, []);
     const addBtn = makeEl('button', {class:'tile-add-btn', type:'button'}, ['Add']);
-    const addAllBtn = makeEl('button', {class:'tile-addall-btn', type:'button'}, ['Add all']);
-    const removeAllBtn = makeEl('button', {class:'tile-removeall-btn', type:'button'}, ['Remove all']);
     addRow.appendChild(combo);
     addRow.appendChild(addBtn);
-    addRow.appendChild(addAllBtn);
-    addRow.appendChild(removeAllBtn);
     body.appendChild(addRow);
     body.appendChild(datalist);
     // Chips container for current members
