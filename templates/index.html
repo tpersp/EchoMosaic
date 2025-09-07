@@ -199,6 +199,7 @@
           // open editor immediately
           const body = tile.querySelector('.tile-body');
           if (body) body.hidden = false;
+          tile.classList.add('expanded');
           const nameInput = tile.querySelector('.tile-name');
           if (nameInput) nameInput.focus();
         });
@@ -231,6 +232,7 @@
     header.appendChild(actions);
     tile.appendChild(header);
     const body = makeEl('div', {class:'tile-body', hidden: !isOpen(name)}, []);
+    if (isOpen(name)) tile.classList.add('expanded');
     const nameRow = makeEl('div', {class:'tile-row'}, [
       makeEl('label', {}, ['Name: ', makeEl('input', {type:'text', class:'tile-name', value: name || ''}, [])])
     ]);
@@ -340,6 +342,7 @@
     // interactions
     edit.addEventListener('click', () => {
       body.hidden = !body.hidden;
+      tile.classList.toggle('expanded', !body.hidden);
       markOpen(name, !body.hidden);
     });
     if (del) {
@@ -347,6 +350,7 @@
         if (!confirm(`Delete group ${name}?`)) return;
         await fetch(`/groups/${encodeURIComponent(name)}`, {method:'DELETE'});
         markOpen(name, false);
+        tile.classList.remove('expanded');
         loadGroupsUI();
       });
     }
@@ -360,12 +364,13 @@
         // Collapse after save (and handle rename)
         if (name && nameVal !== name) markOpen(name, false);
         markOpen(nameVal, false);
+        tile.classList.remove('expanded');
         loadGroupsUI();
       } else {
         alert('Failed to save group');
       }
     });
-    cancel.addEventListener('click', () => { body.hidden = true; });
+    cancel.addEventListener('click', () => { body.hidden = true; tile.classList.remove('expanded'); });
     // Keep count/title in sync with name edits
     const nameInputEl = nameRow.querySelector('.tile-name');
     if (nameInputEl) nameInputEl.addEventListener('input', () => { refreshTitleCount(); });

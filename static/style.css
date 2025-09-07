@@ -138,14 +138,15 @@ a {
 .group-section { margin-bottom: 0.5rem; }
 .group-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 6px; }
 .group-item { border: 1px solid var(--border); padding: 6px; border-radius: 4px; background: var(--surface); }
-.group-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 8px; }
-.group-tile { border: 1px solid var(--border); border-radius: 6px; background: var(--surface); padding: 6px; }
+.group-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 8px; align-items: start; }
+.group-tile { border: 1px solid var(--border); border-radius: 6px; background: var(--surface); padding: 6px; position: relative; overflow: hidden; }
+.group-tile.expanded { z-index: 10; box-shadow: 0 6px 16px rgba(0,0,0,0.35); }
 .group-tile.add { cursor: pointer; display: flex; align-items: center; justify-content: center; color: var(--accent); border-style: dashed; }
 .tile-header { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
 .tile-title { font-weight: 600; }
 .tile-actions a { color: var(--accent); text-decoration: none; margin-right: 6px; }
 .tile-actions button { font-size: 0.75rem; padding: 0.15rem 0.4rem; }
-.tile-body { margin-top: 6px; }
+.tile-body { margin-top: 6px; max-height: 320px; overflow-y: auto; padding-right: 2px; }
 .tile-row { margin-bottom: 6px; }
 .tile-buttons { display: flex; gap: 6px; margin-top: 6px; }
 .tile-add-row { display:grid; grid-template-columns: 1fr auto auto auto; gap:8px; align-items:center; }
