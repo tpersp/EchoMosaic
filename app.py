@@ -80,6 +80,9 @@ for k, v in list(settings.items()):
     if not k.startswith("_") and isinstance(v, dict):
         v.setdefault("include_in_global", True)
 
+# Ensure notes key exists
+settings.setdefault("_notes", "")
+
 
 def get_subfolders():
     subfolders = ["all"]
@@ -233,6 +236,18 @@ def serve_stream_image(filename):
     if not os.path.exists(full_path):
         return jsonify({"error": f"File {filename} not found"}), 404
     return send_from_directory(IMAGE_DIR, filename)
+
+
+@app.route("/notes", methods=["GET", "POST"])
+def notes_api():
+    """Simple API to store and retrieve dashboard notes server-side."""
+    if request.method == "GET":
+        return jsonify({"text": settings.get("_notes", "")})
+    data = request.get_json(silent=True) or {}
+    text = data.get("text", "")
+    settings["_notes"] = text
+    save_settings(settings)
+    return jsonify({"status": "ok"})
 
 @app.route("/stream/live")
 def stream_live():

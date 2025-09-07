@@ -254,13 +254,23 @@
   const toggleNotepadBtn = document.getElementById('toggle-notepad');
   const notepadText = document.getElementById('notepad-text');
   const saveNotesBtn = document.getElementById('save-notes');
-  notepadText.value = localStorage.getItem('echoNotes') || '';
+  // Load notes from server
+  fetch('/notes')
+    .then(r => r.json())
+    .then(({text}) => { notepadText.value = text || ''; })
+    .catch(() => {});
   toggleNotepadBtn.addEventListener('click', () => {
     notepad.classList.toggle('collapsed');
   });
   saveNotesBtn.addEventListener('click', () => {
-    localStorage.setItem('echoNotes', notepadText.value);
-    showNotification('Notes saved');
+    fetch('/notes', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text: notepadText.value })
+    })
+    .then(r => r.json())
+    .then(() => showNotification('Notes saved on server'))
+    .catch(() => showNotification('Failed to save notes'));
   });
 
   // The following section reuses much of the original dashboard logic to
