@@ -11,7 +11,7 @@ A running list of ideas and future improvements. Add new items anywhere below.
 
 - [ ] Provide bulk toggle actions (e.g., include/exclude all).
 
-- [ ] “Slideshow sync”: sync transitions across all streams (e.g., all change every 10s together), to prevent them from changing at "random interval" when having multiple streams on one screen or near eachother.
+- [ ] “Slideshow sync”: sync transitions across all streams (e.g., all change every 10s together), to prevent them from changing at "random interval" when having multiple streams on one screen or near each other.
 
 - [ ] Low-bandwidth mode: auto-reduces image resolution for remote access.
 
@@ -21,9 +21,13 @@ A running list of ideas and future improvements. Add new items anywhere below.
 
 - [x] add prettier update feature so user isn't hit with "This site can’t be reached <site/ip> refused to connect.
 
-- [ ] add server sided rendering as an option if possible. so it feels more like a proper stream as everyone who opens the site sees the same thing at the same time.
+- [ ] add server sided rendering as an option if possible. so it feels more like a proper stream as everyone who opens the site sees the same thing at the same time. - maybe not all streams, but the option to enable server side rendering for a specific group would be nice, if single stream is needed then the user would just make group with only one stream, hence SSR should be controlled on group level.
+
+- [ ] Add system monitoring, to watch cpu usage, memory usage(using/max), gpu usage(if any), storage available for media, other useful info.
 
 - [ ] Add stream quality options instead of free text format, options should be 1080p, 720p, 480, 360p, 240p, 144p, Auto. if a non-youtube stream is used, it should automatically select "auto" for compatibility.
+
+- [ ] Add option to shuffle display order of media in folders - should by default shuffle, with the option to turn off shuffle.
 
 ## Suggestions from a friend:
 - [ ]  [2025-09-08] Add optional authentication or API‑key protection for the dashboard and update endpoints. The README notes that after installation you can access the dashboard directly at http://your‑server:PORT/, so anyone on the network can modify streams and run updates. Implementing a simple login or token-based auth would improve security.
