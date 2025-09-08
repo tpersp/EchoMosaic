@@ -57,23 +57,23 @@
       </div>
 
       <div class="form-grid">
-        <!-- Folder Selection -->
-        <div class="form-row">
-          <label for="folder-{{ stream_id }}">Folder</label>
-          <select id="folder-{{ stream_id }}" class="folder-select" data-stream="{{ stream_id }}" title="{{ conf.folder }}">
-            {% for f in subfolders %}
-              <option value="{{ f }}" title="{{ f }}" {% if conf.folder == f %} selected {% endif %}>{{ f }}</option>
-            {% endfor %}
-          </select>
-        </div>
-
-        <!-- Mode Selection -->
+        <!-- Mode Selection (moved to top) -->
         <div class="form-row">
           <label for="mode-{{ stream_id }}">Mode</label>
           <select id="mode-{{ stream_id }}" class="mode-select" data-stream="{{ stream_id }}">
             <option value="random" {% if conf.mode == 'random' %} selected {% endif %}>Random</option>
             <option value="specific" {% if conf.mode == 'specific' %} selected {% endif %}>Specific</option>
             <option value="livestream" {% if conf.mode == 'livestream' %} selected {% endif %}>URL / Embed</option>
+          </select>
+        </div>
+
+        <!-- Folder Selection -->
+        <div class="form-row folder-row" {% if conf.mode == 'livestream' %} style="display:none;" {% endif %}>
+          <label for="folder-{{ stream_id }}">Folder</label>
+          <select id="folder-{{ stream_id }}" class="folder-select" data-stream="{{ stream_id }}" title="{{ conf.folder }}">
+            {% for f in subfolders %}
+              <option value="{{ f }}" title="{{ f }}" {% if conf.folder == f %} selected {% endif %}>{{ f }}</option>
+            {% endfor %}
           </select>
         </div>
 
@@ -105,7 +105,12 @@
               <label title="Closed Captions"><input type="checkbox" class="yt-cc-chk" data-stream="{{ stream_id }}" {% if conf.yt_cc %} checked {% endif %}> CC</label>
               <label title="Start muted"><input type="checkbox" class="yt-mute-chk" data-stream="{{ stream_id }}" {% if conf.yt_mute %} checked {% endif %}> Mute</label>
               <label for="yt-quality-{{ stream_id }}">Quality</label>
-              <input type="text" id="yt-quality-{{ stream_id }}" class="yt-quality-input" data-stream="{{ stream_id }}" value="{{ conf.yt_quality }}" placeholder="auto/hd720/etc">
+              {% set q = (conf.yt_quality or 'auto') %}
+              <select id="yt-quality-{{ stream_id }}" class="yt-quality-select" data-stream="{{ stream_id }}">
+                {% for opt in ['auto','1080p','720p','480','360p','240p','144p'] %}
+                  <option value="{{ opt }}" {% if q|lower == opt|lower %} selected {% endif %}>{{ opt|upper }}</option>
+                {% endfor %}
+              </select>
             </div>
           </details>
         </div>
@@ -847,9 +852,13 @@
     const urlDiv = card.querySelector('.stream-url-container');
     const imagePicker = card.querySelector('.image-picker');
     const ytSettingsDiv = card.querySelector('.yt-settings');
+    const selectedRow = card.querySelector('.selected-image-row');
+    const folderRow = card.querySelector('.folder-row');
     if (durationDiv) durationDiv.style.display = (mode === 'random') ? '' : 'none';
     if (urlDiv) urlDiv.style.display = (mode === 'livestream') ? '' : 'none';
     if (imagePicker) imagePicker.style.display = (mode === 'specific') ? '' : 'none';
+    if (selectedRow) selectedRow.style.display = (mode === 'specific') ? '' : 'none';
+    if (folderRow) folderRow.style.display = (mode === 'livestream') ? 'none' : '';
     // Only show YT options if URL looks like YouTube
     const type = detectUrlType(streamUrl);
     if (ytSettingsDiv) ytSettingsDiv.style.display = (mode === 'livestream' && type === 'YouTube') ? '' : 'none';
@@ -930,10 +939,16 @@
             if (urlInput) payload.stream_url = urlInput.value;
             const ccChk = card.querySelector('.yt-cc-chk');
             const muteChk = card.querySelector('.yt-mute-chk');
-            const qualityInput = card.querySelector('.yt-quality-input');
+            const qualitySelect = card.querySelector('.yt-quality-select');
             if (ccChk) payload.yt_cc = ccChk.checked;
             if (muteChk) payload.yt_mute = muteChk.checked;
-            if (qualityInput) payload.yt_quality = qualityInput.value;
+            if (qualitySelect) payload.yt_quality = qualitySelect.value;
+            // If URL isn't YouTube, force AUTO for compatibility
+            const t = detectUrlType(urlInput ? urlInput.value : '');
+            if (t !== 'YouTube' && qualitySelect) {
+              qualitySelect.value = 'auto';
+              payload.yt_quality = 'auto';
+            }
           }
           saveSettings(streamId, payload);
           toggleVisibilityForMode(card, mode, urlInput ? urlInput.value : '');
@@ -996,12 +1011,19 @@
         urlInput.addEventListener('change', e => {
           saveSettings(streamId, { stream_url: e.target.value });
           toggleVisibilityForMode(card, modeSelect.value, e.target.value);
+          // If not YouTube, force quality AUTO
+          const qualitySelect = card.querySelector('.yt-quality-select');
+          const t = detectUrlType(e.target.value);
+          if (t !== 'YouTube' && qualitySelect) {
+            qualitySelect.value = 'auto';
+            saveSettings(streamId, { yt_quality: 'auto' });
+          }
         });
       }
       // YT settings changes
       const ccChk = card.querySelector('.yt-cc-chk');
       const muteChk = card.querySelector('.yt-mute-chk');
-      const qualityInput = card.querySelector('.yt-quality-input');
+      const qualitySelect = card.querySelector('.yt-quality-select');
       const renameBtn = card.querySelector('.menu-rename');
       if (ccChk) {
         ccChk.addEventListener('change', e => {
@@ -1013,8 +1035,8 @@
           saveSettings(streamId, { yt_mute: e.target.checked });
         });
       }
-      if (qualityInput) {
-        qualityInput.addEventListener('change', e => {
+      if (qualitySelect) {
+        qualitySelect.addEventListener('change', e => {
           saveSettings(streamId, { yt_quality: e.target.value });
         });
       }

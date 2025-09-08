@@ -25,7 +25,7 @@ A running list of ideas and future improvements. Add new items anywhere below.
 
 - [ ] Add system monitoring, to watch cpu usage, memory usage(using/max), gpu usage(if any), storage available for media, other useful info.
 
-- [ ] Add stream quality options instead of free text format, options should be 1080p, 720p, 480, 360p, 240p, 144p, Auto. if a non-youtube stream is used, it should automatically select "auto" for compatibility.
+- [x] Add stream quality options instead of free text format, options should be 1080p, 720p, 480, 360p, 240p, 144p, Auto. if a non-youtube stream is used, it should automatically select "auto" for compatibility.
 
 - [ ] Add option to shuffle display order of media in folders - should by default shuffle, with the option to turn off shuffle.
 
