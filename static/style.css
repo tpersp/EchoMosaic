@@ -198,15 +198,31 @@ a {
 }
 .stream-card h2 { margin: 0; font-size: 1.05rem; }
 .stream-card h2 a { color: var(--text); text-decoration: none; }
-.remove-stream {
-  position: absolute;
-  top: 0.4rem;
-  right: 0.4rem;
-  font-size: 0.8rem;
+/* Card menu (burger) */
+.card-menu { position: relative; margin-left: auto; }
+.menu-button {
   background: var(--surface-alt);
+  border: 1px solid var(--border);
   color: var(--text);
-  border: none;
+  border-radius: 4px;
+  padding: 0 0.4rem;
+  line-height: 1.4;
 }
+.menu-dropdown {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 4px);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  display: flex;
+  flex-direction: column;
+  min-width: 120px;
+  box-shadow: 0 6px 16px rgba(0,0,0,0.35);
+  z-index: 20;
+}
+.menu-dropdown button { background: transparent; border: 0; text-align: left; padding: 6px 10px; color: var(--text); }
+.menu-dropdown button:hover { background: var(--surface-alt); }
 
 /* Details/summary styling within cards */
 .stream-card details {
