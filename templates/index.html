@@ -69,7 +69,7 @@
           <select id="mode-{{ stream_id }}" class="mode-select" data-stream="{{ stream_id }}">
             <option value="random" {% if conf.mode == 'random' %} selected {% endif %}>Random</option>
             <option value="specific" {% if conf.mode == 'specific' %} selected {% endif %}>Specific</option>
-            <option value="livestream" {% if conf.mode == 'livestream' %} selected {% endif %}>Livestream</option>
+            <option value="livestream" {% if conf.mode == 'livestream' %} selected {% endif %}>URL / Embed</option>
           </select>
         </div>
 
@@ -83,10 +83,14 @@
 
         <!-- Stream URL -->
         <div class="form-row stream-url-container" {% if conf.mode != 'livestream' %} style="display:none;" {% endif %}>
-          <label for="stream-url-{{ stream_id }}">Stream URL</label>
+          <label for="stream-url-{{ stream_id }}">URL to Embed</label>
           <div>
-            <input id="stream-url-{{ stream_id }}" type="text" class="stream-url-input" data-stream="{{ stream_id }}" value="{{ conf.stream_url if conf.stream_url else '' }}" placeholder="YouTube/Twitch/HLS or embeddable page">
-            <div class="help-text">Examples: https://youtube.com/watch?v=… • https://twitch.tv/… • direct .m3u8/.mpd</div>
+            <div style="display:flex; align-items:center; gap:8px; flex-wrap: wrap;">
+              <input id="stream-url-{{ stream_id }}" type="text" class="stream-url-input" data-stream="{{ stream_id }}" value="{{ conf.stream_url if conf.stream_url else '' }}" placeholder="YouTube / Twitch / HLS (.m3u8) / embeddable site">
+              <span class="url-type-badge" aria-live="polite"></span>
+              <button type="button" class="test-embed-btn" data-stream="{{ stream_id }}" title="Open this stream in a new tab to test">Test</button>
+            </div>
+            <div class="help-text">Works with many sites that allow embedding. If a site blocks embedding (e.g., with X-Frame-Options), it won’t load.</div>
           </div>
         </div>
 
@@ -203,6 +207,17 @@
     Object.entries(attrs).forEach(([k,v]) => { if (k==='class') e.className=v; else if (k==='style') e.style.cssText=v; else e.setAttribute(k,v); });
     children.forEach(c => e.appendChild(typeof c==='string' ? document.createTextNode(c) : c));
     return e;
+  }
+
+  // Simple client-side URL type detection so users know what will embed
+  function detectUrlType(url) {
+    if (!url) return '';
+    const u = (url||'').toLowerCase();
+    if (u.includes('youtube.com') || u.includes('youtu.be/')) return 'YouTube';
+    if (u.includes('twitch.tv/')) return 'Twitch';
+    if (u.endsWith('.m3u8') || u.endsWith('.mpd')) return 'HLS';
+    if (u.startsWith('http://') || u.startsWith('https://')) return 'Website';
+    return '';
   }
   // Persist expanded/collapsed tile state
   function getOpenSet() {
@@ -625,13 +640,9 @@
     if (durationDiv) durationDiv.style.display = (mode === 'random') ? '' : 'none';
     if (urlDiv) urlDiv.style.display = (mode === 'livestream') ? '' : 'none';
     if (imagePicker) imagePicker.style.display = (mode === 'specific') ? '' : 'none';
-    if (ytSettingsDiv) {
-      if (mode === 'livestream' && (streamUrl.includes('youtube.com') || streamUrl.includes('youtu.be'))) {
-        ytSettingsDiv.style.display = '';
-      } else {
-        ytSettingsDiv.style.display = 'none';
-      }
-    }
+    // Only show YT options if URL looks like YouTube
+    const type = detectUrlType(streamUrl);
+    if (ytSettingsDiv) ytSettingsDiv.style.display = (mode === 'livestream' && type === 'YouTube') ? '' : 'none';
   }
 
   function loadImagesFor(streamId, folder) {
@@ -713,11 +724,34 @@
           saveSettings(streamId, { duration: e.target.value });
         });
       }
-      // URL change
+      // URL helpers: type badge + save
+      function setUrlBadge(url) {
+        const badge = card.querySelector('.url-type-badge');
+        if (!badge) return;
+        const t = detectUrlType(url);
+        badge.textContent = t || '';
+        badge.dataset.type = (t || '').toLowerCase();
+        badge.style.visibility = t ? 'visible' : 'hidden';
+      }
       if (urlInput) {
+        setUrlBadge(urlInput.value || '');
+        urlInput.addEventListener('input', e => {
+          setUrlBadge(e.target.value);
+          toggleVisibilityForMode(card, modeSelect.value, e.target.value);
+        });
         urlInput.addEventListener('change', e => {
           saveSettings(streamId, { stream_url: e.target.value });
           toggleVisibilityForMode(card, modeSelect.value, e.target.value);
+        });
+      }
+      const testBtn = card.querySelector('.test-embed-btn');
+      if (testBtn && urlInput) {
+        testBtn.addEventListener('click', async () => {
+          // Save current URL before testing so the stream page loads it
+          try { await fetch(`/settings/${encodeURIComponent(streamId)}`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ stream_url: urlInput.value }) }); } catch {}
+          const link = card.querySelector('.card-header a.stream-link');
+          const href = link ? link.href : `/stream/${encodeURIComponent(streamId)}`;
+          window.open(href, '_blank');
         });
       }
       // YT settings changes

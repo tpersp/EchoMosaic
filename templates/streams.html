@@ -8,21 +8,42 @@
 </head>
 <body>
 <div id="mosaic" class="mosaic-grid layout-{{ mosaic_settings.layout }} cols-{{ mosaic_settings.cols }} stream-count-{{ stream_settings|length }}{% if mosaic_settings.layout == 'pip' %} corner-{{ mosaic_settings.pip_corner }}{% endif %}"{% if mosaic_settings.layout == 'pip' %} style="--pip-size: {{ mosaic_settings.pip_size|default(25) }}%;"{% endif %}>
+  {% macro url_type_from_conf(conf) -%}
+    {%- if conf.mode == 'livestream' and conf.stream_url -%}
+      {%- set u = conf.stream_url.lower() -%}
+      {%- if 'youtube.com' in u or 'youtu.be' in u -%}YouTube
+      {%- elif 'twitch.tv' in u -%}Twitch
+      {%- elif '.m3u8' in u or '.mpd' in u -%}HLS
+      {%- else -%}Website{%- endif -%}
+    {%- elif conf.mode == 'random' -%}Images
+    {%- elif conf.mode == 'specific' -%}Image
+    {%- endif -%}
+  {%- endmacro %}
+  {% macro url_type_for_slug(slug) -%}
+    {%- for sid, c in stream_settings.items() -%}
+      {%- if ((c.label if c.label else sid)|slugify) == slug -%}
+        {{ url_type_from_conf(c) }}
+      {%- endif -%}
+    {%- endfor -%}
+  {%- endmacro %}
   {% if mosaic_settings.layout == 'pip' %}
     {% if mosaic_settings.pip_main %}
     <div class="mosaic-cell main">
       <iframe src="{{ url_for('render_stream', name=mosaic_settings.pip_main) }}" allow="autoplay" loading="lazy" scrolling="no"></iframe>
+      <div class="source-badge">{{ url_type_for_slug(mosaic_settings.pip_main) }}</div>
     </div>
     {% endif %}
     {% if mosaic_settings.pip_pip %}
     <div class="mosaic-cell pip">
       <iframe src="{{ url_for('render_stream', name=mosaic_settings.pip_pip) }}" allow="autoplay" loading="lazy" scrolling="no"></iframe>
+      <div class="source-badge">{{ url_type_for_slug(mosaic_settings.pip_pip) }}</div>
     </div>
     {% endif %}
   {% else %}
     {% for stream_id, conf in stream_settings.items() %}
     <div class="mosaic-cell">
       <iframe src="{{ url_for('render_stream', name=(conf.label if conf.label else stream_id)|slugify) }}" allow="autoplay" loading="lazy" scrolling="no"></iframe>
+      <div class="source-badge">{{ url_type_from_conf(conf) }}</div>
     </div>
     {% endfor %}
   {% endif %}
