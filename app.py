@@ -29,6 +29,7 @@ def default_mosaic_config():
     # layouts (e.g. horizontal or vertical stacking).
     return {
         "cols": 2,
+        "rows": None,
         "layout": "grid",
         "pip_main": None,
         "pip_pip": None,
@@ -265,7 +266,12 @@ def update_mosaic_settings():
     data = request.json or {}
     layout = data.get("layout", "grid")
     cols = int(data.get("cols", settings.get("_mosaic", {}).get("cols", 2)))
-    mosaic = {"layout": layout, "cols": cols}
+    rows_val = data.get("rows", settings.get("_mosaic", {}).get("rows"))
+    try:
+        rows = int(rows_val) if rows_val is not None else None
+    except (TypeError, ValueError):
+        rows = None
+    mosaic = {"layout": layout, "cols": cols, "rows": rows}
     if layout == "pip":
         mosaic.update({
             "pip_main": data.get("pip_main"),
@@ -734,7 +740,7 @@ def stream_group(name):
     mosaic = default_mosaic_config()
     if g_layout:
         # safe merge
-        for k in ["layout", "cols", "pip_main", "pip_pip", "pip_corner", "pip_size"]:
+        for k in ["layout", "cols", "rows", "pip_main", "pip_pip", "pip_corner", "pip_size"]:
             if k in g_layout:
                 mosaic[k] = g_layout[k]
     return render_template("streams.html", stream_settings=streams, mosaic_settings=mosaic)

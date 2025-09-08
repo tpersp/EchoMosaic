@@ -309,14 +309,17 @@
     // Layout selection + visual gallery
     const layoutRow = makeEl('div', {class:'tile-row'}, []);
     const layoutSelect = makeEl('select', {class:'tile-layout'}, []);
-    ['grid','horizontal','vertical','focus','pip'].forEach(opt => {
+    ['grid','focus','pip'].forEach(opt => {
       const o = makeEl('option', {value:opt}, [opt.charAt(0).toUpperCase()+opt.slice(1)]);
       layoutSelect.appendChild(o);
     });
     layoutRow.appendChild(makeEl('label', {}, ['Layout: ', layoutSelect]));
-    const colsInput = makeEl('input', {type:'number', min:'1', max:'6', class:'tile-cols', value: gLayout.cols || 2}, []);
-    const colsWrap = makeEl('span', {class:'tile-cols-wrap'}, [' Columns: ', colsInput]);
+    const colsInput = makeEl('input', {type:'number', min:'1', max:'8', class:'tile-cols', value: gLayout.cols || 2}, []);
+    const colsWrap = makeEl('span', {class:'tile-cols-wrap'}, [' Cols: ', colsInput]);
     layoutRow.appendChild(colsWrap);
+    const rowsInput = makeEl('input', {type:'number', min:'1', max:'8', class:'tile-rows', value: gLayout.rows || 2}, []);
+    const rowsWrap = makeEl('span', {class:'tile-rows-wrap'}, [' Rows: ', rowsInput]);
+    layoutRow.appendChild(rowsWrap);
     // PIP options
     const pipWrap = makeEl('div', {class:'tile-pip-wrap', style:'display:none;'}, []);
     const pipMain = makeEl('select', {class:'tile-pip-main'}, []);
@@ -337,26 +340,13 @@
 
     // Visual layout gallery
     const gallery = makeEl('div', {class:'layout-gallery'}, []);
-    function buildGridPreview(cols) {
+    function buildGridPreview(rows, cols) {
       const p = makeEl('div', {class:'layout-preview'}, []);
       p.style.display = 'grid';
-      p.style.gridTemplateColumns = `repeat(${cols}, 1fr)`;
-      p.style.gridAutoRows = '1fr';
-      for (let i=0;i<Math.max(cols*2, 4);i++) p.appendChild(makeEl('div', {class:'cell'}, []));
-      return p;
-    }
-    function buildHorizontalPreview() {
-      const p = buildGridPreview(3); // shows a row
-      p.style.gridTemplateRows = '1fr';
-      p.style.gridAutoFlow = 'column';
-      return p;
-    }
-    function buildVerticalPreview() {
-      const p = makeEl('div', {class:'layout-preview'}, []);
-      p.style.display = 'grid';
-      p.style.gridTemplateColumns = '1fr';
-      p.style.gridTemplateRows = 'repeat(3, 1fr)';
-      for (let i=0;i<3;i++) p.appendChild(makeEl('div', {class:'cell'}, []));
+      p.style.gridTemplateColumns = `repeat(${Math.max(1, cols)}, 1fr)`;
+      p.style.gridTemplateRows = `repeat(${Math.max(1, rows)}, 1fr)`;
+      const n = Math.max(rows*cols, 4);
+      for (let i=0;i<n;i++) p.appendChild(makeEl('div', {class:'cell'}, []));
       return p;
     }
     function buildFocusPreview() {
@@ -381,15 +371,9 @@
       p.appendChild(main); p.appendChild(pip);
       return p;
     }
-    function addOption(kind, label, onPick) {
+    function addOption(kind, label, onPick, builder) {
       const opt = makeEl('div', {class:'layout-option', 'data-kind': kind}, []);
-      let preview;
-      if (kind.startsWith('grid-')) preview = buildGridPreview(parseInt(kind.split('-')[1],10));
-      else if (kind==='horizontal') preview = buildHorizontalPreview();
-      else if (kind==='vertical') preview = buildVerticalPreview();
-      else if (kind==='focus') preview = buildFocusPreview();
-      else if (kind==='pip') preview = buildPipPreview();
-      else preview = makeEl('div', {class:'layout-preview'}, []);
+      const preview = builder ? builder() : makeEl('div', {class:'layout-preview'}, []);
       opt.appendChild(preview);
       opt.appendChild(makeEl('span', {class:'caption'}, [label]));
       opt.addEventListener('click', () => { onPick(); setActive(kind); });
@@ -399,19 +383,21 @@
     function setActive(kind) {
       gallery.querySelectorAll('.layout-option').forEach(o => o.classList.toggle('active', o.dataset.kind===kind));
     }
-    const optionRefs = [];
-    for (let c=1;c<=6;c++) optionRefs.push(addOption(`grid-${c}`, `Grid ${c}`, () => { layoutSelect.value='grid'; colsInput.value=c; updateLayoutVisibility(); }));
-    optionRefs.push(addOption('horizontal', 'Horizontal', () => { layoutSelect.value='horizontal'; updateLayoutVisibility(); }));
-    optionRefs.push(addOption('vertical', 'Vertical', () => { layoutSelect.value='vertical'; updateLayoutVisibility(); }));
-    optionRefs.push(addOption('focus', 'Focus', () => { layoutSelect.value='focus'; updateLayoutVisibility(); }));
-    optionRefs.push(addOption('pip', 'PiP', () => { layoutSelect.value='pip'; updateLayoutVisibility(); }));
+    const gridOpt = addOption('grid', 'Grid', () => { layoutSelect.value='grid'; updateLayoutVisibility(); }, () => buildGridPreview(parseInt(rowsInput.value||'2',10), parseInt(colsInput.value||'2',10)));
+    const focusOpt = addOption('focus', 'Focus', () => { layoutSelect.value='focus'; updateLayoutVisibility(); }, () => buildFocusPreview());
+    const pipOpt = addOption('pip', 'PiP', () => { layoutSelect.value='pip'; updateLayoutVisibility(); }, () => buildPipPreview());
     body.appendChild(gallery);
     function syncActiveFromInputs() {
       const v = layoutSelect.value;
-      if (v==='grid') setActive(`grid-${parseInt(colsInput.value||'2',10)}`); else setActive(v);
+      if (v==='grid') setActive('grid'); else setActive(v);
+      // update grid preview on change
+      const oldPrev = gridOpt.querySelector('.layout-preview');
+      const newPrev = buildGridPreview(parseInt(rowsInput.value||'2',10), parseInt(colsInput.value||'2',10));
+      gridOpt.replaceChild(newPrev, oldPrev);
     }
     layoutSelect.addEventListener('change', syncActiveFromInputs);
     colsInput.addEventListener('change', syncActiveFromInputs);
+    rowsInput.addEventListener('change', syncActiveFromInputs);
     // Bulk row (Add all / Remove all) above the combo
     const bulkRow = makeEl('div', {class:'tile-row tile-bulk-row'}, []);
     const addAllBtn = makeEl('button', {class:'tile-addall-btn', type:'button'}, ['Add all']);
@@ -475,6 +461,7 @@
     function updateLayoutVisibility() {
       const v = layoutSelect.value;
       colsWrap.style.display = (v==='grid') ? '' : 'none';
+      rowsWrap.style.display = (v==='grid') ? '' : 'none';
       pipWrap.style.display = (v==='pip') ? '' : 'none';
       if (v==='pip') refreshPipSelects();
     }
@@ -586,7 +573,7 @@
       // Build layout payload
       const layoutVal = layoutSelect.value;
       const payloadLayout = { layout: layoutVal };
-      if (layoutVal==='grid') payloadLayout.cols = parseInt(colsInput.value||'2',10);
+      if (layoutVal==='grid') { payloadLayout.cols = parseInt(colsInput.value||'2',10); payloadLayout.rows = parseInt(rowsInput.value||'2',10); }
       if (layoutVal==='pip') {
         payloadLayout.pip_main = pipMain.value || null;
         payloadLayout.pip_pip = pipPip.value || null;
