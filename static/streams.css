@@ -72,6 +72,9 @@ html, body {
 .mosaic-grid.layout-focus.stream-count-6 .mosaic-cell:nth-child(5) { grid-area: d; }
 .mosaic-grid.layout-focus.stream-count-6 .mosaic-cell:nth-child(6) { grid-area: e; }
 
+/* New renderer: focus mode uses nested .focus-grid. Ensure it fills the page. */
+.mosaic-grid.layout-focus { display: block; }
+
 .mosaic-cell {
   position: relative;
   overflow: hidden;
