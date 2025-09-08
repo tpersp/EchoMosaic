@@ -320,6 +320,15 @@
     const rowsInput = makeEl('input', {type:'number', min:'1', max:'8', class:'tile-rows', value: gLayout.rows || 2}, []);
     const rowsWrap = makeEl('span', {class:'tile-rows-wrap'}, [' Rows: ', rowsInput]);
     layoutRow.appendChild(rowsWrap);
+    // Focus options
+    const focusWrap = makeEl('div', {class:'tile-pip-wrap', style:'display:none;'}, []);
+    const focusMode = makeEl('select', {class:'tile-focus-mode'}, []);
+    ['1-2','1-3','1-5'].forEach(v => focusMode.appendChild(makeEl('option', {value:v}, [v.replace('-', ' + ')])));
+    const focusPos = makeEl('select', {class:'tile-focus-pos'}, []);
+    const fRow1 = makeEl('div', {class:'pip-row'}, [ makeEl('label', {}, ['Focus: ']), focusMode ]);
+    const fRow2 = makeEl('div', {class:'pip-row'}, [ makeEl('label', {}, ['Placement: ']), focusPos ]);
+    focusWrap.appendChild(fRow1); focusWrap.appendChild(fRow2);
+    layoutRow.appendChild(focusWrap);
     // PIP options
     const pipWrap = makeEl('div', {class:'tile-pip-wrap', style:'display:none;'}, []);
     const pipMain = makeEl('select', {class:'tile-pip-main'}, []);
@@ -349,17 +358,41 @@
       for (let i=0;i<n;i++) p.appendChild(makeEl('div', {class:'cell'}, []));
       return p;
     }
-    function buildFocusPreview() {
+    function buildFocusPreview(mode, pos) {
+      // produce a small grid preview based on mode/pos
+      if (mode === '1-2') {
+        const p = makeEl('div', {class:'layout-preview'}, []);
+        p.style.display = 'grid'; p.style.gridTemplateColumns='repeat(2,1fr)'; p.style.gridTemplateRows='repeat(2,1fr)';
+        const order = (pos==='right') ? ['a','main','b','main'] : ['main','a','main','b'];
+        order.forEach(()=>p.appendChild(makeEl('div',{class:'cell'},[])));
+        // tint main cells
+        Array.from(p.children).forEach((c,i)=>{ if (order[i]==='main') c.style.background='#262626'; });
+        return p;
+      }
+      if (mode === '1-3') {
+        const p = makeEl('div', {class:'layout-preview'}, []);
+        p.style.display='grid'; p.style.gridTemplateColumns='repeat(3,1fr)'; p.style.gridTemplateRows='repeat(2,1fr)';
+        const top = (pos==='top');
+        const order = top ? ['m','m','m','a','b','c'] : ['a','b','c','m','m','m'];
+        order.forEach(()=>p.appendChild(makeEl('div',{class:'cell'},[])));
+        Array.from(p.children).forEach((c,i)=>{ if (order[i]==='m') c.style.background='#262626'; });
+        return p;
+      }
+      // 1-5 default
       const p = makeEl('div', {class:'layout-preview'}, []);
-      p.style.display = 'grid';
-      p.style.gridTemplateColumns = 'repeat(3, 1fr)';
-      p.style.gridTemplateRows = 'repeat(3, 1fr)';
-      const cells = ['a','b','c','d','main','main','e','main','main'];
-      cells.forEach(() => p.appendChild(makeEl('div', {class:'cell'}, [])));
-      // Make main area bigger visually
-      Array.from(p.children).forEach((c, i) => {
-        if ([4,5,7,8].includes(i)) c.style.background = '#262626';
-      });
+      p.style.display='grid'; p.style.gridTemplateColumns='repeat(3,1fr)'; p.style.gridTemplateRows='repeat(3,1fr)';
+      let mat;
+      switch(pos){
+        case 'top-left': mat=[[1,1,0],[1,1,0],[0,0,0]]; break;
+        case 'top-right': mat=[[0,1,1],[0,1,1],[0,0,0]]; break;
+        case 'bottom-left': mat=[[0,0,0],[1,1,0],[1,1,0]]; break;
+        default: mat=[[0,0,0],[0,1,1],[0,1,1]]; // bottom-right
+      }
+      for (let r=0;r<3;r++) for (let c=0;c<3;c++) {
+        const cell = makeEl('div',{class:'cell'},[]);
+        if (mat[r][c]===1) cell.style.background='#262626';
+        p.appendChild(cell);
+      }
       return p;
     }
     function buildPipPreview() {
@@ -384,7 +417,7 @@
       gallery.querySelectorAll('.layout-option').forEach(o => o.classList.toggle('active', o.dataset.kind===kind));
     }
     const gridOpt = addOption('grid', 'Grid', () => { layoutSelect.value='grid'; updateLayoutVisibility(); }, () => buildGridPreview(parseInt(rowsInput.value||'2',10), parseInt(colsInput.value||'2',10)));
-    const focusOpt = addOption('focus', 'Focus', () => { layoutSelect.value='focus'; updateLayoutVisibility(); }, () => buildFocusPreview());
+    const focusOpt = addOption('focus', 'Focus', () => { layoutSelect.value='focus'; updateLayoutVisibility(); }, () => buildFocusPreview(focusMode.value||'1-5', focusPos.value||'bottom-right'));
     const pipOpt = addOption('pip', 'PiP', () => { layoutSelect.value='pip'; updateLayoutVisibility(); }, () => buildPipPreview());
     body.appendChild(gallery);
     function syncActiveFromInputs() {
@@ -394,10 +427,30 @@
       const oldPrev = gridOpt.querySelector('.layout-preview');
       const newPrev = buildGridPreview(parseInt(rowsInput.value||'2',10), parseInt(colsInput.value||'2',10));
       gridOpt.replaceChild(newPrev, oldPrev);
+      // update focus preview on change
+      const oldF = focusOpt.querySelector('.layout-preview');
+      const newF = buildFocusPreview(focusMode.value||'1-5', focusPos.value||'bottom-right');
+      focusOpt.replaceChild(newF, oldF);
     }
     layoutSelect.addEventListener('change', syncActiveFromInputs);
     colsInput.addEventListener('change', syncActiveFromInputs);
     rowsInput.addEventListener('change', syncActiveFromInputs);
+    focusMode.addEventListener('change', () => { updateLayoutVisibility(); syncActiveFromInputs(); refreshFocusPosOptions(); });
+    focusPos.addEventListener('change', syncActiveFromInputs);
+
+    function refreshFocusPosOptions() {
+      // update placement options according to mode
+      const mode = focusMode.value;
+      focusPos.innerHTML = '';
+      let opts = [];
+      if (mode === '1-2') opts = ['left','right'];
+      else if (mode === '1-3') opts = ['top','bottom'];
+      else opts = ['top-left','top-right','bottom-left','bottom-right'];
+      opts.forEach(v => focusPos.appendChild(makeEl('option',{value:v},[v.replace('-', ' ')])));
+      // select from gLayout or defaults
+      const desired = gLayout.focus_pos || opts[opts.length-1];
+      Array.from(focusPos.options).forEach(o => o.selected = (o.value===desired));
+    }
     // Bulk row (Add all / Remove all) above the combo
     const bulkRow = makeEl('div', {class:'tile-row tile-bulk-row'}, []);
     const addAllBtn = makeEl('button', {class:'tile-addall-btn', type:'button'}, ['Add all']);
@@ -462,6 +515,7 @@
       const v = layoutSelect.value;
       colsWrap.style.display = (v==='grid') ? '' : 'none';
       rowsWrap.style.display = (v==='grid') ? '' : 'none';
+      focusWrap.style.display = (v==='focus') ? '' : 'none';
       pipWrap.style.display = (v==='pip') ? '' : 'none';
       if (v==='pip') refreshPipSelects();
     }
@@ -493,6 +547,9 @@
     }
     // init layout controls
     layoutSelect.value = gLayout.layout || 'grid';
+    // initialize focus controls from gLayout
+    Array.from(focusMode.options).forEach(o => o.selected = (o.value === (gLayout.focus_mode || '1-5')));
+    refreshFocusPosOptions();
     updateLayoutVisibility();
     refreshDatalist();
     refreshChips();
@@ -574,6 +631,7 @@
       const layoutVal = layoutSelect.value;
       const payloadLayout = { layout: layoutVal };
       if (layoutVal==='grid') { payloadLayout.cols = parseInt(colsInput.value||'2',10); payloadLayout.rows = parseInt(rowsInput.value||'2',10); }
+      if (layoutVal==='focus') { payloadLayout.focus_mode = focusMode.value; payloadLayout.focus_pos = focusPos.value; }
       if (layoutVal==='pip') {
         payloadLayout.pip_main = pipMain.value || null;
         payloadLayout.pip_pip = pipPip.value || null;
