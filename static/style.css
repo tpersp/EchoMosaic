@@ -131,14 +131,15 @@ a {
 .dashboard-grid {
   display: grid;
   gap: 1rem;
-  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  /* Widen cards so controls don’t feel cramped */
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
 }
 
 /* Group manager styles */
 .group-section { margin-bottom: 0.5rem; }
 .group-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 6px; }
 .group-item { border: 1px solid var(--border); padding: 6px; border-radius: 4px; background: var(--surface); }
-.group-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 8px; align-items: start; }
+.group-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 8px; align-items: start; }
 .group-tile { border: 1px solid var(--border); border-radius: 6px; background: var(--surface); padding: 6px; position: relative; overflow: hidden; }
 .group-tile.expanded { z-index: 10; box-shadow: 0 6px 16px rgba(0,0,0,0.35); }
 .group-tile.add { cursor: pointer; display: flex; align-items: center; justify-content: center; color: var(--accent); border-style: dashed; }
@@ -183,6 +184,8 @@ a {
   margin-bottom: 0.5rem;
 }
 .stream-card .title-row { display:flex; align-items:center; gap:0.5rem; }
+.open-stream { color: var(--accent); text-decoration: none; font-size: 0.85rem; padding: 0.1rem 0.35rem; border: 1px solid transparent; border-radius: 4px; }
+.open-stream:hover { background: var(--surface-alt); border-color: var(--border); }
 .rename-stream {
   font-size: 0.75rem;
   padding: 0.15rem 0.4rem;
@@ -191,25 +194,55 @@ a {
 .stream-card h2 a { color: var(--text); text-decoration: none; }
 .remove-stream {
   position: absolute;
-  top: 0.25rem;
-  right: 0.25rem;
+  top: 0.4rem;
+  right: 0.4rem;
   font-size: 0.8rem;
   background: var(--surface-alt);
   color: var(--text);
   border: none;
 }
 
+/* Details/summary styling within cards */
+.stream-card details {
+  background: var(--surface-alt);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0.25rem 0.5rem;
+}
+.stream-card details > summary {
+  cursor: pointer;
+  color: var(--accent);
+}
+
 /* Card form layout */
 .form-grid {
   display: grid;
   grid-template-columns: 1fr 2fr;
-  gap: 0.5rem 0.75rem;
+  /* Slightly more breathing room between label/control */
+  gap: 0.6rem 1rem;
   align-items: center;
 }
 .form-row { display: contents; }
 .form-row > label { align-self: center; opacity: 0.9; }
 .form-row > input,
 .form-row > select { width: 100%; }
+
+/* Small helper text under inputs */
+.help-text {
+  font-size: 0.8rem;
+  opacity: 0.8;
+  margin-top: 4px;
+}
+
+/* Inline controls (e.g., YT CC/Mute/Quality) */
+.inline-controls {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(100px, max-content));
+  gap: 8px 12px;
+  align-items: center;
+}
+.inline-controls label { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.inline-controls input[type="text"] { min-width: 140px; width: 100%; }
 
 @media (max-width: 600px) {
   .form-grid { grid-template-columns: 1fr; }
