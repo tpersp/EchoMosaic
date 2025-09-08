@@ -284,7 +284,9 @@
   }
   function createGroupTile(streamsMeta, groups, name) {
     const gdata = name ? (groups[name]||[]) : [];
-    const members = new Set(Array.isArray(gdata) ? gdata : (gdata?.streams || []));
+    const initial = Array.isArray(gdata) ? gdata.slice() : ((gdata?.streams || []).slice());
+    const order = Array.isArray(initial) ? initial.slice() : [];
+    const members = new Set(order);
     const gLayout = Array.isArray(gdata) ? {} : (gdata?.layout || {});
     const isNew = !name;
     const tile = makeEl('div', {class:'group-tile'}, []);
@@ -433,6 +435,7 @@
       const oldF = focusOpt.querySelector('.layout-preview');
       const newF = buildFocusPreview(focusMode.value||'1-5', focusPos.value||'bottom-right');
       focusOpt.replaceChild(newF, oldF);
+      refreshChips();
     }
     layoutSelect.addEventListener('change', syncActiveFromInputs);
     colsInput.addEventListener('change', syncActiveFromInputs);
@@ -487,7 +490,7 @@
       title.textContent = (tile.querySelector('.tile-name')?.value?.trim() || name || 'New Group') + ` (${count})`;
     }
     function refreshPipSelects() {
-      const mem = Array.from(members);
+      const mem = order.slice();
       let mainSel = gLayout.pip_main && members.has(gLayout.pip_main) ? gLayout.pip_main : (mem[0] || '');
       let pipSel = gLayout.pip_pip && members.has(gLayout.pip_pip) ? gLayout.pip_pip : (mem.find(x=>x!==mainSel) || '');
       // ensure different
@@ -530,6 +533,7 @@
       focusWrap.style.display = (v==='focus') ? '' : 'none';
       pipWrap.style.display = (v==='pip') ? '' : 'none';
       if (v==='pip') refreshPipSelects();
+      refreshChips();
     }
     function refreshDatalist() {
       datalist.innerHTML = '';
@@ -537,18 +541,36 @@
         datalist.appendChild(makeEl('option', {value: labelOf(id)}, []));
       });
     }
+    function capacityForLayout() {
+      const v = layoutSelect.value;
+      if (v==='grid') {
+        const r = parseInt(rowsInput.value||'');
+        const c = parseInt(colsInput.value||'');
+        if (Number.isFinite(r) && Number.isFinite(c) && r>0 && c>0) return r*c;
+        return Infinity;
+      }
+      if (v==='focus') {
+        const m = (focusMode.value||'1-5');
+        if (m==='1-2') return 3; if (m==='1-3') return 4; return 6;
+      }
+      if (v==='pip') return 2;
+      return Infinity;
+    }
     function refreshChips() {
       chips.innerHTML = '';
       const list = makeEl('ul', {class:'member-list'}, []);
-      const sorted = Array.from(members).sort((a,b) => labelOf(a).localeCompare(labelOf(b)));
-      sorted.forEach(id => {
-        const li = makeEl('li', {class:'member-item'}, []);
+      const cap = capacityForLayout();
+      order.forEach((id, idx) => {
+        const li = makeEl('li', {class:'member-item' + (idx >= cap ? ' overflow' : '')}, []);
         const nameSpan = makeEl('span', {class:'member-name'}, [labelOf(id)]);
         const rm = makeEl('button', {class:'member-remove', title:'Remove'}, ['Remove']);
         rm.addEventListener('click', () => {
           members.delete(id);
+          const i = order.indexOf(id); if (i>=0) order.splice(i,1);
           refreshDatalist();
           refreshChips();
+          refreshPipSelects();
+          refreshFocusMainOptions();
         });
         li.appendChild(nameSpan);
         li.appendChild(rm);
@@ -584,7 +606,7 @@
     addBtn.addEventListener('click', () => {
       const id = resolveSingleSelection();
       if (!id) return;
-      members.add(id);
+      members.add(id); order.push(id);
       combo.value = '';
       refreshDatalist();
       refreshChips();
@@ -593,7 +615,7 @@
     });
     addAllBtn.addEventListener('click', () => {
       const q = combo.value;
-      candidates(q).forEach(id => members.add(id));
+      candidates(q).forEach(id => { members.add(id); order.push(id); });
       combo.value = '';
       refreshDatalist();
       refreshChips();
@@ -601,7 +623,7 @@
       updateLayoutVisibility();
     });
     removeAllBtn.addEventListener('click', () => {
-      members.clear();
+      members.clear(); order.splice(0, order.length);
       combo.value = '';
       refreshDatalist();
       refreshChips();
@@ -642,7 +664,7 @@
       if (wanted === 'default') { showNotification("'default' is a reserved group name"); return; }
       const exists = Object.keys(gmCurrentGroups || {}).some(g => g.toLowerCase() === wanted && g !== (name || ''));
       if (exists) { showNotification('A group with this name already exists'); return; }
-      const ids = Array.from(members);
+      const ids = order.slice();
       // Build layout payload
       const layoutVal = layoutSelect.value;
       const payloadLayout = { layout: layoutVal };

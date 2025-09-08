@@ -88,11 +88,22 @@
       {% endfor %}
       </div>
     {% else %}
-      {% for stream_id, conf in stream_settings.items() %}
-      <div class="mosaic-cell">
-        <iframe src="{{ url_for('render_stream', name=(conf.label if conf.label else stream_id)|slugify) }}" allow="autoplay" loading="lazy" scrolling="no"></iframe>
-      </div>
-      {% endfor %}
+      {% if mosaic_settings.layout == 'grid' %}
+        {% set items = stream_settings.items()|list %}
+        {% set limit = mosaic_settings.rows and mosaic_settings.cols and (mosaic_settings.rows * mosaic_settings.cols) or None %}
+        {% set items = items[:limit] if limit else items %}
+        {% for stream_id, conf in items %}
+        <div class="mosaic-cell">
+          <iframe src="{{ url_for('render_stream', name=(conf.label if conf.label else stream_id)|slugify) }}" allow="autoplay" loading="lazy" scrolling="no"></iframe>
+        </div>
+        {% endfor %}
+      {% else %}
+        {% for stream_id, conf in stream_settings.items() %}
+        <div class="mosaic-cell">
+          <iframe src="{{ url_for('render_stream', name=(conf.label if conf.label else stream_id)|slugify) }}" allow="autoplay" loading="lazy" scrolling="no"></iframe>
+        </div>
+        {% endfor %}
+      {% endif %}
     {% endif %}
   {% endif %}
 </div>
