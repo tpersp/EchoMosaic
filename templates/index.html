@@ -48,7 +48,7 @@
           <h2><a class="stream-link" href="{{ url_for('render_stream', name=(conf.label if conf.label else stream_id)|slugify) }}" target="_blank">{{ conf.label if conf.label else stream_id|capitalize }}</a></h2>
         </div>
         <div class="card-menu" data-stream="{{ stream_id }}">
-          <button class="menu-button" aria-haspopup="true" aria-expanded="false" title="More">⋮</button>
+          <button class="menu-button" aria-haspopup="true" aria-expanded="false" title="More"><span class="burger"></span></button>
           <div class="menu-dropdown" hidden>
             <button class="menu-rename" data-stream="{{ stream_id }}">Rename</button>
             <button class="menu-remove" data-stream="{{ stream_id }}">Remove</button>
