@@ -556,12 +556,15 @@
       if (v==='pip') return 2;
       return Infinity;
     }
+    let draggingId = null;
     function refreshChips() {
       chips.innerHTML = '';
       const list = makeEl('ul', {class:'member-list'}, []);
       const cap = capacityForLayout();
       order.forEach((id, idx) => {
         const li = makeEl('li', {class:'member-item' + (idx >= cap ? ' overflow' : '')}, []);
+        li.setAttribute('draggable', 'true');
+        li.dataset.id = id;
         const nameSpan = makeEl('span', {class:'member-name'}, [labelOf(id)]);
         const rm = makeEl('button', {class:'member-remove', title:'Remove'}, ['Remove']);
         rm.addEventListener('click', () => {
@@ -571,6 +574,46 @@
           refreshChips();
           refreshPipSelects();
           refreshFocusMainOptions();
+        });
+        li.addEventListener('dragstart', (e) => {
+          draggingId = id;
+          try { e.dataTransfer.setData('text/plain', id); } catch {}
+          e.dataTransfer.effectAllowed = 'move';
+        });
+        li.addEventListener('dragover', (e) => {
+          e.preventDefault();
+          const rect = li.getBoundingClientRect();
+          const before = (e.clientY - rect.top) < rect.height/2;
+          li.classList.toggle('drag-over-top', before);
+          li.classList.toggle('drag-over-bottom', !before);
+        });
+        li.addEventListener('dragleave', () => {
+          li.classList.remove('drag-over-top','drag-over-bottom');
+        });
+        li.addEventListener('drop', (e) => {
+          e.preventDefault();
+          li.classList.remove('drag-over-top','drag-over-bottom');
+          const fromId = draggingId; draggingId = null;
+          if (!fromId || fromId === id) return;
+          const fromIdx = order.indexOf(fromId);
+          const targetIdx = order.indexOf(id);
+          if (fromIdx < 0 || targetIdx < 0) return;
+          const rect = li.getBoundingClientRect();
+          const before = (e.clientY - rect.top) < rect.height/2;
+          // Remove from old spot
+          order.splice(fromIdx, 1);
+          // Recompute target index after removal
+          let insertAt = order.indexOf(id);
+          insertAt = before ? insertAt : insertAt + 1;
+          order.splice(insertAt, 0, fromId);
+          refreshChips();
+          refreshPipSelects();
+          refreshFocusMainOptions();
+        });
+        li.addEventListener('dragend', () => {
+          const els = list.querySelectorAll('.drag-over-top,.drag-over-bottom');
+          els.forEach(el => el.classList.remove('drag-over-top','drag-over-bottom'));
+          draggingId = null;
         });
         li.appendChild(nameSpan);
         li.appendChild(rm);
