@@ -212,12 +212,15 @@ a {
   align-items: center;
   justify-content: center;
 }
-.menu-button .burger { position: relative; width: 16px; height: 2px; background: var(--text); border-radius: 1px; }
-.menu-button .burger::before,
-.menu-button .burger::after { content: ""; position: absolute; left: 0; width: 16px; height: 2px; background: var(--text); border-radius: 1px; }
-.menu-button .burger::before { top: -5px; }
-.menu-button .burger::after { top: 5px; }
-.menu-button:hover .burger, .menu-button:hover .burger::before, .menu-button:hover .burger::after { background: #fff; }
+.menu-button .burger {
+  display: block;
+  width: 16px;
+  height: 2px;
+  background: var(--text);
+  border-radius: 1px;
+  box-shadow: 0 -5px 0 0 var(--text), 0 5px 0 0 var(--text);
+}
+.menu-button:hover .burger { background: #fff; box-shadow: 0 -5px 0 0 #fff, 0 5px 0 0 #fff; }
 .menu-dropdown {
   position: absolute;
   right: 0;
