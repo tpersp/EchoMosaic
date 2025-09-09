@@ -24,6 +24,19 @@
     </div>
   </div>
 
+  <!-- System Monitor Card -->
+  <div class="stream-card" id="system-monitor">
+    <div class="card-header">
+      <h2>System Monitor</h2>
+    </div>
+    <div class="form-grid">
+      <div class="form-row"><strong>CPU:</strong> <span id="sys-cpu">--</span></div>
+      <div class="form-row"><strong>Memory:</strong> <span id="sys-mem">--</span></div>
+      <div class="form-row"><strong>GPU:</strong> <span id="sys-gpu">--</span></div>
+      <div class="form-row"><strong>Storage:</strong> <span id="sys-disk">--</span></div>
+    </div>
+  </div>
+
   <div class="controls">
     <button id="add-stream">Add Stream</button>
     <button id="open-mosaic">View Streams</button>
@@ -76,8 +89,11 @@
             {% endfor %}
           </select>
         </div>
-
-        
+        <!-- Shuffle Option -->
+        <div class="form-row shuffle-row" {% if conf.mode != 'random' %} style="display:none;" {% endif %}>
+          <label for="shuffle-{{ stream_id }}">Shuffle</label>
+          <input type="checkbox" id="shuffle-{{ stream_id }}" class="shuffle-chk" data-stream="{{ stream_id }}" {% if conf.shuffle %}checked{% endif %}>
+        </div>
 
         <!-- Duration -->
         <div class="form-row duration-container" {% if conf.mode != 'random' %} style="display:none;" {% endif %}>
@@ -159,6 +175,12 @@
   // Group Manager elements
   const groupTiles = document.getElementById('group-tiles');
 
+  // System monitor elements
+  const sysCpuEl = document.getElementById('sys-cpu');
+  const sysMemEl = document.getElementById('sys-mem');
+  const sysGpuEl = document.getElementById('sys-gpu');
+  const sysDiskEl = document.getElementById('sys-disk');
+
   // Build a set of taken stream name slugs for client-side validation
   const takenSlugs = {};
   {% for sid, conf in stream_settings.items() %}
@@ -172,6 +194,44 @@
       notification.classList.remove('show');
     }, 3000);
   }
+
+  function refreshSystemInfo() {
+    fetch('/system_info')
+      .then(r => r.json())
+      .then(data => {
+        if (sysCpuEl) sysCpuEl.textContent = (data.cpu_percent !== null) ? data.cpu_percent.toFixed(1) + '%' : 'N/A';
+        if (sysMemEl) {
+          if (data.memory) {
+            const used = (data.memory.used / 1073741824).toFixed(1);
+            const total = (data.memory.total / 1073741824).toFixed(1);
+            sysMemEl.textContent = `${used} / ${total} GB (${data.memory.percent}%)`;
+          } else {
+            sysMemEl.textContent = 'N/A';
+          }
+        }
+        if (sysGpuEl) {
+          if (data.gpu && data.gpu.length) {
+            sysGpuEl.textContent = data.gpu.map(g => `${g.util}% (${g.mem_used}/${g.mem_total}MB)`).join(', ');
+          } else {
+            sysGpuEl.textContent = 'N/A';
+          }
+        }
+        if (sysDiskEl) {
+          if (data.disk) {
+            const free = (data.disk.free / 1073741824).toFixed(1);
+            const totalD = (data.disk.total / 1073741824).toFixed(1);
+            sysDiskEl.textContent = `${free} GB free of ${totalD} GB`;
+          } else {
+            sysDiskEl.textContent = 'N/A';
+          }
+        }
+      })
+      .catch(() => {
+        if (sysCpuEl) sysCpuEl.textContent = 'Error';
+      });
+  }
+  refreshSystemInfo();
+  setInterval(refreshSystemInfo, 5000);
 
   // No layout settings for global /stream; it adapts dynamically
 
@@ -854,11 +914,13 @@
     const ytSettingsDiv = card.querySelector('.yt-settings');
     const selectedRow = card.querySelector('.selected-image-row');
     const folderRow = card.querySelector('.folder-row');
+    const shuffleRow = card.querySelector('.shuffle-row');
     if (durationDiv) durationDiv.style.display = (mode === 'random') ? '' : 'none';
     if (urlDiv) urlDiv.style.display = (mode === 'livestream') ? '' : 'none';
     if (imagePicker) imagePicker.style.display = (mode === 'specific') ? '' : 'none';
     if (selectedRow) selectedRow.style.display = (mode === 'specific') ? '' : 'none';
     if (folderRow) folderRow.style.display = (mode === 'livestream') ? 'none' : '';
+    if (shuffleRow) shuffleRow.style.display = (mode === 'random') ? '' : 'none';
     // Only show YT options if URL looks like YouTube
     const type = detectUrlType(streamUrl);
     if (ytSettingsDiv) ytSettingsDiv.style.display = (mode === 'livestream' && type === 'YouTube') ? '' : 'none';
@@ -872,7 +934,7 @@
     const selectedDisplay = card.querySelector('.selected-image-display');
     const currentSelected = selectedDisplay ? selectedDisplay.textContent.trim() : null;
     imageGrid.innerHTML = 'Loading...';
-    fetch(`/images?folder=${encodeURIComponent(folder)}`)
+    fetch(`/images?folder=${encodeURIComponent(folder)}&shuffle=0`)
       .then(res => res.json())
       .then(imgs => {
         imageGrid.innerHTML = '';
@@ -959,6 +1021,13 @@
       if (durInput) {
         durInput.addEventListener('change', e => {
           saveSettings(streamId, { duration: e.target.value });
+        });
+      }
+      // Shuffle change
+      const shuffleChk = card.querySelector('.shuffle-chk');
+      if (shuffleChk) {
+        shuffleChk.addEventListener('change', e => {
+          saveSettings(streamId, { shuffle: e.target.checked });
         });
       }
       // URL helpers: type badge + background embed test + save

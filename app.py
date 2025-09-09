@@ -8,11 +8,17 @@ import shutil
 from datetime import datetime
 import re
 from urllib.parse import urlparse
+import random
 
 try:
     import requests
 except Exception:
     requests = None
+
+try:
+    import psutil
+except Exception:
+    psutil = None
 
 app = Flask(__name__, static_folder="static", static_url_path="/static")
 socketio = SocketIO(app)
@@ -50,6 +56,7 @@ def default_stream_config():
         "yt_mute": True,
         "yt_quality": "auto",
         "label": "",
+        "shuffle": True,
     }
 
 
@@ -87,6 +94,7 @@ else:
 for k, v in list(settings.items()):
     if not k.startswith("_") and isinstance(v, dict):
         v.setdefault("label", k.capitalize())
+        v.setdefault("shuffle", True)
 
 # Ensure notes key exists
 settings.setdefault("_notes", "")
@@ -104,10 +112,11 @@ def get_subfolders():
             break
     return subfolders
 
-def list_images(folder="all"):
+def list_images(folder="all", shuffle=True):
     """
-    List all images (including .webp) in the chosen folder (or 'all'),
-    then sort them alphabetically.
+    List all images (including .webp) in the chosen folder (or 'all').
+    If ``shuffle`` is True, the order is randomized; otherwise the list
+    is returned alphabetically.
     """
     exts = (".png", ".jpg", ".jpeg", ".gif", ".webp")
     target_dir = IMAGE_DIR if folder == "all" else os.path.join(IMAGE_DIR, folder)
@@ -120,9 +129,35 @@ def list_images(folder="all"):
                 relative_path = os.path.relpath(os.path.join(root, file), IMAGE_DIR)
                 relative_path = relative_path.replace("\\", "/")
                 images.append(relative_path)
-    # Sort them alphabetically
-    images.sort(key=str.lower)
+    if shuffle:
+        random.shuffle(images)
+    else:
+        images.sort(key=str.lower)
     return images
+
+
+def get_gpu_info():
+    """Return basic GPU utilisation stats using nvidia-smi if available."""
+    try:
+        out = subprocess.check_output(
+            [
+                "nvidia-smi",
+                "--query-gpu=utilization.gpu,memory.used,memory.total",
+                "--format=csv,noheader,nounits",
+            ],
+            stderr=subprocess.STDOUT,
+        ).decode()
+        gpus = []
+        for line in out.strip().splitlines():
+            util, mem_used, mem_total = [x.strip() for x in line.split(",")]
+            gpus.append({
+                "util": int(util),
+                "mem_used": int(mem_used),
+                "mem_total": int(mem_total),
+            })
+        return gpus
+    except Exception:
+        return []
 
 def try_get_hls(original_url):
     if not original_url:
@@ -191,7 +226,7 @@ def render_stream(name):
     if not key or key not in settings:
         return f"No stream '{name}'", 404
     conf = settings[key]
-    images = list_images(conf.get("folder", "all"))
+    images = list_images(conf.get("folder", "all"), shuffle=conf.get("shuffle", True))
     return render_template("single_stream.html", stream_id=key, config=conf, images=images)
 
 
@@ -235,7 +270,7 @@ def update_stream_settings(stream_id):
 
     # We'll add new keys for YouTube: "yt_cc", "yt_mute", "yt_quality"
     for key in ["mode", "folder", "selected_image", "duration", "stream_url",
-                "yt_cc", "yt_mute", "yt_quality", "label"]:
+                "yt_cc", "yt_mute", "yt_quality", "label", "shuffle"]:
         if key in data:
             val = data[key]
             if key == "stream_url":
@@ -449,8 +484,37 @@ def test_embed():
 @app.route("/images", methods=["GET"])
 def get_images():
     folder = request.args.get("folder", "all")
-    imgs = list_images(folder)
+    shuffle_param = request.args.get("shuffle", "1")
+    shuffle = shuffle_param not in ("0", "false", "False")
+    imgs = list_images(folder, shuffle=shuffle)
     return jsonify(imgs)
+
+
+@app.route("/system_info")
+def system_info():
+    info = {}
+    if psutil:
+        info["cpu_percent"] = psutil.cpu_percent(interval=0)
+        mem = psutil.virtual_memory()
+        info["memory"] = {
+            "used": mem.used,
+            "total": mem.total,
+            "percent": mem.percent,
+        }
+    else:
+        info["cpu_percent"] = None
+        info["memory"] = None
+    info["gpu"] = get_gpu_info()
+    try:
+        usage = shutil.disk_usage(IMAGE_DIR)
+        info["disk"] = {
+            "total": usage.total,
+            "used": usage.used,
+            "free": usage.free,
+        }
+    except FileNotFoundError:
+        info["disk"] = None
+    return jsonify(info)
 
 
 @app.route("/settings")
