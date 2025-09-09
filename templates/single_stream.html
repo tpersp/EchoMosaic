@@ -55,22 +55,25 @@ function render(config) {
     container.appendChild(img);
   } else if (config.mode === 'random') {
     const folder = config.folder || 'all';
-    fetch(`/images?folder=${encodeURIComponent(folder)}`)
+    const shuffleParam = (config.shuffle === false) ? 0 : 1;
+    fetch(`/images?folder=${encodeURIComponent(folder)}&shuffle=${shuffleParam}`)
       .then(r => r.json())
       .then(imgs => {
         if (!imgs.length) {
           container.textContent = 'No images available';
           return;
         }
-        function showRandom() {
-          const path = imgs[Math.floor(Math.random() * imgs.length)];
+        let idx = 0;
+        function showNext() {
+          const path = imgs[idx];
+          idx = (idx + 1) % imgs.length;
           container.innerHTML = '';
           const img = document.createElement('img');
           img.src = `/stream/image/${path}`;
           container.appendChild(img);
         }
-        showRandom();
-        rotationTimer = setInterval(showRandom, (config.duration || 5) * 1000);
+        showNext();
+        rotationTimer = setInterval(showNext, (config.duration || 5) * 1000);
       });
   } else {
     container.textContent = 'No content configured';
