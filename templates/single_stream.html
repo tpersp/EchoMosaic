@@ -13,20 +13,6 @@
 const streamId = "{{ stream_id }}";
 const socket = io();
 let rotationTimer = null;
-let imgs = [];
-let idx = 0;
-const params = new URLSearchParams(location.search);
-const syncGroup = params.get('group');
-const useSSR = params.get('ssr') === '1';
-let pendingTick = false;
-
-function showImage(path) {
-  const container = document.getElementById('container');
-  container.innerHTML = '';
-  const img = document.createElement('img');
-  img.src = `/stream/image/${path}`;
-  container.appendChild(img);
-}
 
 function render(config) {
   const container = document.getElementById('container');
@@ -70,56 +56,25 @@ function render(config) {
   } else if (config.mode === 'random') {
     const folder = config.folder || 'all';
     const shuffleParam = (config.shuffle === false) ? 0 : 1;
-    if (syncGroup) {
-      if (!useSSR) {
-        fetch(`/images?folder=${encodeURIComponent(folder)}&shuffle=${shuffleParam}`)
-          .then(r => r.json())
-          .then(list => {
-            imgs = list;
-            idx = 0;
-            if (pendingTick && imgs.length) {
-              pendingTick = false;
-              const path = imgs[idx];
-              idx = (idx + 1) % imgs.length;
-              showImage(path);
-            }
-          });
-      }
-      socket.off('group_tick');
-      socket.on('group_tick', data => {
-        if (data.group !== syncGroup) return;
-        if (useSSR) {
-          const path = data.streams && data.streams[streamId];
-          if (path) showImage(path);
-        } else {
-          if (!imgs.length) {
-            pendingTick = true;
-            return;
-          }
+    fetch(`/images?folder=${encodeURIComponent(folder)}&shuffle=${shuffleParam}`)
+      .then(r => r.json())
+      .then(imgs => {
+        if (!imgs.length) {
+          container.textContent = 'No images available';
+          return;
+        }
+        let idx = 0;
+        function showNext() {
           const path = imgs[idx];
           idx = (idx + 1) % imgs.length;
-          showImage(path);
+          container.innerHTML = '';
+          const img = document.createElement('img');
+          img.src = `/stream/image/${path}`;
+          container.appendChild(img);
         }
+        showNext();
+        rotationTimer = setInterval(showNext, (config.duration || 5) * 1000);
       });
-    } else {
-      fetch(`/images?folder=${encodeURIComponent(folder)}&shuffle=${shuffleParam}`)
-        .then(r => r.json())
-        .then(list => {
-          if (!list.length) {
-            container.textContent = 'No images available';
-            return;
-          }
-          imgs = list;
-          idx = 0;
-          function showNext() {
-            const path = imgs[idx];
-            idx = (idx + 1) % imgs.length;
-            showImage(path);
-          }
-          showNext();
-          rotationTimer = setInterval(showNext, (config.duration || 5) * 1000);
-        });
-    }
   } else {
     container.textContent = 'No content configured';
   }

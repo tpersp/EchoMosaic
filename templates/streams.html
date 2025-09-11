@@ -8,11 +8,6 @@
 </head>
 <body>
 {% set style_parts = [] %}
-{% set extra_qs = '' %}
-{% if group_name %}
-  {% set extra_qs = '?group=' ~ group_name %}
-  {% if ssr %}{% set extra_qs = extra_qs ~ '&ssr=1' %}{% endif %}
-{% endif %}
 {% if mosaic_settings.layout == 'pip' %}
   {% set _ = style_parts.append('--pip-size: ' ~ (mosaic_settings.pip_size|default(25)) ~ '%') %}
 {% endif %}
@@ -25,12 +20,12 @@
   {% if mosaic_settings.layout == 'pip' %}
     {% if mosaic_settings.pip_main %}
     <div class="mosaic-cell main">
-      <iframe src="{{ url_for('render_stream', name=mosaic_settings.pip_main) }}{{ extra_qs }}" allow="autoplay" loading="lazy" scrolling="no"></iframe>
+      <iframe src="{{ url_for('render_stream', name=mosaic_settings.pip_main) }}" allow="autoplay" loading="lazy" scrolling="no"></iframe>
     </div>
     {% endif %}
     {% if mosaic_settings.pip_pip %}
     <div class="mosaic-cell pip">
-      <iframe src="{{ url_for('render_stream', name=mosaic_settings.pip_pip) }}{{ extra_qs }}" allow="autoplay" loading="lazy" scrolling="no"></iframe>
+      <iframe src="{{ url_for('render_stream', name=mosaic_settings.pip_pip) }}" allow="autoplay" loading="lazy" scrolling="no"></iframe>
     </div>
     {% endif %}
   {% else %}
@@ -88,7 +83,7 @@
         {% set conf = stream_settings[stream_id] %}
         {% set area = slots[i] %}
         <div class="mosaic-cell" style="grid-area: {{ area }};">
-          <iframe src="{{ url_for('render_stream', name=(conf.label if conf.label else stream_id)|slugify) }}{{ extra_qs }}" allow="autoplay" loading="lazy" scrolling="no"></iframe>
+          <iframe src="{{ url_for('render_stream', name=(conf.label if conf.label else stream_id)|slugify) }}" allow="autoplay" loading="lazy" scrolling="no"></iframe>
         </div>
       {% endfor %}
       </div>
@@ -99,13 +94,13 @@
         {% set items = items[:limit] if limit else items %}
         {% for stream_id, conf in items %}
         <div class="mosaic-cell">
-          <iframe src="{{ url_for('render_stream', name=(conf.label if conf.label else stream_id)|slugify) }}{{ extra_qs }}" allow="autoplay" loading="lazy" scrolling="no"></iframe>
+          <iframe src="{{ url_for('render_stream', name=(conf.label if conf.label else stream_id)|slugify) }}" allow="autoplay" loading="lazy" scrolling="no"></iframe>
         </div>
         {% endfor %}
       {% else %}
         {% for stream_id, conf in stream_settings.items() %}
         <div class="mosaic-cell">
-          <iframe src="{{ url_for('render_stream', name=(conf.label if conf.label else stream_id)|slugify) }}{{ extra_qs }}" allow="autoplay" loading="lazy" scrolling="no"></iframe>
+          <iframe src="{{ url_for('render_stream', name=(conf.label if conf.label else stream_id)|slugify) }}" allow="autoplay" loading="lazy" scrolling="no"></iframe>
         </div>
         {% endfor %}
       {% endif %}
