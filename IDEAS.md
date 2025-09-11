@@ -31,6 +31,8 @@ A running list of ideas and future improvements. Add new items anywhere below.
 
 - [x] Grid strict-mode: when a group has more streams than Rows×Cols, optionally show only the first N (or chosen order) instead of auto-expanding the grid. Provide pagination/scroll or a toggle to auto-fit vs. strict.
 
+- [ ] Implement Stable Horde image generation.
+
 ## Suggestions from a friend:
 - [ ]  [2025-09-08] Add optional authentication or API‑key protection for the dashboard and update endpoints. The README notes that after installation you can access the dashboard directly at http://your‑server:PORT/, so anyone on the network can modify streams and run updates. Implementing a simple login or token-based auth would improve security. - Lets drop the api key but use a simple login with session cache for some time to not annoy the user.
 
