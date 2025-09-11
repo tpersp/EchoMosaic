@@ -346,37 +346,7 @@
           groupTiles.appendChild(createGroupTile(streamsMeta, groups, name));
         });
       }
-      updateGroupSyncUI(groups);
     } catch (e) { console.error('Failed to load groups UI', e); }
-  }
-
-  function updateGroupSyncUI(groups) {
-    document.querySelectorAll('.duration-container').forEach(dc => {
-      const inp = dc.querySelector('input');
-      if (inp) { inp.disabled = false; }
-      const note = dc.querySelector('.group-sync-note');
-      if (note) note.remove();
-    });
-    Object.keys(groups).forEach(g => {
-      const cfg = groups[g];
-      const syncDur = cfg && (cfg.sync || cfg.sync_duration);
-      const members = Array.isArray(cfg) ? cfg : (cfg.streams || []);
-      if (syncDur) {
-        members.forEach(id => {
-          const inp = document.getElementById(`duration-${id}`);
-          if (inp) {
-            inp.disabled = true;
-            inp.value = syncDur;
-            if (!inp.parentElement.querySelector('.group-sync-note')) {
-              const sp = document.createElement('span');
-              sp.className = 'group-sync-note';
-              sp.textContent = 'controlled by Group Sync';
-              inp.parentElement.appendChild(sp);
-            }
-          }
-        });
-      }
-    });
   }
   function selectedIds(container) {
     return Array.from(container.querySelectorAll('input[type="checkbox"]:checked')).map(c=>c.value);
@@ -387,7 +357,6 @@
     const order = Array.isArray(initial) ? initial.slice() : [];
     const members = new Set(order);
     const gLayout = Array.isArray(gdata) ? {} : (gdata?.layout || {});
-    const gConf = Array.isArray(gdata) ? {} : gdata;
     const isNew = !name;
     const tile = makeEl('div', {class:'group-tile'}, []);
     const header = makeEl('div', {class:'tile-header'}, []);
@@ -450,15 +419,6 @@
     pipWrap.appendChild(rowSize);
     layoutRow.appendChild(pipWrap);
     body.appendChild(layoutRow);
-
-    const syncRow = makeEl('div', {class:'tile-row'}, [
-      makeEl('label', {}, ['Sync Duration (sec): ', makeEl('input', {type:'number', min:'1', class:'tile-sync', value: gConf.sync || ''}, [])])
-    ]);
-    body.appendChild(syncRow);
-    const ssrRow = makeEl('div', {class:'tile-row'}, [
-      makeEl('label', {}, [makeEl('input', {type:'checkbox', class:'tile-ssr', checked: gConf.ssr ? true : false}, []), ' Server-side Rendering'])
-    ]);
-    body.appendChild(ssrRow);
 
     // Visual layout gallery
     const gallery = makeEl('div', {class:'layout-gallery'}, []);
@@ -828,12 +788,7 @@
         payloadLayout.pip_corner = pipCorner.value || 'bottom-right';
         payloadLayout.pip_size = parseInt(pipSize.value||'25',10);
       }
-      const payload = {name: nameVal, streams: ids, layout: payloadLayout};
-      const syncInput = tile.querySelector('.tile-sync');
-      const ssrInput = tile.querySelector('.tile-ssr');
-      if (syncInput && syncInput.value) payload.sync = parseInt(syncInput.value,10);
-      if (ssrInput && ssrInput.checked) payload.ssr = true;
-      const res = await fetch('/groups', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload)});
+      const res = await fetch('/groups', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({name: nameVal, streams: ids, layout: payloadLayout})});
       if (res.ok) {
         showNotification('Saved group');
         // If renamed, delete the old group name

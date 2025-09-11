@@ -102,37 +102,6 @@ settings.setdefault("_notes", "")
 # Ensure groups key exists
 settings.setdefault("_groups", {})
 
-group_sync_tasks = {}
-
-def start_group_sync(name, duration, ssr, streams_conf):
-    """Start a background task to emit sync ticks for a group."""
-    if name in group_sync_tasks:
-        return
-
-    def run():
-        state = {}
-        if ssr:
-            for sid, conf in streams_conf.items():
-                imgs = list_images(conf.get("folder", "all"), shuffle=conf.get("shuffle", True))
-                state[sid] = {"imgs": imgs, "idx": 0}
-        while True:
-            payload = {"group": name}
-            if ssr:
-                payload["streams"] = {}
-                for sid, st in state.items():
-                    if not st["imgs"]:
-                        continue
-                    img = st["imgs"][st["idx"]]
-                    st["idx"] = (st["idx"] + 1) % len(st["imgs"])
-                    payload["streams"][sid] = img
-            try:
-                socketio.emit("group_tick", payload)
-            except Exception:
-                pass
-            socketio.sleep(duration)
-
-    group_sync_tasks[name] = socketio.start_background_task(run)
-
 
 def get_subfolders():
     subfolders = ["all"]
@@ -780,8 +749,6 @@ def groups_collection():
     name = (data.get("name") or "").strip()
     streams = data.get("streams") or []
     layout = data.get("layout") or None
-    sync_val = data.get("sync")
-    ssr_val = data.get("ssr")
     if not name:
         return jsonify({"error": "Name required"}), 400
     # Prevent reserved name and duplicates (case-insensitive)
@@ -792,19 +759,9 @@ def groups_collection():
         if existing.lower() == name.lower() and existing != name:
             return jsonify({"error": "Group name already exists (case-insensitive)"}), 409
     cleaned = [s for s in streams if s in settings]
-    extra = {}
+    # Store as object with streams + optional layout
     if layout and isinstance(layout, dict):
-        extra["layout"] = layout
-    if sync_val is not None:
-        try:
-            extra["sync"] = int(sync_val)
-        except (TypeError, ValueError):
-            pass
-    if ssr_val:
-        extra["ssr"] = bool(ssr_val)
-    if extra:
-        extra["streams"] = cleaned
-        settings["_groups"][name] = extra
+        settings["_groups"][name] = {"streams": cleaned, "layout": layout}
     else:
         settings["_groups"][name] = cleaned
     save_settings(settings)
@@ -839,19 +796,10 @@ def stream_group(name):
     if isinstance(group_def, dict):
         members = group_def.get("streams", [])
         g_layout = group_def.get("layout") or {}
-        sync = group_def.get("sync")
-        ssr = group_def.get("ssr", False)
     else:
         members = list(group_def)
         g_layout = {}
-        sync = None
-        ssr = False
     streams = {k: settings[k] for k in members if k in settings}
-    if sync:
-        try:
-            start_group_sync(name, int(sync), ssr, streams)
-        except Exception:
-            pass
     # Build mosaic from group layout if provided, else default
     mosaic = default_mosaic_config()
     if g_layout:
@@ -859,7 +807,7 @@ def stream_group(name):
         for k in ["layout", "cols", "rows", "pip_main", "pip_pip", "pip_corner", "pip_size", "focus_mode", "focus_pos"]:
             if k in g_layout:
                 mosaic[k] = g_layout[k]
-    return render_template("streams.html", stream_settings=streams, mosaic_settings=mosaic, group_name=name, sync=sync, ssr=ssr)
+    return render_template("streams.html", stream_settings=streams, mosaic_settings=mosaic)
 
 if __name__ == "__main__":
     socketio.run(app, host="0.0.0.0", port=5000, debug=True)
