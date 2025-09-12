@@ -33,6 +33,8 @@ A running list of ideas and future improvements. Add new items anywhere below.
 
 - [ ] Implement Stable Horde image generation.
 
+- [ ] Implement a better an improved rollback feature, enabeling users to mark a rollback point, where the server stores the specific point so the user always have a "known good" restore point.
+
 ## Suggestions from a friend:
 - [ ]  [2025-09-08] Add optional authentication or API‑key protection for the dashboard and update endpoints. The README notes that after installation you can access the dashboard directly at http://your‑server:PORT/, so anyone on the network can modify streams and run updates. Implementing a simple login or token-based auth would improve security. - Lets drop the api key but use a simple login with session cache for some time to not annoy the user.
 
