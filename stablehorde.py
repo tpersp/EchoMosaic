@@ -19,3 +19,4 @@
 # It should have the option to save images to a specified folder directory, also stated in .env file.
 # if user does not whish to save images, they should be temporarily saved to a temp folder and deleted after use.
 
+# ------------------------------- Implementation under here -------------------------------
