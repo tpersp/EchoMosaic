@@ -25,6 +25,8 @@ interface in real time.
   all connected clients using Socket.IO, eliminating the need for
   manual refreshes.
 
+* **Stable Horde image generation** - craft prompts per stream, queue jobs, and tweak advanced controls (post-processing, LoRAs, hires fix, worker filters) without leaving the dashboard.
+
 ## Getting started
 
 The easiest way to set up the application on a Linux system is to run

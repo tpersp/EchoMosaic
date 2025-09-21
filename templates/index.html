@@ -178,6 +178,63 @@
               <input id="ai-seed-{{ stream_id }}" type="text" class="ai-seed-input" data-stream="{{ stream_id }}" value="{{ ai.seed or 'random' }}" placeholder="random">
             </div>
           </div>
+          <details class="ai-advanced-options" data-stream="{{ stream_id }}">
+            <summary>Advanced Options</summary>
+            <div class="ai-advanced-grid">
+              <div class="ai-advanced-group">
+                <label class="ai-toggle"><input type="checkbox" class="ai-hires-fix" data-stream="{{ stream_id }}" {% if ai.hires_fix %}checked{% endif %}> Hires Fix</label>
+                <label class="ai-toggle"><input type="checkbox" class="ai-karras" data-stream="{{ stream_id }}" {% if ai.karras %}checked{% endif %}> Karras Noise</label>
+                <label class="ai-toggle"><input type="checkbox" class="ai-tiling" data-stream="{{ stream_id }}" {% if ai.tiling %}checked{% endif %}> Tiling</label>
+                <label class="ai-toggle"><input type="checkbox" class="ai-transparent" data-stream="{{ stream_id }}" {% if ai.transparent %}checked{% endif %}> Transparent BG</label>
+                <label class="ai-toggle"><input type="checkbox" class="ai-trusted-workers" data-stream="{{ stream_id }}" {% if ai.trusted_workers %}checked{% endif %}> Trusted Workers</label>
+                <label class="ai-toggle"><input type="checkbox" class="ai-validated-backends" data-stream="{{ stream_id }}" {% if ai.validated_backends %}checked{% endif %}> Validated Backends</label>
+                <label class="ai-toggle"><input type="checkbox" class="ai-slow-workers" data-stream="{{ stream_id }}" {% if ai.slow_workers %}checked{% endif %}> Allow Slow Workers</label>
+                <label class="ai-toggle"><input type="checkbox" class="ai-extra-slow-workers" data-stream="{{ stream_id }}" {% if ai.extra_slow_workers %}checked{% endif %}> Allow Extra Slow</label>
+                <label class="ai-toggle"><input type="checkbox" class="ai-disable-batching" data-stream="{{ stream_id }}" {% if ai.disable_batching %}checked{% endif %}> Disable Batching</label>
+                <label class="ai-toggle"><input type="checkbox" class="ai-allow-downgrade" data-stream="{{ stream_id }}" {% if ai.allow_downgrade %}checked{% endif %}> Allow Downgrade</label>
+              </div>
+              <div class="ai-advanced-group">
+                <label for="ai-style-{{ stream_id }}">Style Preset</label>
+                <input id="ai-style-{{ stream_id }}" type="text" class="ai-style-input" data-stream="{{ stream_id }}" placeholder="Style ID or name" value="{{ ai.style or '' }}">
+                <label for="ai-clip-skip-{{ stream_id }}">Clip Skip</label>
+                <input id="ai-clip-skip-{{ stream_id }}" type="number" class="ai-clip-skip" data-stream="{{ stream_id }}" min="{{ clip_skip_range[0] }}" max="{{ clip_skip_range[1] }}" step="1" value="{{ ai.clip_skip if ai.clip_skip is not none else '' }}">
+                <label for="ai-facefixer-{{ stream_id }}">Face Fix Strength</label>
+                <input id="ai-facefixer-{{ stream_id }}" type="number" class="ai-facefixer" data-stream="{{ stream_id }}" min="{{ strength_range[0] }}" max="{{ strength_range[1] }}" step="0.05" value="{{ ai.facefixer_strength if ai.facefixer_strength is not none else '' }}">
+                <label for="ai-denoise-{{ stream_id }}">Denoising</label>
+                <input id="ai-denoise-{{ stream_id }}" type="number" class="ai-denoise" data-stream="{{ stream_id }}" min="{{ denoise_range[0] }}" max="{{ denoise_range[1] }}" step="0.01" value="{{ ai.denoising_strength if ai.denoising_strength is not none else '' }}">
+                <label for="ai-hires-denoise-{{ stream_id }}">Hires Denoise</label>
+                <input id="ai-hires-denoise-{{ stream_id }}" type="number" class="ai-hires-denoise" data-stream="{{ stream_id }}" min="{{ denoise_range[0] }}" max="{{ denoise_range[1] }}" step="0.01" value="{{ ai.hires_fix_denoising_strength if ai.hires_fix_denoising_strength is not none else '' }}">
+              </div>
+            </div>
+            <div class="ai-post-processing">
+              <div class="section-title">Post Processing</div>
+              <div class="post-processing-options">
+                {% set selected_post = ai.post_processing or [] %}
+                {% for proc in post_processors %}
+                  <label><input type="checkbox" class="ai-post-proc" data-stream="{{ stream_id }}" value="{{ proc }}" {% if proc in selected_post %}checked{% endif %}> {{ proc }}</label>
+                {% endfor %}
+              </div>
+            </div>
+            <div class="ai-lora-section" data-max="{{ max_loras }}">
+              <div class="lora-header">
+                <span>LoRAs</span>
+                <button type="button" class="ai-add-lora" data-stream="{{ stream_id }}">Add</button>
+              </div>
+              <div class="ai-lora-list">
+                {% for lora in ai.loras or [] %}
+                <div class="ai-lora-row">
+                  <input type="text" class="ai-lora-name" placeholder="Name or CivitAI ID" value="{{ lora.name }}">
+                  <input type="number" class="ai-lora-model" placeholder="Model" step="0.05" min="-5" max="5" value="{{ lora.model if lora.model is not none else '' }}">
+                  <input type="number" class="ai-lora-clip" placeholder="Clip" step="0.05" min="-5" max="5" value="{{ lora.clip if lora.clip is not none else '' }}">
+                  <input type="text" class="ai-lora-trigger" placeholder="Trigger (optional)" value="{{ lora.inject_trigger or '' }}">
+                  <label class="ai-lora-flag"><input type="checkbox" class="ai-lora-is-version" {% if lora.is_version %}checked{% endif %}> Version ID</label>
+                  <button type="button" class="ai-lora-remove">Remove</button>
+                </div>
+                {% endfor %}
+              </div>
+              <p class="hint">Up to {{ max_loras }} entries. Strength 1.0 is neutral.</p>
+            </div>
+          </details>
           <div class="ai-flags">
             <label><input type="checkbox" class="ai-save-output" data-stream="{{ stream_id }}" {% if ai.save_output %}checked{% endif %}> Save to library</label>
             <label><input type="checkbox" class="ai-nsfw" data-stream="{{ stream_id }}" {% if ai.nsfw %}checked{% endif %}> Allow NSFW</label>
@@ -1084,6 +1141,48 @@
     }
   }
 
+  function gatherPostProcessing(card) {
+    const selected = [];
+    card.querySelectorAll('.ai-post-proc').forEach(chk => {
+      if (chk.checked && chk.value) {
+        selected.push(chk.value);
+      }
+    });
+    return selected;
+  }
+
+  function gatherLoras(card) {
+    const rows = card.querySelectorAll('.ai-lora-row');
+    const result = [];
+    rows.forEach(row => {
+      const nameInput = row.querySelector('.ai-lora-name');
+      const name = nameInput ? nameInput.value.trim() : '';
+      if (!name) return;
+      const entry = { name };
+      const modelInput = row.querySelector('.ai-lora-model');
+      if (modelInput && modelInput.value.trim() !== '') {
+        const parsed = parseFloat(modelInput.value);
+        if (!Number.isNaN(parsed)) entry.model = parsed;
+      }
+      const clipInput = row.querySelector('.ai-lora-clip');
+      if (clipInput && clipInput.value.trim() !== '') {
+        const parsed = parseFloat(clipInput.value);
+        if (!Number.isNaN(parsed)) entry.clip = parsed;
+      }
+      const triggerInput = row.querySelector('.ai-lora-trigger');
+      if (triggerInput) {
+        const trig = triggerInput.value.trim();
+        if (trig) entry.inject_trigger = trig;
+      }
+      const versionChk = row.querySelector('.ai-lora-is-version');
+      if (versionChk && versionChk.checked) {
+        entry.is_version = true;
+      }
+      result.push(entry);
+    });
+    return result;
+  }
+
   function collectAiPayload(card) {
     const payload = {};
     const promptInput = card.querySelector('.ai-prompt-input');
@@ -1112,6 +1211,54 @@
     payload.save_output = saveOutput ? saveOutput.checked : undefined;
     payload.nsfw = nsfw ? nsfw.checked : undefined;
     payload.censor_nsfw = censor ? censor.checked : undefined;
+    payload.post_processing = gatherPostProcessing(card);
+    payload.loras = gatherLoras(card);
+    const boolPairs = [
+      ['.ai-hires-fix', 'hires_fix'],
+      ['.ai-karras', 'karras'],
+      ['.ai-tiling', 'tiling'],
+      ['.ai-transparent', 'transparent'],
+      ['.ai-trusted-workers', 'trusted_workers'],
+      ['.ai-validated-backends', 'validated_backends'],
+      ['.ai-slow-workers', 'slow_workers'],
+      ['.ai-extra-slow-workers', 'extra_slow_workers'],
+      ['.ai-disable-batching', 'disable_batching'],
+      ['.ai-allow-downgrade', 'allow_downgrade'],
+    ];
+    boolPairs.forEach(([selector, key]) => {
+      const el = card.querySelector(selector);
+      if (el) payload[key] = el.checked;
+    });
+    const styleInput = card.querySelector('.ai-style-input');
+    payload.style = styleInput ? styleInput.value.trim() : '';
+    const clipSkipInput = card.querySelector('.ai-clip-skip');
+    if (clipSkipInput && clipSkipInput.value.trim() !== '') {
+      const parsedClip = parseInt(clipSkipInput.value, 10);
+      payload.clip_skip = Number.isNaN(parsedClip) ? null : parsedClip;
+    } else {
+      payload.clip_skip = null;
+    }
+    const facefixerInput = card.querySelector('.ai-facefixer');
+    if (facefixerInput && facefixerInput.value.trim() !== '') {
+      const parsed = parseFloat(facefixerInput.value);
+      payload.facefixer_strength = Number.isNaN(parsed) ? null : parsed;
+    } else {
+      payload.facefixer_strength = null;
+    }
+    const denoiseInput = card.querySelector('.ai-denoise');
+    if (denoiseInput && denoiseInput.value.trim() !== '') {
+      const parsed = parseFloat(denoiseInput.value);
+      payload.denoising_strength = Number.isNaN(parsed) ? null : parsed;
+    } else {
+      payload.denoising_strength = null;
+    }
+    const hiresDenoiseInput = card.querySelector('.ai-hires-denoise');
+    if (hiresDenoiseInput && hiresDenoiseInput.value.trim() !== '') {
+      const parsed = parseFloat(hiresDenoiseInput.value);
+      payload.hires_fix_denoising_strength = Number.isNaN(parsed) ? null : parsed;
+    } else {
+      payload.hires_fix_denoising_strength = null;
+    }
     return payload;
   }
 
@@ -1167,6 +1314,8 @@
         saveSettings(streamId, { ai_settings: { model: e.target.value } });
       });
     }
+    const loraSection = card.querySelector('.ai-lora-section');
+
     function bindNumeric(selector, key) {
       const input = card.querySelector(selector);
       if (!input) return;
@@ -1176,11 +1325,85 @@
         saveSettings(streamId, { ai_settings: { [key]: val } });
       });
     }
+
+    function bindCheckboxSetting(selector, key) {
+      const input = card.querySelector(selector);
+      if (!input) return;
+      input.addEventListener('change', e => {
+        saveSettings(streamId, { ai_settings: { [key]: e.target.checked } });
+      });
+    }
+
+    function bindOptionalNumber(selector, key, parser) {
+      const input = card.querySelector(selector);
+      if (!input) return;
+      input.addEventListener('change', e => {
+        const raw = (e.target.value || '').trim();
+        if (!raw) {
+          saveSettings(streamId, { ai_settings: { [key]: null } });
+          return;
+        }
+        const parsed = parser(raw);
+        if (Number.isNaN(parsed)) return;
+        saveSettings(streamId, { ai_settings: { [key]: parsed } });
+      });
+    }
+
+    function updateLoraAddState() {
+      if (!loraSection) return;
+      const addBtn = loraSection.querySelector('.ai-add-lora');
+      if (!addBtn) return;
+      const max = parseInt(loraSection.dataset.max || '0', 10) || 0;
+      const current = loraSection.querySelectorAll('.ai-lora-row').length;
+      addBtn.disabled = max > 0 && current >= max;
+    }
+
+    function syncLoras() {
+      if (!loraSection) return;
+      const loras = gatherLoras(card);
+      saveSettings(streamId, { ai_settings: { loras } });
+      updateLoraAddState();
+    }
+
+    function bindLoraRow(row) {
+      if (!row) return;
+      const inputs = row.querySelectorAll('input');
+      inputs.forEach(input => {
+        const handler = () => syncLoras();
+        input.addEventListener('change', handler);
+        if (input.type === 'text') {
+          input.addEventListener('blur', handler);
+        }
+      });
+      const removeBtn = row.querySelector('.ai-lora-remove');
+      if (removeBtn) {
+        removeBtn.addEventListener('click', () => {
+          row.remove();
+          syncLoras();
+        });
+      }
+    }
     bindNumeric('.ai-width-input', 'width');
     bindNumeric('.ai-height-input', 'height');
     bindNumeric('.ai-steps-input', 'steps');
     bindNumeric('.ai-cfg-input', 'cfg_scale');
     bindNumeric('.ai-samples-input', 'samples');
+    [
+      ['.ai-hires-fix', 'hires_fix'],
+      ['.ai-karras', 'karras'],
+      ['.ai-tiling', 'tiling'],
+      ['.ai-transparent', 'transparent'],
+      ['.ai-trusted-workers', 'trusted_workers'],
+      ['.ai-validated-backends', 'validated_backends'],
+      ['.ai-slow-workers', 'slow_workers'],
+      ['.ai-extra-slow-workers', 'extra_slow_workers'],
+      ['.ai-disable-batching', 'disable_batching'],
+      ['.ai-allow-downgrade', 'allow_downgrade'],
+    ].forEach(([selector, key]) => bindCheckboxSetting(selector, key));
+    bindOptionalNumber('.ai-clip-skip', 'clip_skip', raw => parseInt(raw, 10));
+    bindOptionalNumber('.ai-facefixer', 'facefixer_strength', raw => parseFloat(raw));
+    bindOptionalNumber('.ai-denoise', 'denoising_strength', raw => parseFloat(raw));
+    bindOptionalNumber('.ai-hires-denoise', 'hires_fix_denoising_strength', raw => parseFloat(raw));
     const saveOutput = card.querySelector('.ai-save-output');
     if (saveOutput) {
       saveOutput.addEventListener('change', e => {
@@ -1198,6 +1421,49 @@
       censor.addEventListener('change', e => {
         saveSettings(streamId, { ai_settings: { censor_nsfw: e.target.checked } });
       });
+    }
+    const styleInput = card.querySelector('.ai-style-input');
+    if (styleInput) {
+      styleInput.addEventListener('blur', e => {
+        saveSettings(streamId, { ai_settings: { style: e.target.value.trim() } });
+      });
+    }
+    const postProcChecks = card.querySelectorAll('.ai-post-proc');
+    if (postProcChecks.length) {
+      postProcChecks.forEach(chk => {
+        chk.addEventListener('change', () => {
+          saveSettings(streamId, { ai_settings: { post_processing: gatherPostProcessing(card) } });
+        });
+      });
+    }
+    if (loraSection) {
+      const addLoraBtn = loraSection.querySelector('.ai-add-lora');
+      const list = loraSection.querySelector('.ai-lora-list');
+      if (addLoraBtn && list) {
+        addLoraBtn.addEventListener('click', () => {
+          const max = parseInt(loraSection.dataset.max || '0', 10) || 0;
+          const current = loraSection.querySelectorAll('.ai-lora-row').length;
+          if (max > 0 && current >= max) {
+            showNotification(`Maximum of ${max} LoRAs reached`);
+            return;
+          }
+          const row = document.createElement('div');
+          row.className = 'ai-lora-row';
+          row.innerHTML = `
+            <input type="text" class="ai-lora-name" placeholder="Name or CivitAI ID">
+            <input type="number" class="ai-lora-model" placeholder="Model" step="0.05" min="-5" max="5">
+            <input type="number" class="ai-lora-clip" placeholder="Clip" step="0.05" min="-5" max="5">
+            <input type="text" class="ai-lora-trigger" placeholder="Trigger (optional)">
+            <label class="ai-lora-flag"><input type="checkbox" class="ai-lora-is-version"> Version ID</label>
+            <button type="button" class="ai-lora-remove">Remove</button>
+          `;
+          list.appendChild(row);
+          bindLoraRow(row);
+          updateLoraAddState();
+        });
+      }
+      loraSection.querySelectorAll('.ai-lora-row').forEach(row => bindLoraRow(row));
+      updateLoraAddState();
     }
     const generateBtn = card.querySelector('.ai-generate-btn');
     if (generateBtn) {
