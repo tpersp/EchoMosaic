@@ -1026,8 +1026,8 @@
       item.dataset.path = img.path;
       item.dataset.persisted = img.persisted ? 'true' : 'false';
       const imageEl = document.createElement('img');
-      imageEl.src = /stream/image/;
-      imageEl.alt = Generated image .trim();
+      imageEl.src = `/stream/image/${img.path}`;
+      imageEl.alt = (`Generated image ${img.seed || ''}`).trim();
       item.appendChild(imageEl);
       const meta = document.createElement('div');
       meta.className = 'ai-generated-meta';
@@ -1040,7 +1040,7 @@
       if (img.seed) {
         const seedTag = document.createElement('span');
         seedTag.className = 'ai-seed-tag';
-        seedTag.textContent = #;
+        seedTag.textContent = `#${img.seed}`;
         meta.appendChild(seedTag);
       }
       item.appendChild(meta);
@@ -1059,11 +1059,11 @@
     let label = status.charAt(0).toUpperCase() + status.slice(1);
     const queuePos = jobInfo.queue_position ?? info.queue_position;
     if (queuePos !== undefined && queuePos !== null) {
-      label +=  (queue );
+      label += ` (queue ${queuePos})`;
     }
     const note = jobInfo.message || info.message;
     if (note && status === 'error') {
-      label +=  – ;
+      label += ` - ${note}`;
     }
     statusEl.dataset.status = status;
     statusEl.textContent = label;
@@ -1199,14 +1199,14 @@
         generateBtn.disabled = true;
         renderAiStatus(card, { status: 'queued' }, { status: 'queued' });
         try {
-          const res = await fetch(/ai/generate/, {
+          const res = await fetch(`/ai/generate/${encodeURIComponent(streamId)}`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload)
           });
           const data = await res.json().catch(() => ({}));
           if (!res.ok || data.error) {
-            const note = data.error || Request failed ();
+            const note = data.error || `Request failed (${res.status})`;
             showNotification(note);
             renderAiStatus(card, { status: 'error', message: note }, { status: 'error', message: note });
             generateBtn.disabled = false;
@@ -1227,6 +1227,7 @@
         }
       });
     }
+
     const resultsEl = card.querySelector('.ai-results');
     if (resultsEl) {
       resultsEl.addEventListener('click', e => {
