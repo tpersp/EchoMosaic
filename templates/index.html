@@ -891,7 +891,7 @@
   socket.on('ai_job_update', (data) => {
     const streamId = data && data.stream_id;
     if (!streamId) return;
-    const card = document.querySelector(.stream-card[data-stream=]);
+    const card = document.querySelector(`.stream-card[data-stream="${streamId}"]`);
     if (!card) return;
     if (data.job) {
       aiActiveJobs.set(streamId, data.job);
@@ -914,7 +914,7 @@
     const streamId = data && data.stream_id;
     const conf = data && data.config;
     if (!streamId || !conf) return;
-    const card = document.querySelector(.stream-card[data-stream=]);
+    const card = document.querySelector(`.stream-card[data-stream="${streamId}"]`);
     if (!card) return;
     if (conf.selected_image !== undefined) {
       const display = card.querySelector('.selected-image-display');
