@@ -112,11 +112,10 @@ function render(config) {
       const interval = Math.max((config.duration || 10), 2) * 1000;
       rotationTimer = setInterval(showAi, interval);
     }
-  }
   } else {
     container.textContent = 'No content configured';
   }
-
+}
 
 function load() {
   fetch(`/get-settings/${encodeURIComponent(streamId)}`)
