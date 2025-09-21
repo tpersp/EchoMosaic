@@ -85,6 +85,34 @@ function render(config) {
         showNext();
         rotationTimer = setInterval(showNext, (config.duration || 5) * 1000);
       });
+
+  } else if (config.mode === 'ai') {
+    const aiImages = (config.ai_state && Array.isArray(config.ai_state.images))
+      ? config.ai_state.images
+      : [];
+    const paths = aiImages.map(item => (item && item.path) ? item.path : item).filter(Boolean);
+    if (!paths.length && config.selected_image) {
+      paths.push(config.selected_image);
+    }
+    if (!paths.length) {
+      container.textContent = 'No AI image generated yet';
+      return;
+    }
+    let index = 0;
+    function showAi() {
+      const path = paths[index % paths.length];
+      index += 1;
+      container.innerHTML = '';
+      const img = document.createElement('img');
+      img.src = `/stream/image/${path}`;
+      container.appendChild(img);
+    }
+    showAi();
+    if (paths.length > 1) {
+      const interval = Math.max((config.duration || 10), 2) * 1000;
+      rotationTimer = setInterval(showAi, interval);
+    }
+  }
   } else {
     container.textContent = 'No content configured';
   }

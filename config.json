@@ -2,5 +2,8 @@
   "INSTALL_DIR": "/opt/echomosaic",
   "SERVICE_NAME": "echomosaic.service",
   "UPDATE_BRANCH": "main",
-  "API_KEY": ""
+  "API_KEY": "",
+  "AI_DEFAULT_MODEL": "stable_diffusion",
+  "AI_OUTPUT_SUBDIR": "ai_generated",
+  "AI_TEMP_SUBDIR": "_ai_temp"
 }

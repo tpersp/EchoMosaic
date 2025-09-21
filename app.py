@@ -1,12 +1,16 @@
 from flask import Flask, jsonify, send_from_directory, request, render_template, redirect, url_for
 from flask_socketio import SocketIO
-import os
 import json
-import subprocess
-import time
-import shutil
-from datetime import datetime
+import logging
+import os
 import re
+import shutil
+import subprocess
+import threading
+import time
+from datetime import datetime
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Union
 from urllib.parse import urlparse
 
 try:
@@ -14,12 +18,121 @@ try:
 except Exception:
     requests = None
 
+from stablehorde import StableHorde, StableHordeError
+
 app = Flask(__name__, static_folder="static", static_url_path="/static")
 socketio = SocketIO(app)
+
+logger = logging.getLogger(__name__)
 
 SETTINGS_FILE = "settings.json"
 CONFIG_FILE = "config.json"
 IMAGE_DIR = "/mnt/viewers"  # Adjust if needed
+
+AI_MODE = "ai"
+AI_SETTINGS_KEY = "ai_settings"
+AI_STATE_KEY = "ai_state"
+
+AI_DEFAULT_MODEL = "stable_diffusion"
+AI_DEFAULT_SAMPLER = "k_euler"
+AI_DEFAULT_WIDTH = 512
+AI_DEFAULT_HEIGHT = 512
+AI_DEFAULT_STEPS = 30
+AI_DEFAULT_CFG = 7.5
+AI_DEFAULT_SAMPLES = 1
+
+AI_OUTPUT_SUBDIR = "ai_generated"
+AI_TEMP_SUBDIR = "_ai_temp"
+AI_DEFAULT_PERSIST = True
+AI_POLL_INTERVAL = 5.0
+AI_TIMEOUT = 600.0
+
+IMAGE_DIR_PATH = Path(IMAGE_DIR)
+
+
+def default_ai_settings() -> Dict[str, Any]:
+    return {
+        "prompt": "",
+        "negative_prompt": "",
+        "model": AI_DEFAULT_MODEL,
+        "sampler": AI_DEFAULT_SAMPLER,
+        "steps": AI_DEFAULT_STEPS,
+        "cfg_scale": AI_DEFAULT_CFG,
+        "width": AI_DEFAULT_WIDTH,
+        "height": AI_DEFAULT_HEIGHT,
+        "samples": AI_DEFAULT_SAMPLES,
+        "seed": "random",
+        "nsfw": False,
+        "censor_nsfw": False,
+        "save_output": AI_DEFAULT_PERSIST,
+    }
+
+
+def default_ai_state() -> Dict[str, Any]:
+    return {
+        "status": "idle",
+        "job_id": None,
+        "message": None,
+        "queue_position": None,
+        "wait_time": None,
+        "images": [],
+        "persisted": AI_DEFAULT_PERSIST,
+        "last_updated": None,
+        "error": None,
+    }
+
+
+def ensure_ai_defaults(conf: Dict[str, Any]) -> None:
+    ai_settings = conf.get(AI_SETTINGS_KEY)
+    if not isinstance(ai_settings, dict):
+        conf[AI_SETTINGS_KEY] = default_ai_settings()
+    else:
+        defaults = default_ai_settings()
+        for key, value in defaults.items():
+            ai_settings.setdefault(key, value)
+
+    ai_state = conf.get(AI_STATE_KEY)
+    if not isinstance(ai_state, dict):
+        conf[AI_STATE_KEY] = default_ai_state()
+    else:
+        defaults = default_ai_state()
+        for key, value in defaults.items():
+            ai_state.setdefault(key, value)
+
+
+def _ensure_dir(path: Path) -> Path:
+    try:
+        path.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        logger.warning("Unable to ensure directory %s: %s", path, exc)
+    return path
+
+
+def _sanitize_ai_settings(payload: Dict[str, Any], base: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    defaults = default_ai_settings()
+    current = dict(base or defaults)
+    for key, value in payload.items():
+        if key not in defaults:
+            continue
+        if key in {"width", "height", "steps", "samples"}:
+            try:
+                current[key] = max(1, int(value))
+            except (TypeError, ValueError):
+                continue
+        elif key == "cfg_scale":
+            try:
+                current[key] = float(value)
+            except (TypeError, ValueError):
+                continue
+        elif key in {"save_output", "nsfw", "censor_nsfw"}:
+            current[key] = bool(value)
+        elif key == "seed":
+            current[key] = str(value) if value not in (None, "") else "random"
+        elif isinstance(value, str):
+            current[key] = value.strip()
+        else:
+            current[key] = value
+    return current
 
 
 def default_mosaic_config():
@@ -51,6 +164,8 @@ def default_stream_config():
         "yt_mute": True,
         "yt_quality": "auto",
         "label": "",
+        AI_SETTINGS_KEY: default_ai_settings(),
+        AI_STATE_KEY: default_ai_state(),
     }
 
 
@@ -72,6 +187,276 @@ def load_config():
             return json.load(f)
     return {}
 
+config_data = load_config()
+
+
+def _coerce_float(value, default):
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _coerce_int(value, default):
+    try:
+        return int(float(value))
+    except (TypeError, ValueError):
+        return default
+
+
+def _coerce_bool(value, default):
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "on"}
+    return default
+
+
+AI_DEFAULT_MODEL = config_data.get("AI_DEFAULT_MODEL", AI_DEFAULT_MODEL) or AI_DEFAULT_MODEL
+AI_DEFAULT_SAMPLER = config_data.get("AI_DEFAULT_SAMPLER", AI_DEFAULT_SAMPLER) or AI_DEFAULT_SAMPLER
+AI_DEFAULT_WIDTH = _coerce_int(config_data.get("AI_DEFAULT_WIDTH"), AI_DEFAULT_WIDTH)
+AI_DEFAULT_HEIGHT = _coerce_int(config_data.get("AI_DEFAULT_HEIGHT"), AI_DEFAULT_HEIGHT)
+AI_DEFAULT_STEPS = _coerce_int(config_data.get("AI_DEFAULT_STEPS"), AI_DEFAULT_STEPS)
+AI_DEFAULT_CFG = _coerce_float(config_data.get("AI_DEFAULT_CFG"), AI_DEFAULT_CFG)
+AI_DEFAULT_SAMPLES = _coerce_int(config_data.get("AI_DEFAULT_SAMPLES"), AI_DEFAULT_SAMPLES)
+AI_OUTPUT_SUBDIR = config_data.get("AI_OUTPUT_SUBDIR", AI_OUTPUT_SUBDIR) or AI_OUTPUT_SUBDIR
+AI_TEMP_SUBDIR = config_data.get("AI_TEMP_SUBDIR", AI_TEMP_SUBDIR) or AI_TEMP_SUBDIR
+AI_DEFAULT_PERSIST = _coerce_bool(config_data.get("AI_DEFAULT_PERSIST"), AI_DEFAULT_PERSIST)
+AI_POLL_INTERVAL = _coerce_float(config_data.get("AI_POLL_INTERVAL"), AI_POLL_INTERVAL)
+AI_TIMEOUT = _coerce_float(config_data.get("AI_TIMEOUT"), AI_TIMEOUT)
+
+
+AI_OUTPUT_ROOT = _ensure_dir(Path(IMAGE_DIR) / AI_OUTPUT_SUBDIR)
+AI_TEMP_ROOT = _ensure_dir(Path(IMAGE_DIR) / AI_TEMP_SUBDIR)
+
+try:
+    stable_horde_client = StableHorde(
+        save_dir=AI_OUTPUT_ROOT,
+        persist_images=AI_DEFAULT_PERSIST,
+        default_poll_interval=AI_POLL_INTERVAL,
+        default_timeout=AI_TIMEOUT,
+    )
+except Exception as exc:  # pragma: no cover - defensive during optional setup
+    logger.warning("Stable Horde client unavailable: %s", exc)
+    stable_horde_client = None
+
+ai_jobs_lock = threading.Lock()
+ai_jobs: Dict[str, Dict[str, Any]] = {}
+ai_model_cache: Dict[str, Any] = {"timestamp": 0.0, "data": []}
+
+
+def _relative_image_path(path: Union[Path, str]) -> str:
+    p = Path(path)
+    try:
+        rel = p.relative_to(IMAGE_DIR_PATH)
+    except ValueError:
+        try:
+            rel = p.resolve().relative_to(IMAGE_DIR_PATH.resolve())
+        except Exception:  # pragma: no cover - fallback path
+            return p.as_posix()
+    return rel.as_posix()
+
+
+def _cleanup_temp_outputs(stream_id: str) -> None:
+    temp_dir = AI_TEMP_ROOT / stream_id
+    if temp_dir.exists():
+        try:
+            shutil.rmtree(temp_dir)
+        except Exception as exc:
+            logger.warning('Failed to remove temp outputs for %s: %s', stream_id, exc)
+
+
+def _emit_ai_update(stream_id: str, state: Dict[str, Any], job: Optional[Dict[str, Any]] = None) -> None:
+    try:
+        payload: Dict[str, Any] = {"stream_id": stream_id, "state": state}
+        if job is not None:
+            payload['job'] = job
+        socketio.emit('ai_job_update', payload)
+    except Exception as exc:  # pragma: no cover - socket errors should not crash the server
+        logger.debug('Socket emit failed for ai_job_update: %s', exc)
+
+
+def _update_ai_state(stream_id: str, updates: Dict[str, Any], *, persist: bool = False) -> Dict[str, Any]:
+    conf = settings.get(stream_id)
+    if not conf:
+        return {}
+    ensure_ai_defaults(conf)
+    state = conf[AI_STATE_KEY]
+    state.update(updates)
+    if persist:
+        save_settings(settings)
+    _emit_ai_update(stream_id, state)
+    return state
+
+
+def _record_job_progress(stream_id: str, stage: str, payload: Dict[str, Any]) -> None:
+    with ai_jobs_lock:
+        job = ai_jobs.get(stream_id)
+        if not job:
+            return
+        job = dict(job)
+        job['stage'] = stage
+        if stage == 'accepted':
+            job['job_id'] = payload.get('job_id')
+            job['status'] = 'accepted'
+            job.setdefault('started', time.time())
+        elif stage == 'status':
+            status_payload = payload.get('status') or {}
+            job['status'] = 'running'
+            job['queue_position'] = status_payload.get('queue_position')
+            job['wait_time'] = status_payload.get('wait_time')
+        elif stage == 'fault':
+            job['status'] = 'error'
+            job['message'] = str(payload.get('message') or payload)
+        elif stage == 'timeout':
+            job['status'] = 'timeout'
+            job['message'] = 'Timed out waiting for Stable Horde'
+        elif stage == 'completed':
+            job['status'] = 'completed'
+        ai_jobs[stream_id] = job
+    current_state = settings.get(stream_id, {}).get(AI_STATE_KEY, {})
+    _emit_ai_update(stream_id, current_state, job=job)
+
+
+def _run_ai_generation(stream_id: str, options: Dict[str, Any]) -> None:
+    prompt = str(options.get('prompt') or '').strip()
+    if not prompt:
+        _update_ai_state(stream_id, {
+            'status': 'error',
+            'message': 'Prompt is required',
+            'error': 'Prompt is required',
+        }, persist=True)
+        with ai_jobs_lock:
+            ai_jobs.pop(stream_id, None)
+        return
+
+    persist = bool(options.get('save_output', AI_DEFAULT_PERSIST))
+    target_root = _ensure_dir((AI_OUTPUT_ROOT if persist else AI_TEMP_ROOT) / stream_id)
+
+    def _status_callback(stage: str, payload: Dict[str, Any]) -> None:
+        _record_job_progress(stream_id, stage, payload)
+
+    models = [options['model']] if options.get('model') else None
+    sampler = options.get('sampler') or AI_DEFAULT_SAMPLER
+    negative_prompt = options.get('negative_prompt') or None
+    seed = options.get('seed') or 'random'
+    if not seed or str(seed).lower() == 'random':
+        seed = 'random'
+    else:
+        seed = str(seed)
+
+    try:
+        result = stable_horde_client.generate_images(
+            prompt,
+            negative_prompt=negative_prompt,
+            models=models,
+            width=int(options.get('width', AI_DEFAULT_WIDTH)),
+            height=int(options.get('height', AI_DEFAULT_HEIGHT)),
+            steps=int(options.get('steps', AI_DEFAULT_STEPS)),
+            cfg_scale=float(options.get('cfg_scale', AI_DEFAULT_CFG)),
+            sampler_name=sampler,
+            seed=seed,
+            samples=int(options.get('samples', AI_DEFAULT_SAMPLES)),
+            nsfw=bool(options.get('nsfw')),
+            censor_nsfw=bool(options.get('censor_nsfw')),
+            poll_interval=float(options.get('poll_interval', AI_POLL_INTERVAL)),
+            timeout=float(options.get('timeout', AI_TIMEOUT)),
+            persist=persist,
+            output_dir=target_root if persist else None,
+            status_callback=_status_callback,
+        )
+    except StableHordeError as exc:
+        logger.warning('Stable Horde job for %s failed: %s', stream_id, exc)
+        _record_job_progress(stream_id, 'fault', {'message': str(exc)})
+        _update_ai_state(
+            stream_id,
+            {
+                'status': 'error',
+                'message': str(exc),
+                'error': str(exc),
+                'persisted': persist,
+            },
+            persist=True,
+        )
+        with ai_jobs_lock:
+            ai_jobs.pop(stream_id, None)
+        return
+    except Exception as exc:  # pragma: no cover - defensive logging
+        logger.exception('Unexpected Stable Horde failure for %s: %s', stream_id, exc)
+        _record_job_progress(stream_id, 'fault', {'message': str(exc)})
+        _update_ai_state(
+            stream_id,
+            {
+                'status': 'error',
+                'message': 'Generation failed',
+                'error': str(exc),
+                'persisted': persist,
+            },
+            persist=True,
+        )
+        with ai_jobs_lock:
+            ai_jobs.pop(stream_id, None)
+        return
+
+    images: List[Dict[str, Any]] = []
+    if persist:
+        stored_paths = [(generation.path, generation) for generation in result.generations]
+    else:
+        job_dir = _ensure_dir(target_root / result.job_id)
+        stored_paths = []
+        for generation in result.generations:
+            final_path = job_dir / Path(generation.path).name
+            try:
+                shutil.copy2(generation.path, final_path)
+            except Exception as exc:
+                logger.warning('Failed to copy temp generation %s: %s', generation.path, exc)
+                continue
+            stored_paths.append((final_path, generation))
+        result.cleanup()
+
+    for final_path, generation in stored_paths:
+        rel_path = _relative_image_path(final_path)
+        images.append({
+            'path': rel_path,
+            'seed': generation.seed,
+            'model': generation.model or options.get('model'),
+            'worker': generation.worker,
+            'url': generation.url,
+            'persisted': persist,
+        })
+
+    updates = {
+        'status': 'completed',
+        'job_id': result.job_id,
+        'queue_position': result.queue_position,
+        'wait_time': result.wait_time,
+        'images': images,
+        'persisted': persist,
+        'message': None,
+        'error': None,
+        'last_updated': datetime.utcnow().isoformat() + 'Z',
+    }
+    conf = settings.get(stream_id)
+    if conf:
+        ensure_ai_defaults(conf)
+        conf[AI_SETTINGS_KEY] = _sanitize_ai_settings(options, conf[AI_SETTINGS_KEY])
+        conf[AI_SETTINGS_KEY]['save_output'] = persist
+        conf[AI_STATE_KEY].update(updates)
+        if images:
+            conf['selected_image'] = images[0]['path']
+        conf['mode'] = AI_MODE
+        save_settings(settings)
+        _emit_ai_update(stream_id, conf[AI_STATE_KEY])
+        try:
+            socketio.emit('refresh', {'stream_id': stream_id, 'config': conf})
+        except Exception as exc:  # pragma: no cover
+            logger.debug('Socket refresh emit failed: %s', exc)
+
+    _record_job_progress(stream_id, 'completed', {'job_id': result.job_id})
+    with ai_jobs_lock:
+        ai_jobs.pop(stream_id, None)
+
+
 settings = load_settings()
 if "_mosaic" not in settings:
     settings["_mosaic"] = default_mosaic_config()
@@ -89,6 +474,7 @@ for k, v in list(settings.items()):
     if not k.startswith("_") and isinstance(v, dict):
         v.setdefault("label", k.capitalize())
         v.setdefault("shuffle", True)
+        ensure_ai_defaults(v)
 
 # Ensure notes key exists
 settings.setdefault("_notes", "")
@@ -215,6 +601,9 @@ def add_stream():
 @app.route("/streams/<stream_id>", methods=["DELETE"])
 def delete_stream(stream_id):
     if stream_id in settings:
+        with ai_jobs_lock:
+            ai_jobs.pop(stream_id, None)
+        _cleanup_temp_outputs(stream_id)
         settings.pop(stream_id)
         save_settings(settings)
         socketio.emit("streams_changed", {"action": "deleted", "stream_id": stream_id})
@@ -234,6 +623,7 @@ def update_stream_settings(stream_id):
 
     data = request.json
     conf = settings[stream_id]
+    ensure_ai_defaults(conf)
 
     # We'll add new keys for YouTube: "yt_cc", "yt_mute", "yt_quality"
     for key in ["mode", "folder", "selected_image", "duration", "shuffle", "stream_url",
@@ -258,9 +648,105 @@ def update_stream_settings(stream_id):
             else:
                 conf[key] = val
 
+    if isinstance(data.get("ai_settings"), dict):
+        conf[AI_SETTINGS_KEY] = _sanitize_ai_settings(data["ai_settings"], conf[AI_SETTINGS_KEY])
+
     save_settings(settings)
     socketio.emit("refresh", {"stream_id": stream_id, "config": conf})
     return jsonify({"status": "success", "new_config": conf})
+
+
+@app.route('/ai/models')
+def list_ai_models():
+    if stable_horde_client is None:
+        return jsonify({'error': 'Stable Horde client is not configured'}), 503
+    now = time.time()
+    cache_ttl = 300
+    if (now - ai_model_cache['timestamp']) > cache_ttl or not ai_model_cache['data']:
+        try:
+            models = stable_horde_client.list_models()
+        except StableHordeError as exc:
+            logger.warning('Model fetch failed: %s', exc)
+            return jsonify({'error': str(exc)}), 502
+        ai_model_cache['data'] = [
+            {
+                'name': m.get('name'),
+                'performance': m.get('performance'),
+                'queued': m.get('queued'),
+                'jobs': m.get('jobs'),
+                'type': m.get('type'),
+            }
+            for m in models
+            if isinstance(m, dict) and m.get('type') == 'image'
+        ]
+        ai_model_cache['timestamp'] = now
+    return jsonify({'models': ai_model_cache['data']})
+
+
+@app.route('/ai/status/<stream_id>')
+def ai_status(stream_id: str):
+    conf = settings.get(stream_id)
+    if not conf:
+        return jsonify({'error': f"No stream '{stream_id}' found"}), 404
+    ensure_ai_defaults(conf)
+    with ai_jobs_lock:
+        job_snapshot = dict(ai_jobs.get(stream_id, {}))
+    return jsonify({
+        'state': conf[AI_STATE_KEY],
+        'settings': conf[AI_SETTINGS_KEY],
+        'job': job_snapshot,
+    })
+
+
+@app.route('/ai/generate/<stream_id>', methods=['POST'])
+def ai_generate(stream_id: str):
+    if stable_horde_client is None:
+        return jsonify({'error': 'Stable Horde client is not configured'}), 503
+    conf = settings.get(stream_id)
+    if not conf:
+        return jsonify({'error': f"No stream '{stream_id}' found"}), 404
+    ensure_ai_defaults(conf)
+    payload = request.get_json(silent=True) or {}
+    if not isinstance(payload, dict):
+        payload = {}
+    ai_settings = _sanitize_ai_settings(payload, conf[AI_SETTINGS_KEY])
+    prompt = str(ai_settings.get('prompt') or '').strip()
+    if not prompt:
+        return jsonify({'error': 'Prompt is required'}), 400
+    conf[AI_SETTINGS_KEY] = ai_settings
+    persist = bool(ai_settings.get('save_output', AI_DEFAULT_PERSIST))
+    with ai_jobs_lock:
+        if stream_id in ai_jobs:
+            return jsonify({'error': 'Generation already in progress'}), 409
+        ai_jobs[stream_id] = {
+            'status': 'queued',
+            'job_id': None,
+            'started': time.time(),
+            'persisted': persist,
+        }
+    if not persist:
+        _cleanup_temp_outputs(stream_id)
+    conf['mode'] = AI_MODE
+    conf['selected_image'] = None
+    conf[AI_STATE_KEY] = default_ai_state()
+    conf[AI_STATE_KEY].update({
+        'status': 'queued',
+        'message': 'Awaiting workers',
+        'persisted': persist,
+        'images': [],
+        'error': None,
+    })
+    save_settings(settings)
+    _emit_ai_update(stream_id, conf[AI_STATE_KEY], job=ai_jobs[stream_id])
+    try:
+        socketio.emit('refresh', {'stream_id': stream_id, 'config': conf})
+    except Exception as exc:  # pragma: no cover
+        logger.debug('Socket refresh emit failed: %s', exc)
+    job_options = dict(ai_settings)
+    job_options['prompt'] = prompt
+    worker = threading.Thread(target=_run_ai_generation, args=(stream_id, job_options), daemon=True)
+    worker.start()
+    return jsonify({'status': 'queued', 'state': conf[AI_STATE_KEY], 'job': ai_jobs[stream_id]})
 
 
 @app.route("/mosaic-settings", methods=["POST"])

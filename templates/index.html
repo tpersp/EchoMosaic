@@ -65,6 +65,7 @@
             <option value="random" {% if conf.mode == 'random' %} selected {% endif %}>Random</option>
             <option value="specific" {% if conf.mode == 'specific' %} selected {% endif %}>Specific</option>
             <option value="livestream" {% if conf.mode == 'livestream' %} selected {% endif %}>URL / Embed</option>
+            <option value="ai" {% if conf.mode == 'ai' %} selected {% endif %}>AI Images</option>
           </select>
         </div>
 
@@ -118,8 +119,78 @@
             </div>
           </details>
         </div>
+        <div class="ai-generator" data-stream="{{ stream_id }}" {% if conf.mode != 'ai' %} style="display:none;" {% endif %}>
+          {% set ai = conf.ai_settings or {} %}
+          {% set ai_state = conf.ai_state or {} %}
+          <label for="ai-prompt-{{ stream_id }}">Prompt</label>
+          <textarea id="ai-prompt-{{ stream_id }}" class="ai-prompt-input" data-stream="{{ stream_id }}" rows="3" placeholder="Describe the image you want">{{ ai.prompt or '' }}</textarea>
+          <label for="ai-negative-{{ stream_id }}">Negative Prompt</label>
+          <textarea id="ai-negative-{{ stream_id }}" class="ai-negative-input" data-stream="{{ stream_id }}" rows="2" placeholder="Things to avoid (optional)">{{ ai.negative_prompt or '' }}</textarea>
+          <div class="ai-option-grid">
+            <div class="ai-option">
+              <label for="ai-model-{{ stream_id }}">Model</label>
+              <select id="ai-model-{{ stream_id }}" class="ai-model-select" data-stream="{{ stream_id }}">
+                {% if ai.model %}
+                <option value="{{ ai.model }}" selected>{{ ai.model }}</option>
+                {% else %}
+                <option value="" selected>Auto-select</option>
+                {% endif %}
+              </select>
+            </div>
+            <div class="ai-option">
+              <label for="ai-sampler-{{ stream_id }}">Sampler</label>
+              <input id="ai-sampler-{{ stream_id }}" type="text" class="ai-sampler-input" data-stream="{{ stream_id }}" value="{{ ai.sampler or '' }}" placeholder="k_euler">
+            </div>
+            <div class="ai-option">
+              <label for="ai-width-{{ stream_id }}">Width</label>
+              <input id="ai-width-{{ stream_id }}" type="number" class="ai-width-input" data-stream="{{ stream_id }}" min="64" max="2048" step="64" value="{{ ai.width or 512 }}">
+            </div>
+            <div class="ai-option">
+              <label for="ai-height-{{ stream_id }}">Height</label>
+              <input id="ai-height-{{ stream_id }}" type="number" class="ai-height-input" data-stream="{{ stream_id }}" min="64" max="2048" step="64" value="{{ ai.height or 512 }}">
+            </div>
+            <div class="ai-option">
+              <label for="ai-steps-{{ stream_id }}">Steps</label>
+              <input id="ai-steps-{{ stream_id }}" type="number" class="ai-steps-input" data-stream="{{ stream_id }}" min="1" max="100" value="{{ ai.steps or 30 }}">
+            </div>
+            <div class="ai-option">
+              <label for="ai-cfg-{{ stream_id }}">CFG</label>
+              <input id="ai-cfg-{{ stream_id }}" type="number" class="ai-cfg-input" data-stream="{{ stream_id }}" step="0.5" min="1" max="20" value="{{ ai.cfg_scale or 7.5 }}">
+            </div>
+            <div class="ai-option">
+              <label for="ai-samples-{{ stream_id }}">Images</label>
+              <input id="ai-samples-{{ stream_id }}" type="number" class="ai-samples-input" data-stream="{{ stream_id }}" min="1" max="4" value="{{ ai.samples or 1 }}">
+            </div>
+            <div class="ai-option">
+              <label for="ai-seed-{{ stream_id }}">Seed</label>
+              <input id="ai-seed-{{ stream_id }}" type="text" class="ai-seed-input" data-stream="{{ stream_id }}" value="{{ ai.seed or 'random' }}" placeholder="random">
+            </div>
+          </div>
+          <div class="ai-flags">
+            <label><input type="checkbox" class="ai-save-output" data-stream="{{ stream_id }}" {% if ai.save_output %}checked{% endif %}> Save to library</label>
+            <label><input type="checkbox" class="ai-nsfw" data-stream="{{ stream_id }}" {% if ai.nsfw %}checked{% endif %}> Allow NSFW</label>
+            <label><input type="checkbox" class="ai-censor" data-stream="{{ stream_id }}" {% if ai.censor_nsfw %}checked{% endif %}> Censor NSFW</label>
+          </div>
+          <div class="ai-actions">
+            <button type="button" class="ai-generate-btn" data-stream="{{ stream_id }}">Generate</button>
+            <span class="ai-status" data-stream="{{ stream_id }}" data-status="{{ ai_state.status or 'idle' }}">{{ ai_state.status|default('idle')|capitalize }}</span>
+          </div>
+          <div class="ai-results" data-stream="{{ stream_id }}" data-selected="{{ conf.selected_image or '' }}">
+            <div class="ai-generated-grid">
+              {% for img in ai_state.images or [] %}
+              <div class="ai-generated-item" data-path="{{ img.path }}" data-persisted="{{ 'true' if img.persisted else 'false' }}">
+                <img src="/stream/image/{{ img.path }}" alt="Generated image {{ loop.index }}">
+                <div class="ai-generated-meta">
+                  {% if img.model %}<span class="ai-model-tag">{{ img.model }}</span>{% endif %}
+                  {% if img.seed %}<span class="ai-seed-tag">#{{ img.seed }}</span>{% endif %}
+                </div>
+              </div>
+              {% endfor %}
+            </div>
+            <div class="ai-generated-empty" {% if ai_state.images %}style="display:none;"{% endif %}>No generated images yet.</div>
+          </div>
+        </div>
       </div>
-
       <!-- Specific Image Picker -->
       <div class="image-picker" data-stream="{{ stream_id }}" {% if conf.mode != 'specific' %} style="display:none;" {% endif %}>
         <div class="image-picker-header">
@@ -129,7 +200,7 @@
         <div class="image-grid"></div>
       </div>
 
-      <p class="selected-image-row" {% if conf.mode != 'specific' %} style="display:none;" {% endif %}>
+      <p class="selected-image-row" {% if conf.mode not in ['specific', 'ai'] %} style="display:none;" {% endif %}>
         <strong>Selected Image:</strong>
         <span class="selected-image-display">{{ conf.selected_image if conf.selected_image else "None" }}</span>
       </p>
@@ -817,6 +888,50 @@
     console.log('Streams changed:', data);
   });
 
+  socket.on('ai_job_update', (data) => {
+    const streamId = data && data.stream_id;
+    if (!streamId) return;
+    const card = document.querySelector(.stream-card[data-stream=]);
+    if (!card) return;
+    if (data.job) {
+      aiActiveJobs.set(streamId, data.job);
+      const status = (data.job.status || '').toLowerCase();
+      if (['completed', 'error', 'timeout'].includes(status)) {
+        aiActiveJobs.delete(streamId);
+      }
+    }
+    if (data.state) {
+      if (Array.isArray(data.state.images)) {
+        renderAiResults(card, data.state.images);
+      }
+      renderAiStatus(card, data.state, data.job || aiActiveJobs.get(streamId) || null);
+    } else if (data.job) {
+      renderAiStatus(card, {}, data.job);
+    }
+  });
+
+  socket.on('refresh', (data) => {
+    const streamId = data && data.stream_id;
+    const conf = data && data.config;
+    if (!streamId || !conf) return;
+    const card = document.querySelector(.stream-card[data-stream=]);
+    if (!card) return;
+    if (conf.selected_image !== undefined) {
+      const display = card.querySelector('.selected-image-display');
+      if (display) display.textContent = conf.selected_image || 'None';
+      const resultsEl = card.querySelector('.ai-results');
+      if (resultsEl) {
+        highlightAiSelection(resultsEl, conf.selected_image || '');
+      }
+    }
+    if (conf.ai_state) {
+      if (Array.isArray(conf.ai_state.images)) {
+        renderAiResults(card, conf.ai_state.images);
+      }
+      renderAiStatus(card, conf.ai_state, aiActiveJobs.get(streamId) || null);
+    }
+  });
+
   // Notepad behaviour
   const notepad = document.getElementById('notepad');
   const toggleNotepadBtn = document.getElementById('toggle-notepad');
@@ -847,6 +962,297 @@
   // streams.  The logic is encapsulated in functions that operate on
   // elements with a ``data-stream`` attribute.
 
+  const aiModelCache = { models: null, promise: null };
+  const aiActiveJobs = new Map();
+
+  async function fetchAiModels() {
+    if (aiModelCache.models) {
+      return aiModelCache.models;
+    }
+    if (!aiModelCache.promise) {
+      aiModelCache.promise = fetch('/ai/models')
+        .then(res => {
+          if (!res.ok) {
+            throw new Error(HTTP );
+          }
+          return res.json();
+        })
+        .then(data => Array.isArray(data.models) ? data.models : [])
+        .catch(err => {
+          console.error('Failed to fetch Stable Horde models', err);
+          return [];
+        })
+        .finally(() => {
+          aiModelCache.promise = null;
+        });
+      aiModelCache.promise.then(models => {
+        aiModelCache.models = models;
+      });
+    }
+    return aiModelCache.promise;
+  }
+
+  function highlightAiSelection(resultsEl, selectedPath) {
+    if (!resultsEl) return;
+    const target = selectedPath || '';
+    resultsEl.dataset.selected = target;
+    resultsEl.querySelectorAll('.ai-generated-item').forEach(item => {
+      if (!item.dataset.path) return;
+      if (item.dataset.path === target) {
+        item.classList.add('is-selected');
+      } else {
+        item.classList.remove('is-selected');
+      }
+    });
+  }
+
+  function renderAiResults(card, images) {
+    const resultsEl = card.querySelector('.ai-results');
+    const grid = card.querySelector('.ai-generated-grid');
+    const empty = card.querySelector('.ai-generated-empty');
+    if (!resultsEl || !grid || !empty) return;
+    grid.innerHTML = '';
+    const list = Array.isArray(images) ? images : [];
+    if (!list.length) {
+      empty.style.display = '';
+      highlightAiSelection(resultsEl, resultsEl.dataset.selected || '');
+      return;
+    }
+    empty.style.display = 'none';
+    list.forEach(img => {
+      if (!img || !img.path) return;
+      const item = document.createElement('div');
+      item.className = 'ai-generated-item';
+      item.dataset.path = img.path;
+      item.dataset.persisted = img.persisted ? 'true' : 'false';
+      const imageEl = document.createElement('img');
+      imageEl.src = /stream/image/;
+      imageEl.alt = Generated image .trim();
+      item.appendChild(imageEl);
+      const meta = document.createElement('div');
+      meta.className = 'ai-generated-meta';
+      if (img.model) {
+        const modelTag = document.createElement('span');
+        modelTag.className = 'ai-model-tag';
+        modelTag.textContent = img.model;
+        meta.appendChild(modelTag);
+      }
+      if (img.seed) {
+        const seedTag = document.createElement('span');
+        seedTag.className = 'ai-seed-tag';
+        seedTag.textContent = #;
+        meta.appendChild(seedTag);
+      }
+      item.appendChild(meta);
+      grid.appendChild(item);
+    });
+    highlightAiSelection(resultsEl, resultsEl.dataset.selected || '');
+  }
+
+  function renderAiStatus(card, state, job) {
+    const statusEl = card.querySelector('.ai-status');
+    const button = card.querySelector('.ai-generate-btn');
+    if (!statusEl) return;
+    const info = state || {};
+    const jobInfo = job || {};
+    const status = (jobInfo.status || info.status || 'idle').toLowerCase();
+    let label = status.charAt(0).toUpperCase() + status.slice(1);
+    const queuePos = jobInfo.queue_position ?? info.queue_position;
+    if (queuePos !== undefined && queuePos !== null) {
+      label +=  (queue );
+    }
+    const note = jobInfo.message || info.message;
+    if (note && status === 'error') {
+      label +=  – ;
+    }
+    statusEl.dataset.status = status;
+    statusEl.textContent = label;
+    if (button) {
+      button.disabled = ['queued', 'accepted', 'running'].includes(status);
+    }
+  }
+
+  function collectAiPayload(card) {
+    const payload = {};
+    const promptInput = card.querySelector('.ai-prompt-input');
+    const negativeInput = card.querySelector('.ai-negative-input');
+    const modelSelect = card.querySelector('.ai-model-select');
+    const samplerInput = card.querySelector('.ai-sampler-input');
+    const widthInput = card.querySelector('.ai-width-input');
+    const heightInput = card.querySelector('.ai-height-input');
+    const stepsInput = card.querySelector('.ai-steps-input');
+    const cfgInput = card.querySelector('.ai-cfg-input');
+    const samplesInput = card.querySelector('.ai-samples-input');
+    const seedInput = card.querySelector('.ai-seed-input');
+    const saveOutput = card.querySelector('.ai-save-output');
+    const nsfw = card.querySelector('.ai-nsfw');
+    const censor = card.querySelector('.ai-censor');
+    payload.prompt = promptInput ? promptInput.value : '';
+    payload.negative_prompt = negativeInput ? negativeInput.value : '';
+    payload.model = modelSelect ? modelSelect.value : '';
+    payload.sampler = samplerInput ? samplerInput.value : '';
+    payload.width = widthInput ? parseInt(widthInput.value, 10) : undefined;
+    payload.height = heightInput ? parseInt(heightInput.value, 10) : undefined;
+    payload.steps = stepsInput ? parseInt(stepsInput.value, 10) : undefined;
+    payload.cfg_scale = cfgInput ? parseFloat(cfgInput.value) : undefined;
+    payload.samples = samplesInput ? parseInt(samplesInput.value, 10) : undefined;
+    payload.seed = seedInput ? seedInput.value : '';
+    payload.save_output = saveOutput ? saveOutput.checked : undefined;
+    payload.nsfw = nsfw ? nsfw.checked : undefined;
+    payload.censor_nsfw = censor ? censor.checked : undefined;
+    return payload;
+  }
+
+  function setupAiControls(card, streamId) {
+    const aiSection = card.querySelector('.ai-generator');
+    if (!aiSection || aiSection.dataset.ready === 'true') {
+      return;
+    }
+    aiSection.dataset.ready = 'true';
+    const modeSelect = card.querySelector('.mode-select');
+    const promptInput = card.querySelector('.ai-prompt-input');
+    if (promptInput) {
+      promptInput.addEventListener('blur', e => {
+        saveSettings(streamId, { ai_settings: { prompt: e.target.value } });
+      });
+    }
+    const negativeInput = card.querySelector('.ai-negative-input');
+    if (negativeInput) {
+      negativeInput.addEventListener('blur', e => {
+        saveSettings(streamId, { ai_settings: { negative_prompt: e.target.value } });
+      });
+    }
+    const samplerInput = card.querySelector('.ai-sampler-input');
+    if (samplerInput) {
+      samplerInput.addEventListener('blur', e => {
+        saveSettings(streamId, { ai_settings: { sampler: e.target.value } });
+      });
+    }
+    const seedInput = card.querySelector('.ai-seed-input');
+    if (seedInput) {
+      seedInput.addEventListener('blur', e => {
+        saveSettings(streamId, { ai_settings: { seed: e.target.value } });
+      });
+    }
+    const modelSelect = card.querySelector('.ai-model-select');
+    if (modelSelect) {
+      modelSelect.addEventListener('focus', () => {
+        fetchAiModels().then(models => {
+          if (!models || !modelSelect) return;
+          const values = new Set(Array.from(modelSelect.options).map(opt => opt.value));
+          models.forEach(model => {
+            const name = model && model.name ? model.name : '';
+            if (!name || values.has(name)) return;
+            const opt = document.createElement('option');
+            opt.value = name;
+            opt.textContent = name;
+            modelSelect.appendChild(opt);
+            values.add(name);
+          });
+        });
+      });
+      modelSelect.addEventListener('change', e => {
+        saveSettings(streamId, { ai_settings: { model: e.target.value } });
+      });
+    }
+    function bindNumeric(selector, key) {
+      const input = card.querySelector(selector);
+      if (!input) return;
+      input.addEventListener('change', e => {
+        const val = parseFloat(e.target.value);
+        if (!Number.isFinite(val)) return;
+        saveSettings(streamId, { ai_settings: { [key]: val } });
+      });
+    }
+    bindNumeric('.ai-width-input', 'width');
+    bindNumeric('.ai-height-input', 'height');
+    bindNumeric('.ai-steps-input', 'steps');
+    bindNumeric('.ai-cfg-input', 'cfg_scale');
+    bindNumeric('.ai-samples-input', 'samples');
+    const saveOutput = card.querySelector('.ai-save-output');
+    if (saveOutput) {
+      saveOutput.addEventListener('change', e => {
+        saveSettings(streamId, { ai_settings: { save_output: e.target.checked } });
+      });
+    }
+    const nsfw = card.querySelector('.ai-nsfw');
+    if (nsfw) {
+      nsfw.addEventListener('change', e => {
+        saveSettings(streamId, { ai_settings: { nsfw: e.target.checked } });
+      });
+    }
+    const censor = card.querySelector('.ai-censor');
+    if (censor) {
+      censor.addEventListener('change', e => {
+        saveSettings(streamId, { ai_settings: { censor_nsfw: e.target.checked } });
+      });
+    }
+    const generateBtn = card.querySelector('.ai-generate-btn');
+    if (generateBtn) {
+      generateBtn.addEventListener('click', async () => {
+        const payload = collectAiPayload(card);
+        if (!payload.prompt || !payload.prompt.trim()) {
+          showNotification('Prompt is required for AI generation');
+          if (promptInput) promptInput.focus();
+          return;
+        }
+        generateBtn.disabled = true;
+        renderAiStatus(card, { status: 'queued' }, { status: 'queued' });
+        try {
+          const res = await fetch(/ai/generate/, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+          });
+          const data = await res.json().catch(() => ({}));
+          if (!res.ok || data.error) {
+            const note = data.error || Request failed ();
+            showNotification(note);
+            renderAiStatus(card, { status: 'error', message: note }, { status: 'error', message: note });
+            generateBtn.disabled = false;
+            return;
+          }
+          if (data.job) {
+            aiActiveJobs.set(streamId, data.job);
+          }
+          if (data.state) {
+            renderAiStatus(card, data.state, data.job || null);
+          }
+          showNotification('AI generation queued');
+        } catch (err) {
+          console.error('AI generate failed', err);
+          showNotification('AI generation failed to start');
+          renderAiStatus(card, { status: 'error', message: 'Request failed' }, { status: 'error', message: 'Request failed' });
+          generateBtn.disabled = false;
+        }
+      });
+    }
+    const resultsEl = card.querySelector('.ai-results');
+    if (resultsEl) {
+      resultsEl.addEventListener('click', e => {
+        const target = e.target.closest('.ai-generated-item');
+        if (!target || !target.dataset.path) return;
+        const path = target.dataset.path;
+        highlightAiSelection(resultsEl, path);
+        saveSettings(streamId, { selected_image: path });
+        const display = card.querySelector('.selected-image-display');
+        if (display) display.textContent = path || 'None';
+      });
+    }
+    if (modeSelect) {
+      if (modeSelect.value === 'ai' && modelSelect) {
+        modelSelect.dispatchEvent(new Event('focus'));
+      }
+      modeSelect.addEventListener('change', e => {
+        if (e.target.value === 'ai' && modelSelect) {
+          modelSelect.dispatchEvent(new Event('focus'));
+        }
+      });
+    }
+    renderAiStatus(card, { status: card.querySelector('.ai-status')?.dataset.status || 'idle' }, aiActiveJobs.get(streamId) || null);
+    highlightAiSelection(resultsEl, resultsEl ? resultsEl.dataset.selected || '' : '');
+  }
+
   function saveSettings(streamId, payload) {
     fetch(`/settings/${encodeURIComponent(streamId)}`, {
       method: 'POST',
@@ -859,8 +1265,13 @@
         showNotification(`Updated settings for ${streamId}`);
         const card = document.querySelector(`.stream-card[data-stream="${streamId}"]`);
         if (card && data.new_config.selected_image !== undefined) {
+          const selectedPath = data.new_config.selected_image || "";
           const disp = card.querySelector('.selected-image-display');
-          disp.textContent = data.new_config.selected_image || 'None';
+          if (disp) disp.textContent = selectedPath || "None";
+          const aiResults = card.querySelector('.ai-results');
+          if (aiResults) {
+            highlightAiSelection(aiResults, selectedPath);
+          }
         }
       } else {
         console.error(data.error || 'Unknown error updating settings.');
@@ -882,8 +1293,10 @@
     if (shuffleChk) shuffleChk.closest('label').style.display = (mode === 'random') ? '' : 'none';
     if (urlDiv) urlDiv.style.display = (mode === 'livestream') ? '' : 'none';
     if (imagePicker) imagePicker.style.display = (mode === 'specific') ? '' : 'none';
-    if (selectedRow) selectedRow.style.display = (mode === 'specific') ? '' : 'none';
-    if (folderRow) folderRow.style.display = (mode === 'livestream') ? 'none' : '';
+    const aiSection = card.querySelector('.ai-generator');
+    if (aiSection) aiSection.style.display = (mode === 'ai') ? '' : 'none';
+    if (selectedRow) selectedRow.style.display = (mode === 'specific' || mode === 'ai') ? '' : 'none';
+    if (folderRow) folderRow.style.display = (mode === 'livestream' || mode === 'ai') ? 'none' : '';
     // Only show YT options if URL looks like YouTube
     const type = detectUrlType(streamUrl);
     if (ytSettingsDiv) ytSettingsDiv.style.display = (mode === 'livestream' && type === 'YouTube') ? '' : 'none';
@@ -927,6 +1340,7 @@
   document.addEventListener('DOMContentLoaded', () => {
     document.querySelectorAll('.stream-card').forEach(card => {
       const streamId = card.dataset.stream;
+      setupAiControls(card, streamId);
       // Card menu toggle per card
       const menuBtn = card.querySelector('.menu-button');
       const menuDd = card.querySelector('.card-menu .menu-dropdown');
