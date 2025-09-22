@@ -116,7 +116,9 @@
         <div class="ai-option-grid">
           <div class="ai-option">
             <label for="ai-defaults-model">Model</label>
-            <input id="ai-defaults-model" type="text" placeholder="stable_diffusion">
+            <select id="ai-defaults-model" class="ai-model-select">
+              <option value="">Auto-select</option>
+            </select>
           </div>
           <div class="ai-option">
             <label for="ai-defaults-sampler">Sampler</label>
@@ -209,9 +211,22 @@
             </div>
           </div>
         </details>
-        <div>
-          <label for="ai-defaults-loras" style="display:block; font-weight:600; margin-bottom:0.35rem;">Default LoRAs (JSON array)</label>
-          <textarea id="ai-defaults-loras" rows="2" style="width:100%; resize:vertical; font-family:monospace;"></textarea>
+        <div class="ai-lora-section" data-max="{{ max_loras }}">
+          <div class="lora-header" style="display:flex; align-items:center; justify-content:space-between; gap:0.5rem;">
+            <span style="font-weight:600;">Default LoRAs</span>
+            <button type="button" class="ai-add-lora">Add LoRA</button>
+          </div>
+          <div class="ai-lora-search">
+            <input type="text" class="ai-lora-search-input" placeholder="Search LoRAs on CivitAI (e.g. 'anime')">
+            <button type="button" class="ai-lora-search-btn">Search</button>
+            <a class="ai-lora-browse" href="https://civitai.com/models?types=LORA&sort=Highest%20Rated" target="_blank" rel="noopener">Browse</a>
+          </div>
+          <div class="ai-lora-results" hidden>
+            <div class="ai-lora-results-header"></div>
+            <div class="ai-lora-results-list"></div>
+          </div>
+          <div class="ai-lora-list"></div>
+          <div class="ai-lora-empty" style="opacity:0.75; font-size:0.85rem;">No default LoRAs selected.</div>
         </div>
         <div style="display:flex; gap:.5rem; align-items:center; flex-wrap:wrap;">
           <button type="button" id="ai-defaults-save">Save Defaults</button>
@@ -265,6 +280,8 @@
     const fallback = {{ ai_fallback_defaults|tojson }};
     let current = {{ ai_defaults|tojson }};
 
+    const aiModelCache = { models: null, promise: null };
+
     const fieldSelectors = {
       prompt: '#ai-defaults-prompt',
       negative_prompt: '#ai-defaults-negative',
@@ -301,7 +318,18 @@
     };
 
     const postProcessingChecks = Array.from(form.querySelectorAll('.ai-defaults-post'));
-    const lorasInput = document.getElementById('ai-defaults-loras');
+
+    const modelSelect = form.querySelector('#ai-defaults-model');
+
+    const loraSection = form.querySelector('.ai-lora-section');
+    const loraList = loraSection ? loraSection.querySelector('.ai-lora-list') : null;
+    const loraEmpty = loraSection ? loraSection.querySelector('.ai-lora-empty') : null;
+    const loraSearchInput = loraSection ? loraSection.querySelector('.ai-lora-search-input') : null;
+    const loraSearchBtn = loraSection ? loraSection.querySelector('.ai-lora-search-btn') : null;
+    const loraResultsWrap = loraSection ? loraSection.querySelector('.ai-lora-results') : null;
+    const loraResultsHeader = loraResultsWrap ? loraResultsWrap.querySelector('.ai-lora-results-header') : null;
+    const loraResultsList = loraResultsWrap ? loraResultsWrap.querySelector('.ai-lora-results-list') : null;
+    const addLoraBtn = loraSection ? loraSection.querySelector('.ai-add-lora') : null;
 
     const setStatus = (msg, ok = true) => {
       if (!status) return;
@@ -309,11 +337,32 @@
       status.style.color = ok ? 'inherit' : '#f77';
     };
 
+    const ensureSelectOption = (select, value) => {
+      if (!select) return;
+      const str = value === undefined || value === null ? '' : String(value);
+      if (!str) {
+        select.value = '';
+        return;
+      }
+      let exists = false;
+      for (const opt of select.options) {
+        if (opt.value === str) {
+          exists = true;
+          break;
+        }
+      }
+      if (!exists) {
+        const opt = new Option(str, str, true, true);
+        select.appendChild(opt);
+      }
+      select.value = str;
+    };
+
     const assignValue = (selector, value) => {
       const el = form.querySelector(selector);
       if (!el) return;
       if (el.tagName === 'SELECT') {
-        el.value = (value === undefined || value === null) ? '' : String(value);
+        ensureSelectOption(el, value);
       } else if (el.type === 'number') {
         if (value === undefined || value === null || value === '') {
           el.value = '';
@@ -323,6 +372,138 @@
       } else {
         el.value = value === undefined || value === null ? '' : String(value);
       }
+    };
+
+    const renderLoraEmptyState = () => {
+      if (!loraEmpty) return;
+      const hasRows = loraList && loraList.querySelector('.ai-lora-row');
+      loraEmpty.hidden = !!hasRows;
+    };
+
+    const updateLoraAddState = () => {
+      if (!loraSection || !addLoraBtn) return;
+      const max = parseInt(loraSection.dataset.max || '0', 10) || 0;
+      const current = loraList ? loraList.querySelectorAll('.ai-lora-row').length : 0;
+      addLoraBtn.disabled = max > 0 && current >= max;
+    };
+
+    const bindLoraRow = (row) => {
+      if (!row) return;
+      const removeBtn = row.querySelector('.ai-lora-remove');
+      if (removeBtn) {
+        removeBtn.addEventListener('click', () => {
+          row.remove();
+          renderLoraEmptyState();
+          updateLoraAddState();
+          setStatus('');
+        });
+      }
+      row.querySelectorAll('input').forEach(input => {
+        input.addEventListener('input', () => setStatus(''));
+        input.addEventListener('change', () => setStatus(''));
+      });
+    };
+
+    const createLoraRow = (data = {}) => {
+      const row = document.createElement('div');
+      row.className = 'ai-lora-row';
+      row.innerHTML = `
+        <input type="text" class="ai-lora-name" placeholder="Name or CivitAI ID">
+        <input type="number" class="ai-lora-model" placeholder="Model" step="0.05" min="-5" max="5">
+        <input type="number" class="ai-lora-clip" placeholder="Clip" step="0.05" min="-5" max="5">
+        <input type="text" class="ai-lora-trigger" placeholder="Trigger (optional)">
+        <label class="toggle compact ai-lora-flag"><input type="checkbox" class="ai-lora-is-version"><span class="toggle-switch"></span><span class="toggle-label">Version ID</span></label>
+        <button type="button" class="ai-lora-remove">Remove</button>
+      `;
+      const nameInput = row.querySelector('.ai-lora-name');
+      if (nameInput) nameInput.value = data.name ? String(data.name) : '';
+      const modelInput = row.querySelector('.ai-lora-model');
+      if (modelInput && data.model !== undefined && data.model !== null && data.model !== '') {
+        modelInput.value = data.model;
+      }
+      const clipInput = row.querySelector('.ai-lora-clip');
+      if (clipInput && data.clip !== undefined && data.clip !== null && data.clip !== '') {
+        clipInput.value = data.clip;
+      }
+      const triggerInput = row.querySelector('.ai-lora-trigger');
+      if (triggerInput && data.inject_trigger) {
+        triggerInput.value = String(data.inject_trigger);
+      }
+      const versionChk = row.querySelector('.ai-lora-is-version');
+      if (versionChk && data.is_version) {
+        versionChk.checked = true;
+      }
+      bindLoraRow(row);
+      return row;
+    };
+
+    const appendLoraRow = (data = {}) => {
+      if (!loraSection || !loraList) return null;
+      const max = parseInt(loraSection.dataset.max || '0', 10) || 0;
+      const current = loraList.querySelectorAll('.ai-lora-row').length;
+      if (max > 0 && current >= max) {
+        setStatus(`Maximum of ${max} LoRAs reached`, false);
+        return null;
+      }
+      const row = createLoraRow(data);
+      loraList.appendChild(row);
+      renderLoraEmptyState();
+      updateLoraAddState();
+      return row;
+    };
+
+    const renderLoraList = (list) => {
+      if (!loraList) return;
+      loraList.innerHTML = '';
+      const entries = Array.isArray(list) ? list : [];
+      entries.forEach(entry => {
+        const row = createLoraRow(entry || {});
+        loraList.appendChild(row);
+      });
+      renderLoraEmptyState();
+      updateLoraAddState();
+    };
+
+    const parseNumber = (value, { allowEmpty = false, int = false } = {}) => {
+      const trimmed = String(value ?? '').trim();
+      if (!trimmed) {
+        return allowEmpty ? null : NaN;
+      }
+      const num = int ? parseInt(trimmed, 10) : parseFloat(trimmed);
+      return Number.isNaN(num) ? NaN : num;
+    };
+
+    const gatherLoras = () => {
+      if (!loraList) return [];
+      const rows = loraList.querySelectorAll('.ai-lora-row');
+      const result = [];
+      rows.forEach(row => {
+        const nameInput = row.querySelector('.ai-lora-name');
+        const name = nameInput ? nameInput.value.trim() : '';
+        if (!name) return;
+        const entry = { name };
+        const modelInput = row.querySelector('.ai-lora-model');
+        if (modelInput && modelInput.value.trim() !== '') {
+          const parsed = parseFloat(modelInput.value);
+          if (!Number.isNaN(parsed)) entry.model = parsed;
+        }
+        const clipInput = row.querySelector('.ai-lora-clip');
+        if (clipInput && clipInput.value.trim() !== '') {
+          const parsed = parseFloat(clipInput.value);
+          if (!Number.isNaN(parsed)) entry.clip = parsed;
+        }
+        const triggerInput = row.querySelector('.ai-lora-trigger');
+        if (triggerInput) {
+          const trig = triggerInput.value.trim();
+          if (trig) entry.inject_trigger = trig;
+        }
+        const versionChk = row.querySelector('.ai-lora-is-version');
+        if (versionChk && versionChk.checked) {
+          entry.is_version = true;
+        }
+        result.push(entry);
+      });
+      return result;
     };
 
     const applyDefaults = (values) => {
@@ -339,29 +520,12 @@
       postProcessingChecks.forEach(box => {
         box.checked = selectedPosts.has(box.value);
       });
-      if (lorasInput) {
-        if (Array.isArray(data.loras)) {
-          lorasInput.value = data.loras.length ? JSON.stringify(data.loras, null, 2) : '';
-        } else if (data.loras) {
-          lorasInput.value = JSON.stringify(data.loras, null, 2);
-        } else {
-          lorasInput.value = '';
-        }
-      }
-    };
-
-    const parseNumber = (value, { allowEmpty = false, int = false } = {}) => {
-      const trimmed = String(value ?? '').trim();
-      if (!trimmed) {
-        return allowEmpty ? null : NaN;
-      }
-      const num = int ? parseInt(trimmed, 10) : parseFloat(trimmed);
-      return Number.isNaN(num) ? NaN : num;
+      renderLoraList(Array.isArray(data.loras) ? data.loras : []);
+      setStatus('');
     };
 
     const gatherDefaults = () => {
       const payload = {};
-
       const requiredInts = ['width', 'height', 'steps', 'samples'];
       const optionalInts = ['clip_skip'];
       const floatFields = ['cfg_scale', 'timeout', 'facefixer_strength', 'denoising_strength', 'hires_fix_denoising_strength'];
@@ -413,32 +577,167 @@
       });
 
       payload.post_processing = postProcessingChecks.filter(box => box.checked).map(box => box.value);
-
-      if (lorasInput) {
-        const raw = lorasInput.value.trim();
-        if (raw) {
-          try {
-            const parsed = JSON.parse(raw);
-            if (!Array.isArray(parsed)) {
-              setStatus('LoRAs must be a JSON array', false);
-              lorasInput.focus();
-              return null;
-            }
-            payload.loras = parsed;
-          } catch (err) {
-            setStatus('LoRAs JSON is invalid', false);
-            lorasInput.focus();
-            return null;
-          }
-        } else {
-          payload.loras = [];
-        }
-      }
+      payload.loras = gatherLoras();
 
       return payload;
     };
 
+    const renderLoraResults = (results, query) => {
+      if (!loraResultsWrap || !loraResultsList) return;
+      loraResultsWrap.hidden = false;
+      loraResultsList.innerHTML = '';
+      if (loraResultsHeader) {
+        if (results.length) {
+          loraResultsHeader.textContent = query ? `Results for "${query}"` : 'LoRA results';
+        } else {
+          loraResultsHeader.textContent = query ? `No LoRAs found for "${query}"` : 'No LoRAs found';
+        }
+      }
+      if (!results.length) {
+        const empty = document.createElement('div');
+        empty.className = 'ai-lora-result-empty';
+        empty.textContent = 'Try a different search term.';
+        loraResultsList.appendChild(empty);
+        return;
+      }
+      results.forEach(result => {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'ai-lora-result';
+        const title = document.createElement('div');
+        title.className = 'ai-lora-result-title';
+        const modelName = result.modelName || 'Unnamed LoRA';
+        const versionName = result.versionName || (result.versionId ? `Version ${result.versionId}` : 'Unknown version');
+        title.textContent = `${modelName} - ${versionName}`;
+        button.appendChild(title);
+        if (Array.isArray(result.triggerWords) && result.triggerWords.length) {
+          const triggers = document.createElement('div');
+          triggers.className = 'ai-lora-result-triggers';
+          triggers.textContent = `Triggers: ${result.triggerWords.slice(0, 3).join(', ')}`;
+          button.appendChild(triggers);
+        }
+        button.addEventListener('click', () => {
+          const identifier = result.versionId ? String(result.versionId) : (result.modelName || '');
+          const row = appendLoraRow({
+            name: identifier,
+            inject_trigger: Array.isArray(result.triggerWords) && result.triggerWords.length ? result.triggerWords.slice(0, 2).join(', ') : '',
+            is_version: Boolean(result.versionId),
+          });
+          if (row) {
+            setStatus('LoRA added (remember to save)');
+          }
+        });
+        loraResultsList.appendChild(button);
+      });
+    };
+
+    const performLoraSearch = async (query) => {
+      const term = (query || '').trim();
+      if (!term) {
+        setStatus('Enter a search term for LoRAs', false);
+        return;
+      }
+      if (loraResultsWrap) {
+        loraResultsWrap.hidden = false;
+      }
+      if (loraResultsHeader) loraResultsHeader.textContent = 'Searching…';
+      if (loraResultsList) loraResultsList.innerHTML = '';
+      try {
+        const res = await fetch(`/ai/loras?q=${encodeURIComponent(term)}`);
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || data.error) {
+          throw new Error(data.error || `Request failed (${res.status})`);
+        }
+        renderLoraResults(data.results || [], term);
+      } catch (err) {
+        if (loraResultsHeader) loraResultsHeader.textContent = 'Search failed';
+        if (loraResultsList) {
+          const error = document.createElement('div');
+          error.className = 'ai-lora-result-error';
+          error.textContent = err && err.message ? err.message : 'Unable to load LoRAs';
+          loraResultsList.appendChild(error);
+        }
+        setStatus('LoRA search failed', false);
+      }
+    };
+
+    async function fetchAiModels() {
+      if (aiModelCache.models) {
+        return aiModelCache.models;
+      }
+      if (!aiModelCache.promise) {
+        aiModelCache.promise = fetch('/ai/models')
+          .then(res => {
+            if (!res.ok) {
+              throw new Error(`Request failed (${res.status})`);
+            }
+            return res.json();
+          })
+          .then(data => Array.isArray(data.models) ? data.models : [])
+          .catch(err => {
+            console.error('Failed to fetch Stable Horde models', err);
+            setStatus('Unable to load Stable Horde models', false);
+            return [];
+          })
+          .finally(() => {
+            aiModelCache.promise = null;
+          });
+        aiModelCache.promise.then(models => {
+          aiModelCache.models = models;
+        });
+      }
+      return aiModelCache.promise;
+    }
+
+    const loadModelOptions = (select) => {
+      if (!select) return;
+      fetchAiModels().then(models => {
+        if (!Array.isArray(models) || !models.length) return;
+        const existing = new Set(Array.from(select.options).map(opt => opt.value));
+        models.forEach(model => {
+          const name = model && model.name ? model.name : '';
+          if (!name || existing.has(name)) return;
+          const opt = new Option(name, name);
+          select.appendChild(opt);
+          existing.add(name);
+        });
+      }).catch(() => {});
+    };
+
     applyDefaults(current);
+
+    if (modelSelect) {
+      ['focus', 'click'].forEach(evt => {
+        modelSelect.addEventListener(evt, () => loadModelOptions(modelSelect));
+      });
+      modelSelect.addEventListener('change', () => setStatus(''));
+    }
+
+    if (addLoraBtn) {
+      addLoraBtn.addEventListener('click', () => {
+        appendLoraRow();
+        setStatus('');
+      });
+    }
+    if (loraSearchBtn) {
+      loraSearchBtn.addEventListener('click', () => performLoraSearch(loraSearchInput ? loraSearchInput.value : ''));
+    }
+    if (loraSearchInput) {
+      loraSearchInput.addEventListener('keydown', e => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          performLoraSearch(loraSearchInput.value);
+        }
+      });
+    }
+
+    Array.from(form.querySelectorAll('input, textarea, select')).forEach(el => {
+      if (el === status) return;
+      el.addEventListener('change', () => setStatus(''));
+      if (el.tagName !== 'SELECT') {
+        el.addEventListener('input', () => setStatus(''));
+      }
+    });
 
     if (saveBtn) {
       saveBtn.addEventListener('click', async () => {

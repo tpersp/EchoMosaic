@@ -1418,6 +1418,7 @@ def app_settings():
         ai_defaults=default_ai_settings(),
         ai_fallback_defaults=AI_FALLBACK_DEFAULTS,
         post_processors=STABLE_HORDE_POST_PROCESSORS,
+        max_loras=STABLE_HORDE_MAX_LORAS,
     )
 
 
