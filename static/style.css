@@ -512,6 +512,7 @@ a {
 
 .toggle.inline {
   flex-direction: row;
+  align-items: center;
   margin-right: 1rem;
 }
 
@@ -527,18 +528,20 @@ a {
   width: 100%;
   justify-content: space-between;
   font-size: 0.8rem;
+  display: flex;
+  align-items: center;
 }
 
 .toggle.compact .toggle-label {
   order: 0;
   flex: 1 1 auto;
+  padding-right: 0.75rem;
 }
 
 .toggle.compact .toggle-switch {
   order: 1;
   width: 40px;
   height: 20px;
-  margin-left: 0.75rem;
 }
 
 .toggle.compact .toggle-switch::after {
