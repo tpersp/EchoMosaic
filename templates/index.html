@@ -220,6 +220,15 @@
                 <span>LoRAs</span>
                 <button type="button" class="ai-add-lora" data-stream="{{ stream_id }}">Add</button>
               </div>
+              <div class="ai-lora-search">
+                <input type="text" class="ai-lora-search-input" placeholder="Search LoRAs on CivitAI (e.g. 'anime style')">
+                <button type="button" class="ai-lora-search-btn" data-stream="{{ stream_id }}">Search</button>
+                <a href="https://civitai.com/models?types=LORA&sort=Highest%20Rated" class="ai-lora-browse" target="_blank" rel="noopener">Browse</a>
+              </div>
+              <div class="ai-lora-results" hidden>
+                <div class="ai-lora-results-header"></div>
+                <div class="ai-lora-results-list"></div>
+              </div>
               <div class="ai-lora-list">
                 {% for lora in ai.loras or [] %}
                 <div class="ai-lora-row">
@@ -1315,6 +1324,13 @@
       });
     }
     const loraSection = card.querySelector('.ai-lora-section');
+    const loraList = loraSection ? loraSection.querySelector('.ai-lora-list') : null;
+    const loraSearchInput = loraSection ? loraSection.querySelector('.ai-lora-search-input') : null;
+    const loraSearchBtn = loraSection ? loraSection.querySelector('.ai-lora-search-btn') : null;
+    const loraResultsWrap = loraSection ? loraSection.querySelector('.ai-lora-results') : null;
+    const loraResultsHeader = loraResultsWrap ? loraResultsWrap.querySelector('.ai-lora-results-header') : null;
+    const loraResultsList = loraResultsWrap ? loraResultsWrap.querySelector('.ai-lora-results-list') : null;
+
 
     function bindNumeric(selector, key) {
       const input = card.querySelector(selector);
@@ -1356,6 +1372,114 @@
       const max = parseInt(loraSection.dataset.max || '0', 10) || 0;
       const current = loraSection.querySelectorAll('.ai-lora-row').length;
       addBtn.disabled = max > 0 && current >= max;
+    }
+
+    function appendEmptyLoraRow() {
+      if (!loraSection || !loraList) return null;
+      const max = parseInt(loraSection.dataset.max || '0', 10) || 0;
+      const current = loraList.querySelectorAll('.ai-lora-row').length;
+      if (max > 0 && current >= max) {
+        showNotification(`Maximum of ${max} LoRAs reached`);
+        return null;
+      }
+      const row = document.createElement('div');
+      row.className = 'ai-lora-row';
+      row.innerHTML = `
+        <input type="text" class="ai-lora-name" placeholder="Name or CivitAI ID">
+        <input type="number" class="ai-lora-model" placeholder="Model" step="0.05" min="-5" max="5">
+        <input type="number" class="ai-lora-clip" placeholder="Clip" step="0.05" min="-5" max="5">
+        <input type="text" class="ai-lora-trigger" placeholder="Trigger (optional)">
+        <label class="ai-lora-flag"><input type="checkbox" class="ai-lora-is-version"> Version ID</label>
+        <button type="button" class="ai-lora-remove">Remove</button>
+      `;
+      loraList.appendChild(row);
+      bindLoraRow(row);
+      updateLoraAddState();
+      return row;
+    }
+
+    function renderLoraResults(results, query) {
+      if (!loraResultsWrap || !loraResultsList) return;
+      loraResultsWrap.hidden = false;
+      loraResultsList.innerHTML = '';
+      if (loraResultsHeader) {
+        if (results.length) {
+          loraResultsHeader.textContent = query ? `Results for "${query}"` : 'LoRA results';
+        } else {
+          loraResultsHeader.textContent = query ? `No LoRAs found for "${query}"` : 'No LoRAs found';
+        }
+      }
+      if (!results.length) {
+        const empty = document.createElement('div');
+        empty.className = 'ai-lora-result-empty';
+        empty.textContent = 'Try a different search term.';
+        loraResultsList.appendChild(empty);
+        return;
+      }
+      results.forEach(result => {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'ai-lora-result';
+        const title = document.createElement('div');
+        title.className = 'ai-lora-result-title';
+        const modelName = result.modelName || 'Unnamed LoRA';
+        const versionName = result.versionName || `Version ${result.versionId}`;
+        title.textContent = `${modelName} - ${versionName}`;
+        button.appendChild(title);
+        if (Array.isArray(result.triggerWords) && result.triggerWords.length) {
+          const triggers = document.createElement('div');
+          triggers.className = 'ai-lora-result-triggers';
+          triggers.textContent = `Triggers: ${result.triggerWords.slice(0, 3).join(', ')}`;
+          button.appendChild(triggers);
+        }
+        button.addEventListener('click', () => {
+          const row = appendEmptyLoraRow();
+          if (!row) return;
+          const nameInput = row.querySelector('.ai-lora-name');
+          if (nameInput) {
+            nameInput.value = (result.versionId || '').toString() || modelName;
+          }
+          const triggerInput = row.querySelector('.ai-lora-trigger');
+          if (triggerInput && Array.isArray(result.triggerWords) && result.triggerWords.length) {
+            triggerInput.value = result.triggerWords.slice(0, 2).join(', ');
+          }
+          const isVersionChk = row.querySelector('.ai-lora-is-version');
+          if (isVersionChk && result.versionId) {
+            isVersionChk.checked = true;
+          }
+          syncLoras();
+          showNotification('LoRA added from search');
+        });
+        loraResultsList.appendChild(button);
+      });
+    }
+
+    async function performLoraSearch(query) {
+      if (!loraResultsWrap) return;
+      const term = (query || '').trim();
+      if (!term) {
+        showNotification('Enter a search term for LoRAs');
+        return;
+      }
+      loraResultsWrap.hidden = false;
+      if (loraResultsHeader) loraResultsHeader.textContent = 'Searching...';
+      if (loraResultsList) loraResultsList.innerHTML = '';
+      try {
+        const res = await fetch(`/ai/loras?q=${encodeURIComponent(term)}`);
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || data.error) {
+          throw new Error(data.error || `Request failed (${res.status})`);
+        }
+        renderLoraResults(data.results || [], term);
+      } catch (err) {
+        if (loraResultsHeader) loraResultsHeader.textContent = 'Search failed';
+        if (loraResultsList) {
+          const error = document.createElement('div');
+          error.className = 'ai-lora-result-error';
+          error.textContent = err && err.message ? err.message : 'Unable to load LoRAs';
+          loraResultsList.appendChild(error);
+        }
+      }
     }
 
     function syncLoras() {
@@ -1438,31 +1562,27 @@
     }
     if (loraSection) {
       const addLoraBtn = loraSection.querySelector('.ai-add-lora');
-      const list = loraSection.querySelector('.ai-lora-list');
-      if (addLoraBtn && list) {
+      if (addLoraBtn) {
         addLoraBtn.addEventListener('click', () => {
-          const max = parseInt(loraSection.dataset.max || '0', 10) || 0;
-          const current = loraSection.querySelectorAll('.ai-lora-row').length;
-          if (max > 0 && current >= max) {
-            showNotification(`Maximum of ${max} LoRAs reached`);
-            return;
-          }
-          const row = document.createElement('div');
-          row.className = 'ai-lora-row';
-          row.innerHTML = `
-            <input type="text" class="ai-lora-name" placeholder="Name or CivitAI ID">
-            <input type="number" class="ai-lora-model" placeholder="Model" step="0.05" min="-5" max="5">
-            <input type="number" class="ai-lora-clip" placeholder="Clip" step="0.05" min="-5" max="5">
-            <input type="text" class="ai-lora-trigger" placeholder="Trigger (optional)">
-            <label class="ai-lora-flag"><input type="checkbox" class="ai-lora-is-version"> Version ID</label>
-            <button type="button" class="ai-lora-remove">Remove</button>
-          `;
-          list.appendChild(row);
-          bindLoraRow(row);
-          updateLoraAddState();
+          appendEmptyLoraRow();
         });
       }
-      loraSection.querySelectorAll('.ai-lora-row').forEach(row => bindLoraRow(row));
+      if (loraSearchBtn) {
+        loraSearchBtn.addEventListener('click', () => {
+          performLoraSearch(loraSearchInput ? loraSearchInput.value : '');
+        });
+      }
+      if (loraSearchInput) {
+        loraSearchInput.addEventListener('keydown', e => {
+          if (e.key === 'Enter') {
+            e.preventDefault();
+            performLoraSearch(loraSearchInput.value);
+          }
+        });
+      }
+      if (loraList) {
+        loraList.querySelectorAll('.ai-lora-row').forEach(row => bindLoraRow(row));
+      }
       updateLoraAddState();
     }
     const generateBtn = card.querySelector('.ai-generate-btn');

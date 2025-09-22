@@ -25,7 +25,7 @@ interface in real time.
   all connected clients using Socket.IO, eliminating the need for
   manual refreshes.
 
-* **Stable Horde image generation** - craft prompts per stream, queue jobs, and tweak advanced controls (post-processing, LoRAs, hires fix, worker filters) without leaving the dashboard.
+* **Stable Horde image generation** - craft prompts per stream, queue jobs, tweak advanced controls (post-processing, LoRAs, hires fix, worker filters), and even search CivitAI for new LoRAs without leaving the dashboard.
 
 ## Getting started
 

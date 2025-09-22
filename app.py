@@ -8,6 +8,7 @@ import shutil
 import subprocess
 import threading
 import time
+import secrets
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
@@ -45,7 +46,7 @@ AI_OUTPUT_SUBDIR = "ai_generated"
 AI_TEMP_SUBDIR = "_ai_temp"
 AI_DEFAULT_PERSIST = True
 AI_POLL_INTERVAL = 5.0
-AI_TIMEOUT = 600.0
+AI_TIMEOUT = 0.0
 
 STABLE_HORDE_POST_PROCESSORS = [
     "GFPGAN",
@@ -97,6 +98,7 @@ def default_ai_settings() -> Dict[str, Any]:
         "extra_slow_workers": False,
         "disable_batching": False,
         "allow_downgrade": False,
+        "timeout": AI_TIMEOUT,
     }
 
 
@@ -182,6 +184,11 @@ def _sanitize_ai_settings(payload: Dict[str, Any], base: Optional[Dict[str, Any]
             if maybe is None:
                 continue
             current[key] = maybe
+        elif key == "timeout":
+            maybe = _maybe_float(value)
+            if maybe is None:
+                continue
+            current[key] = max(0.0, maybe)
         elif key in bool_keys:
             current[key] = _coerce_bool(value, defaults[key])
         elif key == "seed":
@@ -524,11 +531,24 @@ def _run_ai_generation(stream_id: str, options: Dict[str, Any]) -> None:
     models = [options['model']] if options.get('model') else None
     sampler = options.get('sampler') or AI_DEFAULT_SAMPLER
     negative_prompt = options.get('negative_prompt') or None
-    seed = options.get('seed') or 'random'
-    if not seed or str(seed).lower() == 'random':
-        seed = 'random'
+    seed_input = options.get('seed')
+    if seed_input is None:
+        seed_payload = str(secrets.randbelow(2**32))
     else:
-        seed = str(seed)
+        seed_str = str(seed_input).strip()
+        if not seed_str or seed_str.lower() in {"random", "rand", "auto"}:
+            seed_payload = str(secrets.randbelow(2**32))
+        else:
+            seed_payload = seed_str
+
+    timeout_raw = options.get('timeout')
+    if timeout_raw in (None, '', 'none'):
+        timeout_value = AI_TIMEOUT
+    else:
+        try:
+            timeout_value = max(0.0, float(timeout_raw))
+        except (TypeError, ValueError):
+            timeout_value = AI_TIMEOUT
 
     post_processing = [
         proc
@@ -590,7 +610,7 @@ def _run_ai_generation(stream_id: str, options: Dict[str, Any]) -> None:
             steps=int(options.get('steps', AI_DEFAULT_STEPS)),
             cfg_scale=float(options.get('cfg_scale', AI_DEFAULT_CFG)),
             sampler_name=sampler,
-            seed=seed,
+            seed=seed_payload,
             samples=int(options.get('samples', AI_DEFAULT_SAMPLES)),
             nsfw=bool(options.get('nsfw')),
             censor_nsfw=bool(options.get('censor_nsfw')),
@@ -598,7 +618,7 @@ def _run_ai_generation(stream_id: str, options: Dict[str, Any]) -> None:
             params=advanced_params or None,
             extras=extras_payload or None,
             poll_interval=float(options.get('poll_interval', AI_POLL_INTERVAL)),
-            timeout=float(options.get('timeout', AI_TIMEOUT)),
+            timeout=timeout_value,
             persist=persist,
             output_dir=target_root if persist else None,
             status_callback=_status_callback,
@@ -898,6 +918,61 @@ def update_stream_settings(stream_id):
     socketio.emit("refresh", {"stream_id": stream_id, "config": conf})
     return jsonify({"status": "success", "new_config": conf})
 
+
+@app.route('/ai/loras')
+def ai_loras():
+    if requests is None:
+        return jsonify({'error': 'LoRA search unavailable'}), 503
+    query = (request.args.get('q') or request.args.get('query') or '').strip()
+    try:
+        limit = int(request.args.get('limit', 20))
+    except (TypeError, ValueError):
+        limit = 20
+    limit = max(1, min(limit, 40))
+    params = {
+        'types': 'LORA',
+        'limit': limit,
+    }
+    if query:
+        params['query'] = query
+    try:
+        resp = requests.get('https://civitai.com/api/v1/models', params=params, timeout=10)
+        resp.raise_for_status()
+    except Exception as exc:
+        logger.warning('LoRA search failed for %s: %s', query or 'default', exc)
+        return jsonify({'error': 'LoRA lookup failed'}), 502
+    try:
+        payload = resp.json()
+    except ValueError as exc:
+        logger.warning('LoRA search returned invalid JSON: %s', exc)
+        return jsonify({'error': 'LoRA lookup invalid response'}), 502
+    items = payload.get('items') or []
+    results = []
+    for item in items:
+        name = item.get('name') or ''
+        versions = item.get('modelVersions') or []
+        for version in versions:
+            version_id = version.get('id')
+            if version_id is None:
+                continue
+            entry = {
+                'modelName': name,
+                'versionId': version_id,
+                'versionName': version.get('name'),
+                'triggerWords': version.get('trainedWords') or [],
+            }
+            results.append(entry)
+            if len(results) >= limit:
+                break
+        if len(results) >= limit:
+            break
+    return jsonify({
+        'results': results,
+        'query': query,
+        'limit': limit,
+        'source': 'civitai',
+        'browseUrl': 'https://civitai.com/models?types=LORA&sort=Highest%20Rated',
+    })
 
 @app.route('/ai/models')
 def list_ai_models():
