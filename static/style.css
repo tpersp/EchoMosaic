@@ -438,6 +438,102 @@ a {
   font-size: 0.9rem;
   padding: 0.25rem 0.45rem;
 }
+/* Toggle switches */
+.toggle {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.85rem;
+}
+
+.toggle input[type="checkbox"] {
+  position: absolute;
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.toggle-switch {
+  position: relative;
+  width: 46px;
+  height: 24px;
+  flex: 0 0 auto;
+}
+
+.toggle-switch::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  transition: background 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.toggle-switch::after {
+  content: "";
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: white;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.35);
+  transition: transform 0.2s ease, background 0.2s ease;
+}
+
+.toggle input[type="checkbox"]:focus + .toggle-switch::before {
+  box-shadow: 0 0 0 3px rgba(88, 130, 230, 0.35);
+  border-color: var(--accent);
+}
+
+.toggle input[type="checkbox"]:checked + .toggle-switch::before {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.toggle input[type="checkbox"]:checked + .toggle-switch::after {
+  transform: translateX(22px);
+}
+
+.toggle input[type="checkbox"]:disabled + .toggle-switch::before {
+  opacity: 0.4;
+}
+
+.toggle input[type="checkbox"]:disabled + .toggle-switch::after {
+  background: rgba(255,255,255,0.7);
+}
+
+.toggle-label {
+  user-select: none;
+}
+
+.toggle.inline {
+  flex-direction: row;
+}
+
+.toggle.inline .toggle-label {
+  margin-left: 0.35rem;
+}
+
+.toggle.compact .toggle-switch {
+  width: 40px;
+  height: 20px;
+}
+
+.toggle.compact .toggle-switch::after {
+  width: 16px;
+  height: 16px;
+  top: 2px;
+  left: 2px;
+}
+
+.toggle.compact input[type="checkbox"]:checked + .toggle-switch::after {
+  transform: translateX(20px);
+}
+
 /* AI generator controls */
 .ai-summary {
   border: 1px solid var(--line-color, var(--border));
@@ -640,13 +736,6 @@ body.ai-modal-active {
 .ai-advanced-group input[type="number"],
 .ai-advanced-group input[type="text"] {
   width: 100%;
-}
-
-.ai-toggle {
-  display: flex;
-  align-items: center;
-  gap: 0.4rem;
-  font-size: 0.8rem;
 }
 
 .ai-post-processing .section-title {
