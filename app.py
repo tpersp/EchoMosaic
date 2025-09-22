@@ -1417,6 +1417,7 @@ def app_settings():
         config=cfg,
         ai_defaults=default_ai_settings(),
         ai_fallback_defaults=AI_FALLBACK_DEFAULTS,
+        post_processors=STABLE_HORDE_POST_PROCESSORS,
     )
 
 
