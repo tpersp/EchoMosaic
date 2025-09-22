@@ -119,6 +119,8 @@
             </div>
           </details>
         </div>
+        {% set ai = conf.ai_settings or {} %}
+        {% set ai_state = conf.ai_state or {} %}
         <div class="ai-summary" data-stream="{{ stream_id }}" {% if conf.mode != 'ai' %} style="display:none;" {% endif %}>
           <div class="ai-summary-grid">
             <div class="ai-summary-item"><span class="ai-summary-label">Model</span><span class="ai-summary-value ai-summary-model">{{ ai.model or 'Auto' }}</span></div>
@@ -144,8 +146,6 @@
             <h3>AI Image Settings</h3>
             <button type="button" class="ai-close-settings" aria-label="Close">&times;</button>
           </div>
-          {% set ai = conf.ai_settings or {} %}
-          {% set ai_state = conf.ai_state or {} %}
           {% set sampler_options = ['k_euler','k_euler_a','k_dpmpp_2m','k_dpmpp_2m_sde','k_dpmpp_sde','k_lms','k_heun','k_dpm_2','k_dpm_2_a','k_dpm_fast','k_dpm_adaptive','ddim','plms'] %}
           <label for="ai-prompt-{{ stream_id }}">Prompt</label>
           <textarea id="ai-prompt-{{ stream_id }}" class="ai-prompt-input" data-stream="{{ stream_id }}" rows="3" placeholder="Describe the image you want">{{ ai.prompt or '' }}</textarea>
