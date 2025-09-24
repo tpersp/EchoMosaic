@@ -44,6 +44,8 @@ Test, confirm or modify so the users stream url works with the "thumb, medium, f
 
 - [ ] Add folder filter and toggle, so user can choose to enable disable folders containing "nsfw/NSFW" in the name. that way, media from folders containing nsfw does not show up in "all" and nsfw folders does not show up in folder list.
 
+- [ ] Add ability to cancel stablehorde queue, if possible. (currently it seems to be stuck in queue, and unable to generate new.)
+
 
 
 ---
