@@ -23,104 +23,405 @@ without explicit instruction; content should be edge-to-edge for immersion. -->
 const streamId = "{{ stream_id }}";
 const socket = io();
 let rotationTimer = null;
+let cancelRotation = null;
+let hlsLoaderPromise = null;
+let activeHls = null;
 
-function render(config) {
-  const container = document.getElementById('container');
-  if (rotationTimer) {
-    clearInterval(rotationTimer);
-    rotationTimer = null;
+// Request downsized images based on real display size so browsers avoid downloading full-resolution assets.
+function computeSizedImageUrl(path, container) {
+  const width = Math.max(container.clientWidth || container.offsetWidth || window.innerWidth || 1, 1);
+  const height = Math.max(container.clientHeight || container.offsetHeight || window.innerHeight || 1, 1);
+  const dpr = window.devicePixelRatio || 1;
+  const targetWidth = Math.max(Math.round(width * dpr), 1);
+  const targetHeight = Math.max(Math.round(height * dpr), 1);
+  const base = `/stream/image/${path}`;
+  const params = new URLSearchParams({
+    width: targetWidth.toString(),
+    height: targetHeight.toString(),
+  });
+  const separator = base.includes('?') ? '&' : '?';
+  return `${base}${separator}${params.toString()}`;
+}
+
+// Preload upcoming images off-screen so swaps are instant and flicker-free when the visible element is replaced.
+function startPreload(url) {
+  const preloadImg = document.createElement('img');
+  preloadImg.style.position = 'absolute';
+  preloadImg.style.left = '-10000px';
+  preloadImg.style.top = '-10000px';
+  preloadImg.style.width = '1px';
+  preloadImg.style.height = '1px';
+  preloadImg.style.pointerEvents = 'none';
+  preloadImg.setAttribute('aria-hidden', 'true');
+  preloadImg.decoding = 'async';
+  preloadImg.loading = 'eager';
+  preloadImg.alt = '';
+  document.body.appendChild(preloadImg);
+
+  let settled = false;
+  const ready = new Promise((resolve, reject) => {
+    const cleanup = () => {
+      preloadImg.removeEventListener('load', handleLoad);
+      preloadImg.removeEventListener('error', handleError);
+    };
+    function handleLoad() {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      cleanup();
+      resolve(preloadImg);
+    }
+    function handleError(err) {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      cleanup();
+      preloadImg.remove();
+      reject(err || new Error('Failed to preload image'));
+    }
+    preloadImg.addEventListener('load', handleLoad, { once: true });
+    preloadImg.addEventListener('error', handleError, { once: true });
+  });
+
+  preloadImg.src = url;
+  return { element: preloadImg, ready };
+}
+
+// Reset styles before showing the preloaded element so layouts remain responsive.
+function prepareImageForDisplay(img) {
+  img.style.position = '';
+  img.style.left = '';
+  img.style.top = '';
+  img.style.width = '';
+  img.style.height = '';
+  img.style.pointerEvents = '';
+  img.style.maxWidth = '100%';
+  img.style.maxHeight = '100%';
+  img.style.objectFit = 'contain';
+  img.removeAttribute('aria-hidden');
+  img.loading = 'eager';
+  img.decoding = 'async';
+  img.alt = img.alt || '';
+}
+
+function stopRotationLoop() {
+  if (cancelRotation) {
+    cancelRotation();
+    cancelRotation = null;
   }
-  container.innerHTML = '';
-
-  if (config.mode === 'livestream' && config.stream_url) {
-    fetch(`/stream/live?stream_id=${encodeURIComponent(streamId)}`)
-      .then(r => r.json())
-      .then(data => {
-        if (data.embed_type === 'youtube') {
-          const params = `?autoplay=1&mute=${config.yt_mute?1:0}&cc_load_policy=${config.yt_cc?1:0}`;
-          const iframe = document.createElement('iframe');
-          iframe.src = `https://www.youtube.com/embed/${data.embed_id}${params}`;
-          iframe.allow = 'autoplay';
-          container.appendChild(iframe);
-        } else if (data.embed_type === 'twitch') {
-          const iframe = document.createElement('iframe');
-          iframe.src = `https://player.twitch.tv/?channel=${data.embed_id}&parent=${location.hostname}&autoplay=true`;
-          iframe.allow = 'autoplay';
-          container.appendChild(iframe);
-        } else if (data.embed_type === 'hls') {
-          const video = document.createElement('video');
-          video.src = data.hls_url;
-          video.autoplay = true;
-          video.controls = true;
-          container.appendChild(video);
-        } else {
-          const iframe = document.createElement('iframe');
-          iframe.src = data.original_url;
-          container.appendChild(iframe);
-        }
-      });
-  } else if (config.mode === 'specific' && config.selected_image) {
-    const img = document.createElement('img');
-    img.src = `/stream/image/${config.selected_image}`;
-    container.appendChild(img);
-  } else if (config.mode === 'random') {
-    const folder = config.folder || 'all';
-    fetch(`/images?folder=${encodeURIComponent(folder)}`)
-      .then(r => r.json())
-      .then(imgs => {
-        if (!imgs.length) {
-          container.textContent = 'No images available';
-          return;
-        }
-        let seqIndex = 0;
-        function showNext() {
-          const path = (config.shuffle === false)
-            ? imgs[(seqIndex++ % imgs.length)]
-            : imgs[Math.floor(Math.random() * imgs.length)];
-          container.innerHTML = '';
-          const img = document.createElement('img');
-          img.src = `/stream/image/${path}`;
-          container.appendChild(img);
-        }
-        showNext();
-        rotationTimer = setInterval(showNext, (config.duration || 5) * 1000);
-      });
-
-  } else if (config.mode === 'ai') {
-    const aiImages = (config.ai_state && Array.isArray(config.ai_state.images))
-      ? config.ai_state.images
-      : [];
-    const paths = aiImages.map(item => (item && item.path) ? item.path : item).filter(Boolean);
-    if (!paths.length && config.selected_image) {
-      paths.push(config.selected_image);
-    }
-    if (!paths.length) {
-      container.textContent = 'No AI image generated yet';
-      return;
-    }
-    let index = 0;
-    function showAi() {
-      const path = paths[index % paths.length];
-      index += 1;
-      container.innerHTML = '';
-      const img = document.createElement('img');
-      img.src = `/stream/image/${path}`;
-      container.appendChild(img);
-    }
-    showAi();
-    if (paths.length > 1) {
-      const interval = Math.max((config.duration || 10), 2) * 1000;
-      rotationTimer = setInterval(showAi, interval);
-    }
-  } else {
-    container.textContent = 'No content configured';
+  if (rotationTimer) {
+    clearTimeout(rotationTimer);
+    rotationTimer = null;
   }
 }
 
-function load() {
-  fetch(`/get-settings/${encodeURIComponent(streamId)}`)
-    .then(r => r.json())
-    .then(conf => render(conf));
+function teardownHlsInstance() {
+  if (activeHls) {
+    try {
+      activeHls.destroy();
+    } catch (err) {
+      console.warn('Failed to destroy Hls instance', err);
+    }
+    activeHls = null;
+  }
+}
+
+// Load hls.js lazily so we only download the library when the server actually provides an HLS stream.
+function ensureHlsLibrary() {
+  if (window.Hls) {
+    return Promise.resolve(window.Hls);
+  }
+  if (!hlsLoaderPromise) {
+    hlsLoaderPromise = new Promise((resolve, reject) => {
+      const script = document.createElement('script');
+      script.src = 'https://cdn.jsdelivr.net/npm/hls.js@latest';
+      script.async = true;
+      script.onload = () => resolve(window.Hls);
+      script.onerror = () => reject(new Error('Failed to load hls.js'));
+      document.head.appendChild(script);
+    });
+  }
+  return hlsLoaderPromise;
+}
+
+async function displaySingleImage(path, container) {
+  if (!path) {
+    container.textContent = 'No image selected';
+    return;
+  }
+  container.textContent = 'Loading…';
+  try {
+    const sizedUrl = computeSizedImageUrl(path, container);
+    const preload = startPreload(sizedUrl);
+    const img = await preload.ready;
+    prepareImageForDisplay(img);
+    container.replaceChildren(img);
+  } catch (err) {
+    console.error('Failed to load image', err);
+    container.textContent = 'Unable to load image';
+  }
+}
+
+function startRandomRotation(config, container) {
+  const folder = config.folder || 'all';
+  const delayMs = Math.max((Number(config.duration) || 5) * 1000, 1000);
+  let cancelled = false;
+  let seqIndex = 0;
+  let pendingPreload = null;
+
+  cancelRotation = () => {
+    cancelled = true;
+    if (rotationTimer) {
+      clearTimeout(rotationTimer);
+      rotationTimer = null;
+    }
+    if (pendingPreload && pendingPreload.parentNode) {
+      pendingPreload.remove();
+    }
+  };
+
+  container.textContent = 'Loading…';
+
+  async function fetchNextPath() {
+    if (config.shuffle === false) {
+      const url = `/images?folder=${encodeURIComponent(folder)}&offset=${seqIndex}&limit=1`;
+      const res = await fetch(url);
+      if (!res.ok) {
+        throw new Error(`Image list request failed (${res.status})`);
+      }
+      const payload = await res.json();
+      if (Array.isArray(payload) && payload.length) {
+        seqIndex += 1;
+        return payload[0];
+      }
+      if (seqIndex !== 0) {
+        seqIndex = 0;
+        return fetchNextPath();
+      }
+      return null;
+    }
+
+    const res = await fetch(`/images/random?folder=${encodeURIComponent(folder)}`);
+    if (!res.ok) {
+      if (res.status === 404) {
+        return null;
+      }
+      throw new Error(`Random image request failed (${res.status})`);
+    }
+    const payload = await res.json();
+    return payload && payload.path ? payload.path : null;
+  }
+
+  async function cycle() {
+    if (cancelled) {
+      return;
+    }
+    try {
+      const path = await fetchNextPath();
+      if (cancelled) {
+        return;
+      }
+      if (!path) {
+        container.textContent = 'No images available';
+        cancelRotation();
+        return;
+      }
+      const sizedUrl = computeSizedImageUrl(path, container);
+      const preload = startPreload(sizedUrl);
+      pendingPreload = preload.element;
+      const img = await preload.ready;
+      pendingPreload = null;
+      if (cancelled) {
+        img.remove();
+        return;
+      }
+      prepareImageForDisplay(img);
+      container.replaceChildren(img);
+    } catch (err) {
+      console.error('Random rotation failed', err);
+      if (!cancelled) {
+        container.textContent = 'Unable to load images';
+      }
+      cancelRotation();
+      return;
+    }
+
+    if (!cancelled) {
+      rotationTimer = setTimeout(cycle, delayMs);
+    }
+  }
+
+  cycle();
+}
+
+function startAiRotation(paths, config, container) {
+  if (!paths.length) {
+    container.textContent = 'No AI image generated yet';
+    return;
+  }
+  if (paths.length === 1) {
+    displaySingleImage(paths[0], container);
+    return;
+  }
+
+  const delayMs = Math.max((Number(config.duration) || 10) * 1000, 2000);
+  let index = 0;
+  let cancelled = false;
+  let pendingPreload = null;
+
+  cancelRotation = () => {
+    cancelled = true;
+    if (rotationTimer) {
+      clearTimeout(rotationTimer);
+      rotationTimer = null;
+    }
+    if (pendingPreload && pendingPreload.parentNode) {
+      pendingPreload.remove();
+    }
+  };
+
+  container.textContent = 'Loading…';
+
+  async function cycle() {
+    if (cancelled) {
+      return;
+    }
+    const path = paths[index % paths.length];
+    index += 1;
+    try {
+      const sizedUrl = computeSizedImageUrl(path, container);
+      const preload = startPreload(sizedUrl);
+      pendingPreload = preload.element;
+      const img = await preload.ready;
+      pendingPreload = null;
+      if (cancelled) {
+        img.remove();
+        return;
+      }
+      prepareImageForDisplay(img);
+      container.replaceChildren(img);
+    } catch (err) {
+      console.error('AI rotation failed', err);
+      if (!cancelled) {
+        container.textContent = 'Unable to load AI image';
+      }
+      cancelRotation();
+      return;
+    }
+
+    if (!cancelled) {
+      rotationTimer = setTimeout(cycle, delayMs);
+    }
+  }
+
+  cycle();
+}
+
+async function render(config) {
+  const container = document.getElementById('container');
+  stopRotationLoop();
+  teardownHlsInstance();
+  container.innerHTML = '';
+
+  if (config.mode === 'livestream' && config.stream_url) {
+    try {
+      const response = await fetch(`/stream/live?stream_id=${encodeURIComponent(streamId)}`);
+      if (!response.ok) {
+        throw new Error(`Stream metadata request failed (${response.status})`);
+      }
+      const data = await response.json();
+      if (data.embed_type === 'youtube') {
+        const params = `?autoplay=1&mute=${config.yt_mute ? 1 : 0}&cc_load_policy=${config.yt_cc ? 1 : 0}`;
+        const iframe = document.createElement('iframe');
+        iframe.src = `https://www.youtube.com/embed/${data.embed_id}${params}`;
+        iframe.allow = 'autoplay';
+        container.appendChild(iframe);
+      } else if (data.embed_type === 'twitch') {
+        const iframe = document.createElement('iframe');
+        iframe.src = `https://player.twitch.tv/?channel=${data.embed_id}&parent=${location.hostname}&autoplay=true`;
+        iframe.allow = 'autoplay';
+        container.appendChild(iframe);
+      } else if (data.embed_type === 'hls') {
+        const video = document.createElement('video');
+        video.controls = true;
+        video.autoplay = true;
+        video.playsInline = true;
+        video.preload = 'auto';
+        video.style.width = '100%';
+        video.style.height = '100%';
+        container.appendChild(video);
+
+        if (video.canPlayType('application/vnd.apple.mpegurl')) {
+          video.src = data.hls_url;
+        } else {
+          try {
+            const Hls = await ensureHlsLibrary();
+            if (Hls && Hls.isSupported()) {
+              activeHls = new Hls();
+              activeHls.loadSource(data.hls_url);
+              activeHls.attachMedia(video);
+            } else {
+              video.src = data.hls_url;
+            }
+          } catch (err) {
+            console.error('Failed to initialise hls.js', err);
+            video.src = data.hls_url;
+          }
+        }
+      } else {
+        const iframe = document.createElement('iframe');
+        iframe.src = data.original_url;
+        container.appendChild(iframe);
+      }
+    } catch (err) {
+      console.error('Failed to load livestream metadata', err);
+      container.textContent = 'Unable to load stream';
+    }
+    return;
+  }
+
+  if (config.mode === 'specific' && config.selected_image) {
+    await displaySingleImage(config.selected_image, container);
+    return;
+  }
+
+  if (config.mode === 'random') {
+    startRandomRotation(config, container);
+    return;
+  }
+
+  if (config.mode === 'ai') {
+    const aiImages = (config.ai_state && Array.isArray(config.ai_state.images))
+      ? config.ai_state.images
+      : [];
+    const paths = aiImages
+      .map(item => (item && item.path) ? item.path : item)
+      .filter(Boolean);
+    if (!paths.length && config.selected_image) {
+      paths.push(config.selected_image);
+    }
+    startAiRotation(paths, config, container);
+    return;
+  }
+
+  container.textContent = 'No content configured';
+}
+
+async function load() {
+  try {
+    const res = await fetch(`/get-settings/${encodeURIComponent(streamId)}`);
+    if (!res.ok) {
+      throw new Error(`Settings request failed (${res.status})`);
+    }
+    const conf = await res.json();
+    await render(conf);
+  } catch (err) {
+    console.error('Failed to load stream settings', err);
+    const container = document.getElementById('container');
+    container.textContent = 'Unable to load stream configuration';
+  }
 }
 
 socket.on('refresh', data => {
