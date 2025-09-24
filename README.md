@@ -25,9 +25,25 @@ interface in real time.
   all connected clients using Socket.IO, eliminating the need for
   manual refreshes.
 
+* **Adaptive image delivery** – request downsized images using
+  optional `size`, `width`, or `height` query parameters on
+  `/stream/image/<filename>`; resized copies are cached for fast reuse.
+
 * **Stable Horde image generation** - craft prompts per stream, queue jobs, tweak advanced controls (post-processing, LoRAs, hires fix, worker filters), search CivitAI for new LoRAs, and review a per-stream summary while the full editor opens in a modal when you need it.
 
 ## Getting started
+
+## Image delivery & caching
+
+The `/stream/image/<path:filename>` endpoint now supports optional sizing hints
+so browsers do not need to download full-resolution assets when thumbnails will do.
+
+- Use `?size=thumb`, `?size=medium`, or `?size=full` to pick preset bounds (respectively 320px, 1024px, or the original size).
+- Supply `?width=` and/or `?height=` for custom bounds; aspect ratio is preserved automatically.
+- The first request writes the resized copy under `${IMAGE_DIR}/_thumbnails/...`; later requests reuse the cached file.
+- Responses include `Cache-Control: public, max-age=31536000` and strong `ETag` headers so standard HTTP caching works.
+
+If no sizing parameters are provided the service continues to return the original file unchanged.
 
 The easiest way to set up the application on a Linux system is to run
 the provided `install.sh` script. This script installs the required
