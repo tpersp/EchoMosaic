@@ -1333,7 +1333,8 @@ def _send_image_response(path: Union[str, Path]):
     """Return an image response with consistent caching headers."""
     abs_path = os.fspath(path)
     stat = os.stat(abs_path)
-    etag_value = generate_etag(f"{stat.st_mtime_ns}-{stat.st_size}")
+    etag_source = f"{stat.st_mtime_ns}-{stat.st_size}".encode("utf-8")
+    etag_value = generate_etag(etag_source)
     response = send_file(
         abs_path,
         conditional=True,
