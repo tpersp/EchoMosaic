@@ -548,7 +548,11 @@ def groups_delete(name):
 
 @app.route("/stream/group/<name>")
 def stream_group(name):
-    group = settings.get("_groups", {}).get(name)
+    groups = settings.get("_groups", {})
+    group = groups.get(name)
+    if not group and name.lower() == "default":
+        # Dynamic default group = all configured streams
+        group = [k for k in settings.keys() if not k.startswith("_")]
     if not group:
         return f"No group '{name}'", 404
     streams = {k: settings[k] for k in group if k in settings}

@@ -194,13 +194,23 @@
         gmGroupsList.innerHTML = '';
         Object.keys(groups).forEach(name => {
           const view = makeEl('a', {href:`/stream/group/${encodeURIComponent(name)}`, target:'_blank', class:'chip-link'}, [name]);
+          const edit = makeEl('button', {class:'chip-del', title:'Edit'}, ['Edit']);
+          edit.addEventListener('click', () => {
+            // Prefill form with group membership
+            gmName.value = name;
+            const selected = new Set(groups[name] || []);
+            gmStreamsList.querySelectorAll('input[type="checkbox"]').forEach(c => {
+              c.checked = selected.has(c.value);
+            });
+            window.scrollTo({ top: document.getElementById('group-manager').offsetTop, behavior: 'smooth' });
+          });
           const del = makeEl('button', {class:'chip-del'}, ['Delete']);
           del.addEventListener('click', async () => {
             if (!confirm(`Delete group ${name}?`)) return;
             await fetch(`/groups/${encodeURIComponent(name)}`, {method:'DELETE'});
             loadGroupsUI();
           });
-          const chip = makeEl('div', {class:'group-chip'}, [view, del]);
+          const chip = makeEl('div', {class:'group-chip'}, [view, edit, del]);
           gmGroupsList.appendChild(chip);
         });
       }
