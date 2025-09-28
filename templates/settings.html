@@ -103,13 +103,122 @@
 
     <div style="margin: 1rem 0; padding: 0.75rem; border:1px solid var(--border); border-radius:4px; background: var(--surface-alt);">
       <h3 style="margin-top:0;">Stable Horde Defaults</h3>
-      <p style="margin-top:0;">These values seed AI image settings when a stream switches to AI mode without custom preferences.</p>
-      <textarea id="ai-defaults-editor" style="width:100%; min-height:200px; font-family:monospace; font-size:0.9rem; line-height:1.4; padding:0.5rem; border:1px solid var(--border); border-radius:4px; background:var(--surface); color:inherit;">{{ ai_defaults|tojson(indent=2) }}</textarea>
-      <div style="display:flex; gap:.5rem; align-items:center; flex-wrap:wrap; margin-top:0.5rem;">
-        <button type="button" id="ai-defaults-save">Save Defaults</button>
-        <button type="button" id="ai-defaults-reset">Reset to Fallback</button>
-        <span id="ai-defaults-status" style="opacity:0.9;"></span>
-      </div>
+      <p style="margin-top:0;">These defaults apply whenever a stream switches to AI mode and has not saved its own overrides.</p>
+      <form id="ai-defaults-form" style="display:flex; flex-direction:column; gap:0.75rem;">
+        <div>
+          <label for="ai-defaults-prompt" style="display:block; font-weight:600; margin-bottom:0.35rem;">Prompt</label>
+          <textarea id="ai-defaults-prompt" rows="3" style="width:100%; resize:vertical;"></textarea>
+        </div>
+        <div>
+          <label for="ai-defaults-negative" style="display:block; font-weight:600; margin-bottom:0.35rem;">Negative Prompt</label>
+          <textarea id="ai-defaults-negative" rows="2" style="width:100%; resize:vertical;"></textarea>
+        </div>
+        <div class="ai-option-grid">
+          <div class="ai-option">
+            <label for="ai-defaults-model">Model</label>
+            <input id="ai-defaults-model" type="text" placeholder="stable_diffusion">
+          </div>
+          <div class="ai-option">
+            <label for="ai-defaults-sampler">Sampler</label>
+            {% set sampler_options = ['k_euler','k_euler_a','k_dpmpp_2m','k_dpmpp_2m_sde','k_dpmpp_sde','k_lms','k_heun','k_dpm_2','k_dpm_2_a','k_dpm_fast','k_dpm_adaptive','ddim','plms'] %}
+            <select id="ai-defaults-sampler">
+              <option value="">Auto-select</option>
+              {% for opt in sampler_options %}
+              <option value="{{ opt }}">{{ opt }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="ai-option">
+            <label for="ai-defaults-width">Width</label>
+            <input id="ai-defaults-width" type="number" min="64" max="2048" step="64">
+          </div>
+          <div class="ai-option">
+            <label for="ai-defaults-height">Height</label>
+            <input id="ai-defaults-height" type="number" min="64" max="2048" step="64">
+          </div>
+          <div class="ai-option">
+            <label for="ai-defaults-steps">Steps</label>
+            <input id="ai-defaults-steps" type="number" min="1" max="100">
+          </div>
+          <div class="ai-option">
+            <label for="ai-defaults-cfg">CFG</label>
+            <input id="ai-defaults-cfg" type="number" step="0.5" min="1" max="20">
+          </div>
+          <div class="ai-option">
+            <label for="ai-defaults-samples">Images</label>
+            <input id="ai-defaults-samples" type="number" min="1" max="10">
+          </div>
+          <div class="ai-option">
+            <label for="ai-defaults-seed">Seed</label>
+            <input id="ai-defaults-seed" type="text" placeholder="random">
+          </div>
+          <div class="ai-option">
+            <label for="ai-defaults-timeout">Timeout (secs)</label>
+            <input id="ai-defaults-timeout" type="number" step="1" min="0">
+          </div>
+        </div>
+        <div style="display:flex; flex-wrap:wrap; gap:0.75rem;">
+          <label class="toggle compact"><input type="checkbox" id="ai-defaults-save-output"><span class="toggle-switch"></span><span class="toggle-label">Persist Images</span></label>
+          <label class="toggle compact"><input type="checkbox" id="ai-defaults-nsfw"><span class="toggle-switch"></span><span class="toggle-label">Allow NSFW</span></label>
+          <label class="toggle compact"><input type="checkbox" id="ai-defaults-censor"><span class="toggle-switch"></span><span class="toggle-label">Censor NSFW</span></label>
+        </div>
+        <details class="ai-advanced-options" open>
+          <summary>Advanced Flags</summary>
+          <div class="ai-advanced-grid">
+            <div class="ai-advanced-group" style="display:flex; flex-direction:column; gap:0.4rem;">
+              <label class="toggle compact"><input type="checkbox" id="ai-defaults-hires-fix"><span class="toggle-switch"></span><span class="toggle-label">Hires Fix</span></label>
+              <label class="toggle compact"><input type="checkbox" id="ai-defaults-karras"><span class="toggle-switch"></span><span class="toggle-label">Karras Noise</span></label>
+              <label class="toggle compact"><input type="checkbox" id="ai-defaults-tiling"><span class="toggle-switch"></span><span class="toggle-label">Tiling</span></label>
+              <label class="toggle compact"><input type="checkbox" id="ai-defaults-transparent"><span class="toggle-switch"></span><span class="toggle-label">Transparent BG</span></label>
+              <label class="toggle compact"><input type="checkbox" id="ai-defaults-trusted"><span class="toggle-switch"></span><span class="toggle-label">Trusted Workers</span></label>
+              <label class="toggle compact"><input type="checkbox" id="ai-defaults-validated"><span class="toggle-switch"></span><span class="toggle-label">Validated Backends</span></label>
+              <label class="toggle compact"><input type="checkbox" id="ai-defaults-slow"><span class="toggle-switch"></span><span class="toggle-label">Allow Slow Workers</span></label>
+              <label class="toggle compact"><input type="checkbox" id="ai-defaults-extra-slow"><span class="toggle-switch"></span><span class="toggle-label">Allow Extra Slow</span></label>
+              <label class="toggle compact"><input type="checkbox" id="ai-defaults-disable-batching"><span class="toggle-switch"></span><span class="toggle-label">Disable Batching</span></label>
+              <label class="toggle compact"><input type="checkbox" id="ai-defaults-allow-downgrade"><span class="toggle-switch"></span><span class="toggle-label">Allow Downgrade</span></label>
+            </div>
+            <div class="ai-advanced-group" style="display:flex; flex-direction:column; gap:0.45rem;">
+              <label style="display:flex; flex-direction:column; gap:0.25rem;">
+                <span style="font-size:0.8rem; font-weight:600;">Clip Skip</span>
+                <input id="ai-defaults-clip-skip" type="number" min="1" max="12" placeholder="Auto">
+              </label>
+              <label style="display:flex; flex-direction:column; gap:0.25rem;">
+                <span style="font-size:0.8rem; font-weight:600;">Face Fixer Strength</span>
+                <input id="ai-defaults-facefixer" type="number" min="0" max="1" step="0.01" placeholder="Auto">
+              </label>
+              <label style="display:flex; flex-direction:column; gap:0.25rem;">
+                <span style="font-size:0.8rem; font-weight:600;">Denoising Strength</span>
+                <input id="ai-defaults-denoise" type="number" min="0.01" max="1" step="0.01" placeholder="Auto">
+              </label>
+              <label style="display:flex; flex-direction:column; gap:0.25rem;">
+                <span style="font-size:0.8rem; font-weight:600;">Hires Denoise Strength</span>
+                <input id="ai-defaults-hires-denoise" type="number" min="0.01" max="1" step="0.01" placeholder="Auto">
+              </label>
+              <label style="display:flex; flex-direction:column; gap:0.25rem;">
+                <span style="font-size:0.8rem; font-weight:600;">Style</span>
+                <input id="ai-defaults-style" type="text" placeholder="Optional">
+              </label>
+            </div>
+          </div>
+          <div class="ai-post-processing">
+            <div class="section-title">Post Processing</div>
+            <div class="post-processing-options">
+              {% for proc in post_processors %}
+              <label><input type="checkbox" class="ai-defaults-post" value="{{ proc }}"> {{ proc }}</label>
+              {% endfor %}
+            </div>
+          </div>
+        </details>
+        <div>
+          <label for="ai-defaults-loras" style="display:block; font-weight:600; margin-bottom:0.35rem;">Default LoRAs (JSON array)</label>
+          <textarea id="ai-defaults-loras" rows="2" style="width:100%; resize:vertical; font-family:monospace;"></textarea>
+        </div>
+        <div style="display:flex; gap:.5rem; align-items:center; flex-wrap:wrap;">
+          <button type="button" id="ai-defaults-save">Save Defaults</button>
+          <button type="button" id="ai-defaults-reset">Reset to Fallback</button>
+          <span id="ai-defaults-status" style="opacity:0.9;"></span>
+        </div>
+      </form>
     </div>
 
     <div style="margin: 1rem 0; padding: 0.75rem; border:1px solid var(--border); border-radius:4px; background: var(--surface-alt);">
@@ -147,12 +256,52 @@
   </script>
   <script>
   (function(){
-    const editor = document.getElementById('ai-defaults-editor');
+    const form = document.getElementById('ai-defaults-form');
+    if (!form) return;
+
     const saveBtn = document.getElementById('ai-defaults-save');
     const resetBtn = document.getElementById('ai-defaults-reset');
     const status = document.getElementById('ai-defaults-status');
     const fallback = {{ ai_fallback_defaults|tojson }};
-    if (!editor || !saveBtn) return;
+    let current = {{ ai_defaults|tojson }};
+
+    const fieldSelectors = {
+      prompt: '#ai-defaults-prompt',
+      negative_prompt: '#ai-defaults-negative',
+      model: '#ai-defaults-model',
+      sampler: '#ai-defaults-sampler',
+      width: '#ai-defaults-width',
+      height: '#ai-defaults-height',
+      steps: '#ai-defaults-steps',
+      cfg_scale: '#ai-defaults-cfg',
+      samples: '#ai-defaults-samples',
+      seed: '#ai-defaults-seed',
+      timeout: '#ai-defaults-timeout',
+      clip_skip: '#ai-defaults-clip-skip',
+      facefixer_strength: '#ai-defaults-facefixer',
+      denoising_strength: '#ai-defaults-denoise',
+      hires_fix_denoising_strength: '#ai-defaults-hires-denoise',
+      style: '#ai-defaults-style',
+    };
+
+    const booleanSelectors = {
+      save_output: '#ai-defaults-save-output',
+      nsfw: '#ai-defaults-nsfw',
+      censor_nsfw: '#ai-defaults-censor',
+      hires_fix: '#ai-defaults-hires-fix',
+      karras: '#ai-defaults-karras',
+      tiling: '#ai-defaults-tiling',
+      transparent: '#ai-defaults-transparent',
+      trusted_workers: '#ai-defaults-trusted',
+      validated_backends: '#ai-defaults-validated',
+      slow_workers: '#ai-defaults-slow',
+      extra_slow_workers: '#ai-defaults-extra-slow',
+      disable_batching: '#ai-defaults-disable-batching',
+      allow_downgrade: '#ai-defaults-allow-downgrade',
+    };
+
+    const postProcessingChecks = Array.from(form.querySelectorAll('.ai-defaults-post'));
+    const lorasInput = document.getElementById('ai-defaults-loras');
 
     const setStatus = (msg, ok = true) => {
       if (!status) return;
@@ -160,40 +309,165 @@
       status.style.color = ok ? 'inherit' : '#f77';
     };
 
-    const parseEditor = () => {
-      try {
-        return JSON.parse(editor.value || '{}');
-      } catch (err) {
-        setStatus('Invalid JSON: ' + err.message, false);
-        return null;
+    const assignValue = (selector, value) => {
+      const el = form.querySelector(selector);
+      if (!el) return;
+      if (el.tagName === 'SELECT') {
+        el.value = (value === undefined || value === null) ? '' : String(value);
+      } else if (el.type === 'number') {
+        if (value === undefined || value === null || value === '') {
+          el.value = '';
+        } else {
+          el.value = value;
+        }
+      } else {
+        el.value = value === undefined || value === null ? '' : String(value);
       }
     };
 
-    saveBtn.addEventListener('click', async () => {
-      const payload = parseEditor();
-      if (!payload) return;
-      setStatus('Saving…');
-      try {
-        const res = await fetch('/settings/ai-defaults', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload)
-        });
-        const data = await res.json().catch(() => ({}));
-        if (!res.ok || data.status !== 'success') {
-          setStatus(data.error || 'Failed to save defaults', false);
-          return;
+    const applyDefaults = (values) => {
+      const data = Object.assign({}, fallback, values || {});
+      Object.entries(fieldSelectors).forEach(([key, selector]) => {
+        assignValue(selector, data[key]);
+      });
+      Object.entries(booleanSelectors).forEach(([key, selector]) => {
+        const el = form.querySelector(selector);
+        if (!el) return;
+        el.checked = !!data[key];
+      });
+      const selectedPosts = new Set(Array.isArray(data.post_processing) ? data.post_processing : []);
+      postProcessingChecks.forEach(box => {
+        box.checked = selectedPosts.has(box.value);
+      });
+      if (lorasInput) {
+        if (Array.isArray(data.loras)) {
+          lorasInput.value = data.loras.length ? JSON.stringify(data.loras, null, 2) : '';
+        } else if (data.loras) {
+          lorasInput.value = JSON.stringify(data.loras, null, 2);
+        } else {
+          lorasInput.value = '';
         }
-        editor.value = JSON.stringify(data.defaults, null, 2);
-        setStatus('Defaults saved');
-      } catch (err) {
-        setStatus('Failed to save defaults', false);
       }
-    });
+    };
+
+    const parseNumber = (value, { allowEmpty = false, int = false } = {}) => {
+      const trimmed = String(value ?? '').trim();
+      if (!trimmed) {
+        return allowEmpty ? null : NaN;
+      }
+      const num = int ? parseInt(trimmed, 10) : parseFloat(trimmed);
+      return Number.isNaN(num) ? NaN : num;
+    };
+
+    const gatherDefaults = () => {
+      const payload = {};
+
+      const requiredInts = ['width', 'height', 'steps', 'samples'];
+      const optionalInts = ['clip_skip'];
+      const floatFields = ['cfg_scale', 'timeout', 'facefixer_strength', 'denoising_strength', 'hires_fix_denoising_strength'];
+
+      for (const [key, selector] of Object.entries(fieldSelectors)) {
+        const el = form.querySelector(selector);
+        if (!el) continue;
+        if (requiredInts.includes(key)) {
+          const parsed = parseNumber(el.value, { int: true });
+          if (parsed === null || Number.isNaN(parsed)) {
+            setStatus(`Enter a valid number for ${key.replace('_', ' ')}`, false);
+            el.focus();
+            return null;
+          }
+          payload[key] = parsed;
+        } else if (optionalInts.includes(key)) {
+          const parsed = parseNumber(el.value, { int: true, allowEmpty: true });
+          if (Number.isNaN(parsed)) {
+            setStatus(`Enter a valid number for ${key.replace('_', ' ')}`, false);
+            el.focus();
+            return null;
+          }
+          payload[key] = parsed;
+        } else if (floatFields.includes(key)) {
+          const allowEmpty = key !== 'cfg_scale' && key !== 'timeout';
+          const parsed = parseNumber(el.value, { allowEmpty });
+          if (Number.isNaN(parsed)) {
+            setStatus(`Enter a valid value for ${key.replace('_', ' ')}`, false);
+            el.focus();
+            return null;
+          }
+          payload[key] = parsed;
+        } else {
+          let value = el.value;
+          if (['seed', 'model', 'sampler', 'style'].includes(key)) {
+            value = value.trim();
+          }
+          payload[key] = value;
+        }
+      }
+
+      if (payload.seed === '' || payload.seed === null) {
+        payload.seed = 'random';
+      }
+
+      Object.entries(booleanSelectors).forEach(([key, selector]) => {
+        const el = form.querySelector(selector);
+        if (el) payload[key] = el.checked;
+      });
+
+      payload.post_processing = postProcessingChecks.filter(box => box.checked).map(box => box.value);
+
+      if (lorasInput) {
+        const raw = lorasInput.value.trim();
+        if (raw) {
+          try {
+            const parsed = JSON.parse(raw);
+            if (!Array.isArray(parsed)) {
+              setStatus('LoRAs must be a JSON array', false);
+              lorasInput.focus();
+              return null;
+            }
+            payload.loras = parsed;
+          } catch (err) {
+            setStatus('LoRAs JSON is invalid', false);
+            lorasInput.focus();
+            return null;
+          }
+        } else {
+          payload.loras = [];
+        }
+      }
+
+      return payload;
+    };
+
+    applyDefaults(current);
+
+    if (saveBtn) {
+      saveBtn.addEventListener('click', async () => {
+        const payload = gatherDefaults();
+        if (!payload) return;
+        setStatus('Saving…');
+        try {
+          const res = await fetch('/settings/ai-defaults', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+          });
+          const data = await res.json().catch(() => ({}));
+          if (!res.ok || data.status !== 'success') {
+            setStatus(data.error || 'Failed to save defaults', false);
+            return;
+          }
+          current = data.defaults || payload;
+          applyDefaults(current);
+          setStatus('Defaults saved');
+        } catch (err) {
+          setStatus('Failed to save defaults', false);
+        }
+      });
+    }
 
     if (resetBtn) {
       resetBtn.addEventListener('click', () => {
-        editor.value = JSON.stringify(fallback, null, 2);
+        applyDefaults(fallback);
         setStatus('Fallback defaults loaded');
       });
     }
