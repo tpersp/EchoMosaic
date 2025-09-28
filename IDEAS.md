@@ -37,11 +37,6 @@ A running list of ideas and future improvements. Add new items anywhere below.
 
 - [ ] Similarly to the stablehorde.py, add a page and function that can pull images from https://www.pexels.com/api/ with the available options showed to the user.
 
-- [ ] #QUESTION: does this url work with the function -> "http://<IP>:5000/stream/stream5?size=thumb"?
-Because that's what the user would use and see, they would never get to the /stream/image/<name>..
-If url : "http://<IP>:5000/stream/stream5?size=thumb" does not work with the feature, then we need to add a "quality" dropdown they would allow the user to select between the three sizes, and then it should be handled on the backend.
-Test, confirm or modify so the users stream url works with the "thumb, medium, full" feature.
-
 - [x] Add folder filter and toggle, so user can choose to enable disable folders containing "nsfw/NSFW" in the name. that way, media from folders containing nsfw does not show up in "all" and nsfw folders does not show up in folder list.
 
 - [ ] Add ability to cancel stablehorde queue, if possible. (currently it seems to be stuck in queue, and unable to generate new.)
