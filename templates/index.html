@@ -26,11 +26,41 @@
         <option value="grid" data-cols="2" {% if mosaic_settings.layout == 'grid' and mosaic_settings.cols == 2 %}selected{% endif %}>Grid 2 columns</option>
         <option value="grid" data-cols="3" {% if mosaic_settings.layout == 'grid' and mosaic_settings.cols == 3 %}selected{% endif %}>Grid 3 columns</option>
         <option value="grid" data-cols="4" {% if mosaic_settings.layout == 'grid' and mosaic_settings.cols == 4 %}selected{% endif %}>Grid 4 columns</option>
+        <option value="grid" data-cols="5" {% if mosaic_settings.layout == 'grid' and mosaic_settings.cols == 5 %}selected{% endif %}>Grid 5 columns</option>
+        <option value="grid" data-cols="6" {% if mosaic_settings.layout == 'grid' and mosaic_settings.cols == 6 %}selected{% endif %}>Grid 6 columns</option>
         <option value="horizontal" {% if mosaic_settings.layout == 'horizontal' %}selected{% endif %}>Horizontal Stack</option>
         <option value="vertical" {% if mosaic_settings.layout == 'vertical' %}selected{% endif %}>Vertical Stack</option>
         <option value="focus" {% if mosaic_settings.layout == 'focus' %}selected{% endif %}>Main + Thumbs</option>
+        <option value="pip" {% if mosaic_settings.layout == 'pip' %}selected{% endif %}>Picture in Picture</option>
       </select>
     </label>
+    <div id="pip-options" style="display:none;">
+      <label>Main Stream:
+        <select id="pip-main-select">
+          {% for sid, conf in stream_settings.items() %}
+          <option value="{{ sid }}" {% if mosaic_settings.pip_main == sid %}selected{% endif %}>{{ sid|capitalize }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>Corner Stream:
+        <select id="pip-pip-select">
+          {% for sid, conf in stream_settings.items() %}
+          <option value="{{ sid }}" {% if mosaic_settings.pip_pip == sid %}selected{% endif %}>{{ sid|capitalize }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>Corner:
+        <select id="pip-corner-select">
+          <option value="top-left" {% if mosaic_settings.pip_corner == 'top-left' %}selected{% endif %}>Top Left</option>
+          <option value="top-right" {% if mosaic_settings.pip_corner == 'top-right' %}selected{% endif %}>Top Right</option>
+          <option value="bottom-left" {% if mosaic_settings.pip_corner == 'bottom-left' %}selected{% endif %}>Bottom Left</option>
+          <option value="bottom-right" {% if mosaic_settings.pip_corner == 'bottom-right' %}selected{% endif %}>Bottom Right</option>
+        </select>
+      </label>
+      <label>Size (%):
+        <input type="number" id="pip-size-input" min="10" max="50" value="{{ mosaic_settings.pip_size or 25 }}">
+      </label>
+    </div>
     <button id="open-mosaic">View Streams</button>
   </div>
 
@@ -119,6 +149,11 @@
   const layoutSelect = document.getElementById('layout-select');
   const addStreamBtn = document.getElementById('add-stream');
   const mosaicLayoutSelect = document.getElementById('mosaic-layout-select');
+  const pipOptions = document.getElementById('pip-options');
+  const pipMainSelect = document.getElementById('pip-main-select');
+  const pipPipSelect = document.getElementById('pip-pip-select');
+  const pipCornerSelect = document.getElementById('pip-corner-select');
+  const pipSizeInput = document.getElementById('pip-size-input');
   const openMosaicBtn = document.getElementById('open-mosaic');
 
   function showNotification(msg) {
@@ -136,20 +171,43 @@
     grid.classList.add('cols-' + cols);
   });
 
-  if (mosaicLayoutSelect) {
-    mosaicLayoutSelect.addEventListener('change', e => {
-      const opt = e.target.selectedOptions[0];
-      const layout = opt.value;
-      const cols = opt.dataset.cols || mosaicLayoutSelect.dataset.currentCols;
-      mosaicLayoutSelect.dataset.currentCols = cols;
-      fetch('/mosaic-settings', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ layout, cols })
-      }).then(res => res.json()).then(() => {
-        showNotification('Stream layout updated');
-      });
+  function sendMosaicSettings() {
+    const opt = mosaicLayoutSelect.selectedOptions[0];
+    const layout = opt.value;
+    const cols = opt.dataset.cols || mosaicLayoutSelect.dataset.currentCols;
+    mosaicLayoutSelect.dataset.currentCols = cols;
+    const body = { layout, cols };
+    if (layout === 'pip') {
+      body.pip_main = pipMainSelect.value;
+      body.pip_pip = pipPipSelect.value;
+      body.pip_corner = pipCornerSelect.value;
+      body.pip_size = parseInt(pipSizeInput.value, 10) || 25;
+    }
+    fetch('/mosaic-settings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    }).then(res => res.json()).then(() => {
+      showNotification('Stream layout updated');
     });
+  }
+
+  if (mosaicLayoutSelect) {
+    const handleLayoutChange = () => {
+      const layout = mosaicLayoutSelect.value;
+      if (pipOptions) {
+        pipOptions.style.display = (layout === 'pip') ? 'block' : 'none';
+      }
+      sendMosaicSettings();
+    };
+    mosaicLayoutSelect.addEventListener('change', handleLayoutChange);
+    ['pip-main-select','pip-pip-select','pip-corner-select','pip-size-input'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) {
+        el.addEventListener('change', sendMosaicSettings);
+      }
+    });
+    handleLayoutChange();
   }
 
   if (openMosaicBtn) {

@@ -17,7 +17,14 @@ def default_mosaic_config():
     # ``layout`` controls how streams are arranged. ``grid`` uses the
     # classic column based approach while other values enable custom
     # layouts (e.g. horizontal or vertical stacking).
-    return {"cols": 2, "layout": "grid"}
+    return {
+        "cols": 2,
+        "layout": "grid",
+        "pip_main": None,
+        "pip_pip": None,
+        "pip_corner": "bottom-right",
+        "pip_size": 25,
+    }
 
 
 def default_stream_config():
@@ -52,6 +59,10 @@ else:
     # Backwards compatibility for older settings files
     settings["_mosaic"].setdefault("layout", "grid")
     settings["_mosaic"].setdefault("cols", 2)
+    settings["_mosaic"].setdefault("pip_main", None)
+    settings["_mosaic"].setdefault("pip_pip", None)
+    settings["_mosaic"].setdefault("pip_corner", "bottom-right")
+    settings["_mosaic"].setdefault("pip_size", 25)
 
 
 def get_subfolders():
@@ -186,7 +197,15 @@ def update_mosaic_settings():
     data = request.json or {}
     layout = data.get("layout", "grid")
     cols = int(data.get("cols", settings.get("_mosaic", {}).get("cols", 2)))
-    settings["_mosaic"] = {"layout": layout, "cols": cols}
+    mosaic = {"layout": layout, "cols": cols}
+    if layout == "pip":
+        mosaic.update({
+            "pip_main": data.get("pip_main"),
+            "pip_pip": data.get("pip_pip"),
+            "pip_corner": data.get("pip_corner", "bottom-right"),
+            "pip_size": int(data.get("pip_size", 25)),
+        })
+    settings["_mosaic"] = mosaic
     save_settings(settings)
     return jsonify({"status": "success", "mosaic": settings["_mosaic"]})
 
