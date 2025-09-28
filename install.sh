@@ -60,7 +60,7 @@ if [[ "$mount_answer" =~ ^[Yy]$ ]]; then
   fi
 
   default_share="//192.168.1.0/images"
-  default_mount="/mnt/images"
+  default_mount="/mnt/viewers"
 
   read -r -p "Enter server share path [${default_share}]: " SERVER_SHARE
   SERVER_SHARE="${SERVER_SHARE:-$default_share}"
