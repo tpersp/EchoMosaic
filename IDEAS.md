@@ -38,7 +38,7 @@ A running list of ideas and future improvements. Add new items anywhere below.
 
 - [ ]  [2025-09-08] Offload HLS lookup to a background task and cache results. The try_get_hls() function synchronously calls yt‑dlp on each request, which can block the server and slow down the UI. Running the lookup asynchronously, caching the resolved HLS URLs, and providing placeholder content or error messages during processing would improve responsiveness and stability.
 
-- [ ]  [2025-09-08] Add a light/dark theme toggle or customizable themes. The existing CSS defines a global dark theme with variables for colors. Allow users to switch between dark and light modes or customize the color palette to improve accessibility and user comfort.
+- [ ]  [2025-09-08] Add a light/dark theme toggle. The existing CSS defines a global dark theme with variables for colors. Allow users to switch between dark and light modes to improve accessibility and user comfort.
 
 - [ ]  [2025-09-08] Enhance group management and stream ordering. The dashboard stores group tile states in local storage, but doesn’t persist layouts server‑side or allow drag‑and‑drop reordering. Adding drag‑and‑drop ordering, server‑side persistence of group layouts, and options to clone/share groups would make managing many streams easier.
 

@@ -306,7 +306,7 @@
       makeEl('label', {}, ['Name: ', makeEl('input', {type:'text', class:'tile-name', value: name || ''}, [])])
     ]);
     body.appendChild(nameRow);
-    // Layout selection
+    // Layout selection + visual gallery
     const layoutRow = makeEl('div', {class:'tile-row'}, []);
     const layoutSelect = makeEl('select', {class:'tile-layout'}, []);
     ['grid','horizontal','vertical','focus','pip'].forEach(opt => {
@@ -334,6 +334,84 @@
     pipWrap.appendChild(rowSize);
     layoutRow.appendChild(pipWrap);
     body.appendChild(layoutRow);
+
+    // Visual layout gallery
+    const gallery = makeEl('div', {class:'layout-gallery'}, []);
+    function buildGridPreview(cols) {
+      const p = makeEl('div', {class:'layout-preview'}, []);
+      p.style.display = 'grid';
+      p.style.gridTemplateColumns = `repeat(${cols}, 1fr)`;
+      p.style.gridAutoRows = '1fr';
+      for (let i=0;i<Math.max(cols*2, 4);i++) p.appendChild(makeEl('div', {class:'cell'}, []));
+      return p;
+    }
+    function buildHorizontalPreview() {
+      const p = buildGridPreview(3); // shows a row
+      p.style.gridTemplateRows = '1fr';
+      p.style.gridAutoFlow = 'column';
+      return p;
+    }
+    function buildVerticalPreview() {
+      const p = makeEl('div', {class:'layout-preview'}, []);
+      p.style.display = 'grid';
+      p.style.gridTemplateColumns = '1fr';
+      p.style.gridTemplateRows = 'repeat(3, 1fr)';
+      for (let i=0;i<3;i++) p.appendChild(makeEl('div', {class:'cell'}, []));
+      return p;
+    }
+    function buildFocusPreview() {
+      const p = makeEl('div', {class:'layout-preview'}, []);
+      p.style.display = 'grid';
+      p.style.gridTemplateColumns = 'repeat(3, 1fr)';
+      p.style.gridTemplateRows = 'repeat(3, 1fr)';
+      const cells = ['a','b','c','d','main','main','e','main','main'];
+      cells.forEach(() => p.appendChild(makeEl('div', {class:'cell'}, [])));
+      // Make main area bigger visually
+      Array.from(p.children).forEach((c, i) => {
+        if ([4,5,7,8].includes(i)) c.style.background = '#262626';
+      });
+      return p;
+    }
+    function buildPipPreview() {
+      const p = makeEl('div', {class:'layout-preview'}, []);
+      const main = makeEl('div', {class:'cell'}, []); main.style.height = '100%'; main.style.width='100%';
+      main.style.background = '#1d1d1d';
+      const pip = makeEl('div', {class:'cell'}, []);
+      pip.style.position='absolute'; pip.style.width='35%'; pip.style.height='35%'; pip.style.right='6%'; pip.style.bottom='6%'; pip.style.background='#262626';
+      p.appendChild(main); p.appendChild(pip);
+      return p;
+    }
+    function addOption(kind, label, onPick) {
+      const opt = makeEl('div', {class:'layout-option', 'data-kind': kind}, []);
+      let preview;
+      if (kind.startsWith('grid-')) preview = buildGridPreview(parseInt(kind.split('-')[1],10));
+      else if (kind==='horizontal') preview = buildHorizontalPreview();
+      else if (kind==='vertical') preview = buildVerticalPreview();
+      else if (kind==='focus') preview = buildFocusPreview();
+      else if (kind==='pip') preview = buildPipPreview();
+      else preview = makeEl('div', {class:'layout-preview'}, []);
+      opt.appendChild(preview);
+      opt.appendChild(makeEl('span', {class:'caption'}, [label]));
+      opt.addEventListener('click', () => { onPick(); setActive(kind); });
+      gallery.appendChild(opt);
+      return opt;
+    }
+    function setActive(kind) {
+      gallery.querySelectorAll('.layout-option').forEach(o => o.classList.toggle('active', o.dataset.kind===kind));
+    }
+    const optionRefs = [];
+    for (let c=1;c<=6;c++) optionRefs.push(addOption(`grid-${c}`, `Grid ${c}`, () => { layoutSelect.value='grid'; colsInput.value=c; updateLayoutVisibility(); }));
+    optionRefs.push(addOption('horizontal', 'Horizontal', () => { layoutSelect.value='horizontal'; updateLayoutVisibility(); }));
+    optionRefs.push(addOption('vertical', 'Vertical', () => { layoutSelect.value='vertical'; updateLayoutVisibility(); }));
+    optionRefs.push(addOption('focus', 'Focus', () => { layoutSelect.value='focus'; updateLayoutVisibility(); }));
+    optionRefs.push(addOption('pip', 'PiP', () => { layoutSelect.value='pip'; updateLayoutVisibility(); }));
+    body.appendChild(gallery);
+    function syncActiveFromInputs() {
+      const v = layoutSelect.value;
+      if (v==='grid') setActive(`grid-${parseInt(colsInput.value||'2',10)}`); else setActive(v);
+    }
+    layoutSelect.addEventListener('change', syncActiveFromInputs);
+    colsInput.addEventListener('change', syncActiveFromInputs);
     // Bulk row (Add all / Remove all) above the combo
     const bulkRow = makeEl('div', {class:'tile-row tile-bulk-row'}, []);
     const addAllBtn = makeEl('button', {class:'tile-addall-btn', type:'button'}, ['Add all']);

@@ -264,6 +264,14 @@ a {
 .embed-status-badge[data-state="unreachable"],
 .embed-status-badge[data-state="error"] { color: #e74c3c; border-color: #7e2a22; }
 
+/* Layout gallery for group tiles */
+.layout-gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 8px; margin-top: 6px; }
+.layout-option { border: 1px solid var(--border); border-radius: 6px; background: var(--surface-alt); padding: 6px; cursor: pointer; }
+.layout-option.active { outline: 2px solid var(--accent); }
+.layout-preview { position: relative; width: 100%; aspect-ratio: 16/9; background: #0b0b0b; border-radius: 4px; overflow: hidden; display: grid; }
+.layout-preview .cell { background: #1d1d1d; border: 1px solid #2a2a2a; }
+.layout-option .caption { display: block; text-align: center; margin-top: 4px; font-size: 0.75rem; opacity: 0.9; }
+
 /* Inline controls (e.g., YT CC/Mute/Quality) */
 .inline-controls {
   display: grid;
