@@ -1029,7 +1029,16 @@ def render_stream(name):
         return f"No stream '{name}'", 404
     conf = settings[key]
     images = list_images(conf.get("folder", "all"))
-    return render_template("single_stream.html", stream_id=key, config=conf, images=images)
+    quality = (request.args.get("size") or "").strip().lower()
+    if quality and quality not in THUMBNAIL_SIZE_PRESETS:
+        quality = ""
+    return render_template(
+        "single_stream.html",
+        stream_id=key,
+        config=conf,
+        images=images,
+        default_quality=quality,
+    )
 
 
 @app.route("/streams", methods=["POST"])
