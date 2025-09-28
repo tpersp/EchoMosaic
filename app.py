@@ -47,6 +47,21 @@ AI_DEFAULT_PERSIST = True
 AI_POLL_INTERVAL = 5.0
 AI_TIMEOUT = 600.0
 
+STABLE_HORDE_POST_PROCESSORS = [
+    "GFPGAN",
+    "RealESRGAN_x4plus",
+    "RealESRGAN_x2plus",
+    "RealESRGAN_x4plus_anime_6B",
+    "NMKD_Siax",
+    "4x_AnimeSharp",
+    "CodeFormers",
+    "strip_background",
+]
+STABLE_HORDE_MAX_LORAS = 4
+STABLE_HORDE_CLIP_SKIP_RANGE = (1, 12)
+STABLE_HORDE_STRENGTH_RANGE = (0.0, 1.0)
+STABLE_HORDE_DENOISE_RANGE = (0.01, 1.0)
+
 IMAGE_DIR_PATH = Path(IMAGE_DIR)
 
 
@@ -65,6 +80,23 @@ def default_ai_settings() -> Dict[str, Any]:
         "nsfw": False,
         "censor_nsfw": False,
         "save_output": AI_DEFAULT_PERSIST,
+        "post_processing": [],
+        "hires_fix": False,
+        "hires_fix_denoising_strength": None,
+        "denoising_strength": None,
+        "facefixer_strength": None,
+        "clip_skip": None,
+        "karras": False,
+        "tiling": False,
+        "transparent": False,
+        "loras": [],
+        "style": "",
+        "trusted_workers": False,
+        "validated_backends": True,
+        "slow_workers": True,
+        "extra_slow_workers": False,
+        "disable_batching": False,
+        "allow_downgrade": False,
     }
 
 
@@ -111,23 +143,80 @@ def _ensure_dir(path: Path) -> Path:
 def _sanitize_ai_settings(payload: Dict[str, Any], base: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     defaults = default_ai_settings()
     current = dict(base or defaults)
+    bool_keys = {
+        "save_output",
+        "nsfw",
+        "censor_nsfw",
+        "hires_fix",
+        "karras",
+        "tiling",
+        "transparent",
+        "trusted_workers",
+        "validated_backends",
+        "slow_workers",
+        "extra_slow_workers",
+        "disable_batching",
+        "allow_downgrade",
+    }
     for key, value in payload.items():
         if key not in defaults:
             continue
-        if key in {"width", "height", "steps", "samples"}:
+        if key in {"width", "height"}:
             try:
-                current[key] = max(1, int(value))
+                coerced = int(value)
             except (TypeError, ValueError):
                 continue
+            current[key] = max(64, coerced)
+        elif key == "steps":
+            maybe = _maybe_int(value)
+            if maybe is None:
+                continue
+            current[key] = max(1, maybe)
+        elif key == "samples":
+            maybe = _maybe_int(value)
+            if maybe is None:
+                continue
+            current[key] = max(1, min(10, maybe))
         elif key == "cfg_scale":
-            try:
-                current[key] = float(value)
-            except (TypeError, ValueError):
+            maybe = _maybe_float(value)
+            if maybe is None:
                 continue
-        elif key in {"save_output", "nsfw", "censor_nsfw"}:
-            current[key] = bool(value)
+            current[key] = maybe
+        elif key in bool_keys:
+            current[key] = _coerce_bool(value, defaults[key])
         elif key == "seed":
-            current[key] = str(value) if value not in (None, "") else "random"
+            current[key] = str(value).strip() if value not in (None, "") else "random"
+        elif key == "post_processing":
+            current[key] = _sanitize_post_processing(value)
+        elif key == "loras":
+            current[key] = _sanitize_loras(value)
+        elif key == "clip_skip":
+            if value in (None, "", "none", "auto", "default"):
+                current[key] = None
+                continue
+            maybe = _maybe_int(value)
+            if maybe is None:
+                continue
+            lower, upper = STABLE_HORDE_CLIP_SKIP_RANGE
+            current[key] = int(_clamp(maybe, lower, upper))
+        elif key in {"facefixer_strength"}:
+            if value in (None, "", "none"):
+                current[key] = None
+                continue
+            maybe = _maybe_float(value)
+            if maybe is None:
+                continue
+            low, high = STABLE_HORDE_STRENGTH_RANGE
+            current[key] = _clamp(maybe, low, high)
+        elif key in {"denoising_strength", "hires_fix_denoising_strength"}:
+            if value in (None, "", "none"):
+                current[key] = None
+                continue
+            maybe = _maybe_float(value)
+            if maybe is None:
+                continue
+            low, high = STABLE_HORDE_DENOISE_RANGE
+            current[key] = _clamp(maybe, low, high)
         elif isinstance(value, str):
             current[key] = value.strip()
         else:
@@ -210,6 +299,102 @@ def _coerce_bool(value, default):
     if isinstance(value, str):
         return value.strip().lower() in {"1", "true", "yes", "on"}
     return default
+
+
+def _maybe_float(value):
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _maybe_int(value):
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _clamp(value, lower=None, upper=None):
+    if value is None:
+        return None
+    if lower is not None and value < lower:
+        value = lower
+    if upper is not None and value > upper:
+        value = upper
+    return value
+
+
+def _sanitize_post_processing(value):
+    if not value:
+        return []
+    if isinstance(value, str):
+        candidates = [part.strip() for part in value.split(',')]
+    elif isinstance(value, (list, tuple, set)):
+        candidates = []
+        for item in value:
+            if isinstance(item, str):
+                candidates.append(item.strip())
+    else:
+        return []
+    seen = set()
+    cleaned = []
+    for name in candidates:
+        if not name:
+            continue
+        if name not in STABLE_HORDE_POST_PROCESSORS:
+            continue
+        if name in seen:
+            continue
+        cleaned.append(name)
+        seen.add(name)
+    return cleaned
+
+
+def _sanitize_loras(value):
+    if not value:
+        return []
+    raw_list = value
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+        except Exception:
+            parsed = [part.strip() for part in value.split(',') if part.strip()]
+        raw_list = parsed
+    if not isinstance(raw_list, (list, tuple)):
+        return []
+    cleaned = []
+    for item in raw_list:
+        if isinstance(item, str):
+            entry = {"name": item}
+        elif isinstance(item, dict):
+            entry = dict(item)
+        else:
+            continue
+        name = str(entry.get("name") or '').strip()
+        if not name:
+            continue
+        model_strength = _maybe_float(entry.get("model"))
+        clip_strength = _maybe_float(entry.get("clip"))
+        inject_trigger = entry.get("inject_trigger")
+        if isinstance(inject_trigger, str):
+            inject_trigger = inject_trigger.strip() or None
+        if model_strength is None:
+            model_strength = 1.0
+        model_strength = _clamp(model_strength, -5.0, 5.0)
+        if clip_strength is None:
+            clip_strength = model_strength
+        clip_strength = _clamp(clip_strength, -5.0, 5.0)
+        cleaned.append({
+            "name": name,
+            "model": model_strength,
+            "clip": clip_strength,
+            "inject_trigger": inject_trigger,
+            "is_version": bool(entry.get("is_version")),
+        })
+        if len(cleaned) >= STABLE_HORDE_MAX_LORAS:
+            break
+    return cleaned
 
 
 AI_DEFAULT_MODEL = config_data.get("AI_DEFAULT_MODEL", AI_DEFAULT_MODEL) or AI_DEFAULT_MODEL
@@ -345,6 +530,56 @@ def _run_ai_generation(stream_id: str, options: Dict[str, Any]) -> None:
     else:
         seed = str(seed)
 
+    post_processing = [
+        proc
+        for proc in (options.get('post_processing') or [])
+        if isinstance(proc, str) and proc in STABLE_HORDE_POST_PROCESSORS
+    ]
+    loras_payload: List[Dict[str, Any]] = []
+    for entry in options.get('loras') or []:
+        if not isinstance(entry, dict):
+            continue
+        name = entry.get('name')
+        if not name:
+            continue
+        cleaned_entry: Dict[str, Any] = {'name': name}
+        for attr in ('model', 'clip'):
+            val = entry.get(attr)
+            if isinstance(val, (int, float)):
+                cleaned_entry[attr] = float(val)
+        trigger = entry.get('inject_trigger')
+        if isinstance(trigger, str) and trigger:
+            cleaned_entry['inject_trigger'] = trigger
+        if entry.get('is_version'):
+            cleaned_entry['is_version'] = bool(entry.get('is_version'))
+        loras_payload.append(cleaned_entry)
+        if len(loras_payload) >= STABLE_HORDE_MAX_LORAS:
+            break
+    advanced_params: Dict[str, Any] = {}
+    if loras_payload:
+        advanced_params['loras'] = loras_payload
+    for flag in ('hires_fix', 'karras', 'tiling', 'transparent'):
+        if options.get(flag):
+            advanced_params[flag] = True
+    clip_skip_value = options.get('clip_skip')
+    if isinstance(clip_skip_value, (int, float)):
+        advanced_params['clip_skip'] = int(clip_skip_value)
+    for float_key in ('facefixer_strength',):
+        val = options.get(float_key)
+        if isinstance(val, (int, float)):
+            advanced_params[float_key] = float(val)
+    for float_key in ('denoising_strength', 'hires_fix_denoising_strength'):
+        val = options.get(float_key)
+        if isinstance(val, (int, float)):
+            advanced_params[float_key] = float(val)
+    extras_payload: Dict[str, Any] = {}
+    for flag in ('trusted_workers', 'validated_backends', 'slow_workers', 'extra_slow_workers', 'disable_batching', 'allow_downgrade'):
+        if flag in options:
+            extras_payload[flag] = bool(options.get(flag))
+    style_value = str(options.get('style') or '').strip()
+    if style_value:
+        extras_payload['style'] = style_value
+
     try:
         result = stable_horde_client.generate_images(
             prompt,
@@ -359,6 +594,9 @@ def _run_ai_generation(stream_id: str, options: Dict[str, Any]) -> None:
             samples=int(options.get('samples', AI_DEFAULT_SAMPLES)),
             nsfw=bool(options.get('nsfw')),
             censor_nsfw=bool(options.get('censor_nsfw')),
+            post_processing=post_processing or None,
+            params=advanced_params or None,
+            extras=extras_payload or None,
             poll_interval=float(options.get('poll_interval', AI_POLL_INTERVAL)),
             timeout=float(options.get('timeout', AI_TIMEOUT)),
             persist=persist,
@@ -541,6 +779,11 @@ def dashboard():
         stream_settings=streams,
         mosaic_settings=mosaic,
         groups=groups,
+        post_processors=STABLE_HORDE_POST_PROCESSORS,
+        max_loras=STABLE_HORDE_MAX_LORAS,
+        clip_skip_range=STABLE_HORDE_CLIP_SKIP_RANGE,
+        strength_range=STABLE_HORDE_STRENGTH_RANGE,
+        denoise_range=STABLE_HORDE_DENOISE_RANGE,
     )
 
 

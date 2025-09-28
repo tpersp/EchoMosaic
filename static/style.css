@@ -477,6 +477,118 @@ a {
   font-size: 0.85rem;
 }
 
+.ai-advanced-options {
+  border: 1px solid var(--line-color, var(--border));
+  border-radius: 6px;
+  padding: 0.5rem 0.6rem 0.75rem;
+  background: var(--surface-alt);
+}
+
+.ai-advanced-options summary {
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 0.9rem;
+  color: var(--accent);
+}
+
+.ai-advanced-options[open] summary {
+  margin-bottom: 0.5rem;
+}
+
+.ai-advanced-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 0.75rem 1rem;
+  margin-bottom: 0.75rem;
+}
+
+.ai-advanced-group label {
+  font-size: 0.8rem;
+  margin-bottom: 0.35rem;
+}
+
+.ai-advanced-group input[type="number"],
+.ai-advanced-group input[type="text"] {
+  width: 100%;
+}
+
+.ai-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.8rem;
+}
+
+.ai-post-processing .section-title {
+  font-size: 0.85rem;
+  font-weight: 600;
+  margin-bottom: 0.35rem;
+}
+
+.post-processing-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem 1rem;
+  font-size: 0.8rem;
+}
+
+.post-processing-options label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.ai-lora-section {
+  margin-top: 0.75rem;
+  border-top: 1px solid var(--line-color, var(--border));
+  padding-top: 0.75rem;
+}
+
+.lora-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.5rem;
+}
+
+.ai-lora-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.ai-lora-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 0.5rem;
+}
+
+.ai-lora-row input {
+  width: 100%;
+}
+
+.ai-lora-remove {
+  justify-self: end;
+}
+
+.ai-lora-flag {
+  font-size: 0.75rem;
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+.ai-lora-section .hint {
+  font-size: 0.7rem;
+  color: var(--muted-color, #8a8a8a);
+  margin: 0.35rem 0 0;
+}
+
+.ai-add-lora[disabled] {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
 .ai-actions {
   display: flex;
   align-items: center;
