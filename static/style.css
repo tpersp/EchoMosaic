@@ -514,15 +514,8 @@ a {
 .toggle.inline {
   flex-direction: row;
   align-items: center;
+  gap: 0.45rem;
   margin-right: 1rem;
-}
-
-.toggle.inline .toggle-switch {
-  margin-right: 0.45rem;
-}
-
-.toggle.inline .toggle-label {
-  margin-left: 0;
 }
 
 .toggle.inline:last-child {
@@ -531,7 +524,8 @@ a {
 
 .toggle.compact {
   width: 100%;
-  justify-content: space-between;
+  justify-content: flex-start;
+  gap: 0.6rem;
   font-size: 0.8rem;
   display: flex;
   align-items: center;
@@ -539,15 +533,14 @@ a {
 
 .toggle.compact .toggle-label {
   order: 0;
-  flex: 1 1 auto;
-  padding-right: 0.4rem;
+  flex: 0 0 auto;
+  padding-right: 0;
 }
 
 .toggle.compact .toggle-switch {
   order: 1;
   width: 40px;
   height: 20px;
-  margin-left: 0;
 }
 
 .toggle.compact .toggle-switch::after {
