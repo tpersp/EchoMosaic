@@ -21,13 +21,17 @@
   </script>
 </head>
 <body>
-  <div class="container">
+  <header class="top-bar">
     <h1>Settings</h1>
+    <nav>
+      <a href="{{ url_for('dashboard') }}">Dashboard</a>
+    </nav>
+  </header>
+  <div class="container">
     <p><strong>Install Dir:</strong> {{ config.INSTALL_DIR }}</p>
     <p><strong>Service Name:</strong> {{ config.SERVICE_NAME }}</p>
     <p><strong>Update Branch:</strong> {{ config.UPDATE_BRANCH }}</p>
     <button onclick="triggerUpdate()">Update Now</button>
-    <p><a href="{{ url_for('dashboard') }}">Back to Dashboard</a></p>
   </div>
 </body>
 </html>
