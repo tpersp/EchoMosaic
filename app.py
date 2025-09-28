@@ -312,6 +312,16 @@ def ensure_ai_defaults(conf: Dict[str, Any]) -> None:
         conf["_ai_customized"] = not _ai_settings_match_defaults(conf[AI_SETTINGS_KEY], defaults=ai_defaults)
 
 
+def ensure_background_defaults(conf: Dict[str, Any]) -> None:
+    if not isinstance(conf, dict):
+        return
+    enabled_raw = conf.get("background_blur_enabled")
+    conf["background_blur_enabled"] = _coerce_bool(enabled_raw, False)
+    amount_raw = conf.get("background_blur_amount", 50)
+    amount_val = _coerce_int(amount_raw, 50)
+    conf["background_blur_amount"] = max(0, min(100, amount_val))
+
+
 def _ensure_dir(path: Path) -> Path:
     try:
         path.mkdir(parents=True, exist_ok=True)
@@ -457,6 +467,8 @@ def default_stream_config():
         "yt_quality": "auto",
         "image_quality": "auto",
         "label": "",
+        "background_blur_enabled": False,
+        "background_blur_amount": 50,
         AI_SETTINGS_KEY: default_ai_settings(),
         AI_STATE_KEY: default_ai_state(),
         "_ai_customized": False,
@@ -943,6 +955,7 @@ for k, v in list(settings.items()):
         if v.get("image_quality") not in IMAGE_QUALITY_CHOICES:
             v["image_quality"] = "auto"
         ensure_ai_defaults(v)
+        ensure_background_defaults(v)
 
 # Ensure notes key exists
 settings.setdefault("_notes", "")
@@ -1020,6 +1033,7 @@ def dashboard():
                 conf["image_quality"] = "auto"
             else:
                 conf["image_quality"] = quality.strip().lower()
+            ensure_background_defaults(conf)
     mosaic = settings.get("_mosaic", default_mosaic_config())
     groups = sorted(list(settings.get("_groups", {}).keys()))
     return render_template(
@@ -1040,6 +1054,9 @@ def dashboard():
 def mosaic_streams():
     # Dynamic global view: include all streams ("online" assumed as configured)
     streams = {k: v for k, v in settings.items() if not k.startswith("_")}
+    for conf in streams.values():
+        if isinstance(conf, dict):
+            ensure_background_defaults(conf)
     mosaic = settings.get("_mosaic", default_mosaic_config())
     return render_template("streams.html", stream_settings=streams, mosaic_settings=mosaic)
 
@@ -1079,6 +1096,7 @@ def render_stream(name):
     if config_quality not in IMAGE_QUALITY_CHOICES:
         config_quality = "auto"
     conf["image_quality"] = config_quality
+    ensure_background_defaults(conf)
     images = list_images(conf.get("folder", "all"), hide_nsfw=conf.get("hide_nsfw", False))
     requested_quality = (request.args.get("size") or "").strip().lower()
     if requested_quality and requested_quality not in IMAGE_QUALITY_CHOICES:
@@ -1124,7 +1142,10 @@ def delete_stream(stream_id):
 def get_stream_settings(stream_id):
     if stream_id not in settings:
         return jsonify({"error": f"No stream '{stream_id}' found"}), 404
-    return jsonify(settings[stream_id])
+    conf = settings[stream_id]
+    ensure_ai_defaults(conf)
+    ensure_background_defaults(conf)
+    return jsonify(conf)
 
 @app.route("/settings/<stream_id>", methods=["POST"])
 def update_stream_settings(stream_id):
@@ -1138,7 +1159,8 @@ def update_stream_settings(stream_id):
 
     # We'll add new keys for YouTube: "yt_cc", "yt_mute", "yt_quality"
     for key in ["mode", "folder", "selected_image", "duration", "shuffle", "stream_url",
-                "image_quality", "yt_cc", "yt_mute", "yt_quality", "label", "hide_nsfw"]:
+                "image_quality", "yt_cc", "yt_mute", "yt_quality", "label", "hide_nsfw",
+                "background_blur_enabled", "background_blur_amount"]:
         if key in data:
             val = data[key]
             if key == "stream_url":
@@ -1158,6 +1180,11 @@ def update_stream_settings(stream_id):
                 conf[key] = new_label
             elif key == "hide_nsfw":
                 conf[key] = bool(val)
+            elif key == "background_blur_enabled":
+                conf[key] = _coerce_bool(val, conf.get(key, False))
+            elif key == "background_blur_amount":
+                amount = _coerce_int(val, conf.get(key, 50))
+                conf[key] = max(0, min(100, amount))
             elif key == "image_quality":
                 normalized = (val or "").strip().lower() if isinstance(val, str) else ""
                 if normalized not in IMAGE_QUALITY_CHOICES:
@@ -1180,6 +1207,7 @@ def update_stream_settings(stream_id):
         conf[AI_SETTINGS_KEY] = _sanitize_ai_settings(data["ai_settings"], conf[AI_SETTINGS_KEY])
         conf["_ai_customized"] = not _ai_settings_match_defaults(conf[AI_SETTINGS_KEY])
 
+    ensure_background_defaults(conf)
     save_settings(settings)
     socketio.emit("refresh", {"stream_id": stream_id, "config": conf})
     return jsonify({"status": "success", "new_config": conf})

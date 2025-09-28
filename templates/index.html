@@ -104,7 +104,25 @@
           </select>
         </div>
 
-        
+        <!-- Background Blur Controls -->
+        {% set blur_enabled = conf.background_blur_enabled|default(False) %}
+        {% set blur_amount = conf.background_blur_amount|default(50) %}
+        <div class="form-row background-row">
+          <label for="background-toggle-{{ stream_id }}">Backdrop</label>
+          <div class="background-controls">
+            <label class="toggle inline">
+              <input id="background-toggle-{{ stream_id }}" type="checkbox" class="background-toggle" data-stream="{{ stream_id }}" {% if blur_enabled %}checked{% endif %}>
+              <span class="toggle-switch" aria-hidden="true"></span>
+              <span class="toggle-label">Blur current media</span>
+            </label>
+            <div class="background-blur-slider-wrap{% if not blur_enabled %} is-disabled{% endif %}">
+              <input type="range" min="0" max="100" class="background-blur-slider" data-stream="{{ stream_id }}" value="{{ blur_amount }}" {% if not blur_enabled %}disabled{% endif %}>
+              <span class="background-blur-value">{{ blur_amount }}%</span>
+            </div>
+          </div>
+        </div>
+
+
 
         <!-- Duration + Shuffle (for Random mode) -->
         <div class="form-row duration-container" {% if conf.mode != 'random' %} style="display:none;" {% endif %}>
@@ -1973,6 +1991,22 @@
               hideToggle.checked = !!data.new_config.hide_nsfw;
             }
           }
+          if (data.new_config && data.new_config.background_blur_enabled !== undefined) {
+            const enabled = !!data.new_config.background_blur_enabled;
+            const bgToggle = card.querySelector('.background-toggle');
+            const slider = card.querySelector('.background-blur-slider');
+            const wrap = card.querySelector('.background-blur-slider-wrap');
+            if (bgToggle) bgToggle.checked = enabled;
+            if (slider) slider.disabled = !enabled;
+            if (wrap) wrap.classList.toggle('is-disabled', !enabled);
+          }
+          if (data.new_config && data.new_config.background_blur_amount !== undefined) {
+            const amount = Number(data.new_config.background_blur_amount) || 0;
+            const slider = card.querySelector('.background-blur-slider');
+            const valEl = card.querySelector('.background-blur-value');
+            if (slider) slider.value = String(amount);
+            if (valEl) valEl.textContent = `${amount}%`;
+          }
           const aiSettings = data.new_config && data.new_config.ai_settings;
           if (aiSettings) {
             const aiSection = card.querySelector('.ai-generator');
@@ -2163,6 +2197,27 @@
         imageQualitySelect.addEventListener('change', e => {
           const nextValue = e.target.value || 'auto';
           saveSettings(streamId, { image_quality: nextValue });
+        });
+      }
+      const backgroundToggle = card.querySelector('.background-toggle');
+      const backgroundSlider = card.querySelector('.background-blur-slider');
+      const backgroundValue = card.querySelector('.background-blur-value');
+      const backgroundWrap = card.querySelector('.background-blur-slider-wrap');
+      if (backgroundToggle) {
+        backgroundToggle.addEventListener('change', e => {
+          const enabled = e.target.checked;
+          if (backgroundSlider) backgroundSlider.disabled = !enabled;
+          if (backgroundWrap) backgroundWrap.classList.toggle('is-disabled', !enabled);
+          saveSettings(streamId, { background_blur_enabled: enabled });
+        });
+      }
+      if (backgroundSlider) {
+        backgroundSlider.addEventListener('input', e => {
+          if (backgroundValue) backgroundValue.textContent = `${e.target.value}%`;
+        });
+        backgroundSlider.addEventListener('change', e => {
+          const amount = Number(e.target.value);
+          saveSettings(streamId, { background_blur_amount: amount });
         });
       }
       // Mode change

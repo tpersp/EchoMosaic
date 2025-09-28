@@ -10,7 +10,10 @@ without explicit instruction; content should be edge-to-edge for immersion. -->
   </head>
 <body>
 <!-- NOTE: No header/toolbars here; keep media full-screen friendly. -->
-<div id="container"></div>
+<div class="stream-wrapper" id="stream-wrapper">
+  <div class="media-backdrop" id="media-backdrop" aria-hidden="true"></div>
+  <div id="container" class="media-container"></div>
+</div>
 <script src="https://cdn.socket.io/4.0.1/socket.io.min.js"></script>
 <script>
 // Apply saved theme (silently, no UI)
@@ -22,10 +25,57 @@ without explicit instruction; content should be edge-to-edge for immersion. -->
 
 const streamId = "{{ stream_id }}";
 const socket = io();
+const MAX_BACKDROP_BLUR = 40;
+const backdropEl = document.getElementById('media-backdrop');
 let rotationTimer = null;
 let cancelRotation = null;
 let hlsLoaderPromise = null;
 let activeHls = null;
+let backdropState = {
+  enabled: false,
+  amount: 50,
+};
+let backdropSource = '';
+
+function clampBlurAmount(raw) {
+  const num = Number(raw);
+  if (!Number.isFinite(num)) {
+    return 50;
+  }
+  return Math.min(100, Math.max(0, Math.round(num)));
+}
+
+function applyBackdropState() {
+  if (!backdropEl) {
+    return;
+  }
+  const amount = clampBlurAmount(backdropState.amount);
+  const blurPx = Math.round((amount / 100) * MAX_BACKDROP_BLUR);
+  backdropEl.style.setProperty('--backdrop-blur', `${blurPx}px`);
+  const active = Boolean(backdropState.enabled && backdropSource);
+  if (active) {
+    backdropEl.style.backgroundImage = `url(${JSON.stringify(backdropSource)})`;
+    backdropEl.classList.add('is-active');
+  } else {
+    backdropEl.classList.remove('is-active');
+    if (!backdropSource) {
+      backdropEl.style.backgroundImage = '';
+    }
+  }
+}
+
+function setBackdropSettings(enabled, amount) {
+  backdropState = {
+    enabled: Boolean(enabled),
+    amount: clampBlurAmount(amount),
+  };
+  applyBackdropState();
+}
+
+function updateBackdropSource(url) {
+  backdropSource = url || '';
+  applyBackdropState();
+}
 
 const VALID_QUALITIES = new Set(['auto', 'thumb', 'medium', 'full']);
 const TEMPLATE_QUALITY = {{ default_quality|tojson }};
@@ -161,6 +211,7 @@ function ensureHlsLibrary() {
 async function displaySingleImage(path, container) {
   if (!path) {
     container.textContent = 'No image selected';
+    updateBackdropSource('');
     return;
   }
   container.textContent = 'Loading...';
@@ -170,9 +221,11 @@ async function displaySingleImage(path, container) {
     const img = await preload.ready;
     prepareImageForDisplay(img);
     container.replaceChildren(img);
+    updateBackdropSource(img.currentSrc || img.src || sizedUrl);
   } catch (err) {
     console.error('Failed to load image', err);
     container.textContent = 'Unable to load image';
+    updateBackdropSource('');
   }
 }
 
@@ -245,6 +298,7 @@ function startRandomRotation(config, container) {
       }
       if (!path) {
         container.textContent = 'No images available';
+        updateBackdropSource('');
         cancelRotation();
         return;
       }
@@ -259,10 +313,12 @@ function startRandomRotation(config, container) {
       }
       prepareImageForDisplay(img);
       container.replaceChildren(img);
+      updateBackdropSource(img.currentSrc || img.src || sizedUrl);
     } catch (err) {
       console.error('Random rotation failed', err);
       if (!cancelled) {
         container.textContent = 'Unable to load images';
+        updateBackdropSource('');
       }
       cancelRotation();
       return;
@@ -279,6 +335,7 @@ function startRandomRotation(config, container) {
 function startAiRotation(paths, config, container) {
   if (!paths.length) {
     container.textContent = 'No AI image generated yet';
+    updateBackdropSource('');
     return;
   }
   if (paths.length === 1) {
@@ -322,10 +379,12 @@ function startAiRotation(paths, config, container) {
       }
       prepareImageForDisplay(img);
       container.replaceChildren(img);
+      updateBackdropSource(img.currentSrc || img.src || sizedUrl);
     } catch (err) {
       console.error('AI rotation failed', err);
       if (!cancelled) {
         container.textContent = 'Unable to load AI image';
+        updateBackdropSource('');
       }
       cancelRotation();
       return;
@@ -348,6 +407,10 @@ async function render(config) {
   stopRotationLoop();
   teardownHlsInstance();
   container.innerHTML = '';
+  setBackdropSettings(config && config.background_blur_enabled, config && config.background_blur_amount);
+  if (config.mode === 'livestream') {
+    updateBackdropSource('');
+  }
 
   if (config.mode === 'livestream' && config.stream_url) {
     try {
@@ -431,6 +494,7 @@ async function render(config) {
   }
 
   container.textContent = 'No content configured';
+  updateBackdropSource('');
 }
 
 async function load() {
