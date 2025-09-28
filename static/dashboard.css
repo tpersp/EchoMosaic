@@ -1,0 +1,94 @@
+/* Additional styles for the dynamic EchoMosaic dashboard */
+
+.controls {
+  margin-bottom: 1rem;
+  display: flex;
+  gap: 1rem;
+  align-items: center;
+}
+
+.controls select {
+  margin-left: 0.5rem;
+}
+
+.dashboard-grid {
+  display: grid;
+  grid-gap: 1rem;
+}
+
+.cols-1 {
+  grid-template-columns: repeat(1, 1fr);
+}
+.cols-2 {
+  grid-template-columns: repeat(2, 1fr);
+}
+.cols-3 {
+  grid-template-columns: repeat(3, 1fr);
+}
+.cols-4 {
+  grid-template-columns: repeat(4, 1fr);
+}
+
+/* Stream card adjustments */
+.stream-card {
+  border: 1px solid #ccc;
+  padding: 0.5rem;
+  position: relative;
+}
+.stream-card h2 {
+  margin-top: 0;
+}
+.remove-stream {
+  position: absolute;
+  top: 0.25rem;
+  right: 0.25rem;
+  font-size: 0.8rem;
+}
+
+/* Notepad floating window */
+.notepad {
+  position: fixed;
+  bottom: 1rem;
+  right: 1rem;
+  width: 250px;
+  background: #f8f8f8;
+  border: 1px solid #ccc;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+  padding: 0.5rem;
+  transition: transform 0.3s;
+  max-height: 300px;
+}
+.notepad.collapsed {
+  transform: translateY(calc(100% - 1.5rem));
+}
+.notepad-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.5rem;
+}
+.notepad textarea {
+  width: 100%;
+  height: 150px;
+  box-sizing: border-box;
+}
+.notepad button {
+  margin-top: 0.5rem;
+}
+
+/* Notification styling */
+.notification {
+  position: fixed;
+  bottom: 2rem;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(0,0,0,0.8);
+  color: #fff;
+  padding: 0.5rem 1rem;
+  border-radius: 4px;
+  opacity: 0;
+  transition: opacity 0.3s;
+}
+.notification.show {
+  opacity: 1;
+}
