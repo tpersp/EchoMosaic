@@ -1,0 +1,332 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <title>EchoMosaic Dashboard</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='dashboard.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+<div class="container">
+  <h1>EchoMosaic Dashboard</h1>
+
+  <div class="controls">
+    <button id="add-stream">Add Stream</button>
+    <label>Layout:
+      <select id="layout-select">
+        <option value="1">1 column</option>
+        <option value="2" selected>2 columns</option>
+        <option value="3">3 columns</option>
+        <option value="4">4 columns</option>
+      </select>
+    </label>
+  </div>
+
+  <div id="dashboard-grid" class="dashboard-grid cols-2">
+    {# Generate a card for each stream dynamically #}
+    {% for stream_id, conf in stream_settings.items() %}
+    <div class="stream-card" data-stream="{{ stream_id }}">
+      <h2>{{ stream_id|capitalize }}</h2>
+      <button class="remove-stream" data-stream="{{ stream_id }}">Remove</button>
+
+      <!-- Folder Selection -->
+      <label>Folder:</label>
+      <select class="folder-select" data-stream="{{ stream_id }}">
+        {% for f in subfolders %}
+          <option value="{{ f }}"
+            {% if conf.folder == f %} selected {% endif %}>{{ f }}</option>
+        {% endfor %}
+      </select>
+
+      <!-- Mode Selection -->
+      <label>Mode:</label>
+      <select class="mode-select" data-stream="{{ stream_id }}">
+        <option value="random" {% if conf.mode == 'random' %} selected {% endif %}>Random</option>
+        <option value="specific" {% if conf.mode == 'specific' %} selected {% endif %}>Specific</option>
+        <option value="livestream" {% if conf.mode == 'livestream' %} selected {% endif %}>Livestream</option>
+      </select>
+
+      <!-- Duration -->
+      <div class="duration-container" {% if conf.mode != 'random' %} style="display:none;" {% endif %}>
+        <label>Duration (sec):</label>
+        <input type="number" class="duration-input" data-stream="{{ stream_id }}"
+               value="{{ conf.duration }}" min="1">
+      </div>
+
+      <!-- Stream URL -->
+      <div class="stream-url-container" {% if conf.mode != 'livestream' %} style="display:none;" {% endif %}>
+        <label>Stream URL:</label>
+        <input type="text" class="stream-url-input" data-stream="{{ stream_id }}"
+               value="{{ conf.stream_url if conf.stream_url else '' }}">
+      </div>
+
+      <!-- YT Settings -->
+      <div class="yt-settings" data-stream="{{ stream_id }}" style="display:none;">
+        <label><input type="checkbox" class="yt-cc-chk" data-stream="{{ stream_id }}" {% if conf.yt_cc %} checked {% endif %}> CC (on/off)</label>
+        <label><input type="checkbox" class="yt-mute-chk" data-stream="{{ stream_id }}" {% if conf.yt_mute %} checked {% endif %}> Mute</label>
+        <label for="yt-quality-{{ stream_id }}">Quality:</label>
+        <input type="text" id="yt-quality-{{ stream_id }}" class="yt-quality-input" data-stream="{{ stream_id }}" value="{{ conf.yt_quality }}" placeholder="auto/hd720/etc">
+      </div>
+
+      <!-- Specific Image Picker -->
+      <div class="image-picker" data-stream="{{ stream_id }}" {% if conf.mode != 'specific' %} style="display:none;" {% endif %}>
+        <label>Pick an Image (Folder: {{ conf.folder }}):</label>
+        <button type="button" class="reload-images-btn" data-stream="{{ stream_id }}">Reload Images</button>
+        <div class="image-grid"></div>
+      </div>
+
+      <p>
+        <strong>Selected Image:</strong>
+        <span class="selected-image-display">
+          {{ conf.selected_image if conf.selected_image else "None" }}
+        </span>
+      </p>
+    </div>
+    {% endfor %}
+  </div>
+</div>
+
+<!-- Notification -->
+<div id="notification" class="notification">Settings updated!</div>
+
+<!-- Floating Notes Pad -->
+<div id="notepad" class="notepad collapsed">
+  <div class="notepad-header">
+    <span>Notes</span>
+    <button id="toggle-notepad">Toggle</button>
+  </div>
+  <textarea id="notepad-text"></textarea>
+  <button id="save-notes">Save</button>
+</div>
+
+<script src="https://cdn.socket.io/4.0.1/socket.io.min.js"></script>
+<script>
+  const socket = io();
+  const notification = document.getElementById('notification');
+  const grid = document.getElementById('dashboard-grid');
+  const layoutSelect = document.getElementById('layout-select');
+  const addStreamBtn = document.getElementById('add-stream');
+
+  function showNotification(msg) {
+    notification.textContent = msg;
+    notification.classList.add('show');
+    setTimeout(() => {
+      notification.classList.remove('show');
+    }, 3000);
+  }
+
+  // Adjust grid layout
+  layoutSelect.addEventListener('change', () => {
+    const cols = layoutSelect.value;
+    grid.classList.remove('cols-1','cols-2','cols-3','cols-4');
+    grid.classList.add('cols-' + cols);
+  });
+
+  // Add a new stream by posting to /streams
+  addStreamBtn.addEventListener('click', () => {
+    fetch('/streams', {method:'POST'})
+      .then(res => res.json())
+      .then(data => {
+        if (data.stream_id) {
+          location.reload();
+        }
+      });
+  });
+
+  // Remove a stream
+  document.addEventListener('click', (e) => {
+    if (e.target.classList.contains('remove-stream')) {
+      const id = e.target.dataset.stream;
+      if (confirm('Delete ' + id + '?')) {
+        fetch('/streams/' + encodeURIComponent(id), {method:'DELETE'})
+          .then(res => res.json())
+          .then(data => {
+            if (data.status === 'deleted') {
+              location.reload();
+            }
+          });
+      }
+    }
+  });
+
+  // Socket.IO listener for layout updates if needed in future
+  socket.on('streams_changed', (data) => {
+    // This could be used to update the UI without reload.
+    console.log('Streams changed:', data);
+  });
+
+  // Notepad behaviour
+  const notepad = document.getElementById('notepad');
+  const toggleNotepadBtn = document.getElementById('toggle-notepad');
+  const notepadText = document.getElementById('notepad-text');
+  const saveNotesBtn = document.getElementById('save-notes');
+  notepadText.value = localStorage.getItem('echoNotes') || '';
+  toggleNotepadBtn.addEventListener('click', () => {
+    notepad.classList.toggle('collapsed');
+  });
+  saveNotesBtn.addEventListener('click', () => {
+    localStorage.setItem('echoNotes', notepadText.value);
+    showNotification('Notes saved');
+  });
+
+  // The following section reuses much of the original dashboard logic to
+  // handle folder/mode selection, duration changes, image selection and
+  // reload.  It has been lightly adapted to support dynamically added
+  // streams.  The logic is encapsulated in functions that operate on
+  // elements with a ``data-stream`` attribute.
+
+  function saveSettings(streamId, payload) {
+    fetch(`/settings/${encodeURIComponent(streamId)}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    })
+    .then(res => res.json())
+    .then(data => {
+      if (data.status === 'success') {
+        showNotification(`Updated settings for ${streamId}`);
+        const card = document.querySelector(`.stream-card[data-stream="${streamId}"]`);
+        if (card && data.new_config.selected_image !== undefined) {
+          const disp = card.querySelector('.selected-image-display');
+          disp.textContent = data.new_config.selected_image || 'None';
+        }
+      } else {
+        console.error(data.error || 'Unknown error updating settings.');
+      }
+    })
+    .catch(err => console.error('Error saving settings:', err));
+  }
+
+  function toggleVisibilityForMode(card, mode, streamUrl) {
+    const durationDiv = card.querySelector('.duration-container');
+    const urlDiv = card.querySelector('.stream-url-container');
+    const imagePicker = card.querySelector('.image-picker');
+    const ytSettingsDiv = card.querySelector('.yt-settings');
+    if (durationDiv) durationDiv.style.display = (mode === 'random') ? '' : 'none';
+    if (urlDiv) urlDiv.style.display = (mode === 'livestream') ? '' : 'none';
+    if (imagePicker) imagePicker.style.display = (mode === 'specific') ? '' : 'none';
+    if (ytSettingsDiv) {
+      if (mode === 'livestream' && (streamUrl.includes('youtube.com') || streamUrl.includes('youtu.be'))) {
+        ytSettingsDiv.style.display = '';
+      } else {
+        ytSettingsDiv.style.display = 'none';
+      }
+    }
+  }
+
+  function loadImagesFor(streamId, folder) {
+    const card = document.querySelector(`.stream-card[data-stream="${streamId}"]`);
+    if (!card) return;
+    const imageGrid = card.querySelector('.image-picker .image-grid');
+    if (!imageGrid) return;
+    const selectedDisplay = card.querySelector('.selected-image-display');
+    const currentSelected = selectedDisplay ? selectedDisplay.textContent.trim() : null;
+    imageGrid.innerHTML = 'Loading...';
+    fetch(`/images?folder=${encodeURIComponent(folder)}`)
+      .then(res => res.json())
+      .then(imgs => {
+        imageGrid.innerHTML = '';
+        imgs.forEach(path => {
+          const imgEl = document.createElement('img');
+          imgEl.src = `/stream/image/${path}`;
+          imgEl.title = path;
+          imgEl.classList.add('picker-thumbnail');
+          if (currentSelected === path) {
+            imgEl.classList.add('selected-thumb');
+          }
+          imgEl.addEventListener('click', () => {
+            saveSettings(streamId, { selected_image: path });
+          });
+          imageGrid.appendChild(imgEl);
+        });
+        if (!imgs.length) {
+          imageGrid.innerHTML = '(No images found in this folder)';
+        }
+      })
+      .catch(err => {
+        console.error('Error fetching images for folder:', err);
+        imageGrid.innerHTML = 'Error loading images.';
+      });
+  }
+
+  document.addEventListener('DOMContentLoaded', () => {
+    document.querySelectorAll('.stream-card').forEach(card => {
+      const streamId = card.dataset.stream;
+      // Folder change
+      const folderSelect = card.querySelector('.folder-select');
+      if (folderSelect) {
+        folderSelect.addEventListener('change', e => {
+          const folder = e.target.value;
+          saveSettings(streamId, { folder, selected_image: null });
+        });
+      }
+      // Mode change
+      const modeSelect = card.querySelector('.mode-select');
+      const urlInput = card.querySelector('.stream-url-input');
+      if (modeSelect) {
+        modeSelect.addEventListener('change', e => {
+          const mode = e.target.value;
+          const payload = { mode };
+          if (mode === 'random') {
+            const durInput = card.querySelector('.duration-input');
+            if (durInput) payload.duration = durInput.value;
+          }
+          if (mode === 'livestream') {
+            if (urlInput) payload.stream_url = urlInput.value;
+            const ccChk = card.querySelector('.yt-cc-chk');
+            const muteChk = card.querySelector('.yt-mute-chk');
+            const qualityInput = card.querySelector('.yt-quality-input');
+            if (ccChk) payload.yt_cc = ccChk.checked;
+            if (muteChk) payload.yt_mute = muteChk.checked;
+            if (qualityInput) payload.yt_quality = qualityInput.value;
+          }
+          saveSettings(streamId, payload);
+          toggleVisibilityForMode(card, mode, urlInput ? urlInput.value : '');
+        });
+      }
+      // Duration change
+      const durInput = card.querySelector('.duration-input');
+      if (durInput) {
+        durInput.addEventListener('change', e => {
+          saveSettings(streamId, { duration: e.target.value });
+        });
+      }
+      // URL change
+      if (urlInput) {
+        urlInput.addEventListener('change', e => {
+          saveSettings(streamId, { stream_url: e.target.value });
+          toggleVisibilityForMode(card, modeSelect.value, e.target.value);
+        });
+      }
+      // YT settings changes
+      const ccChk = card.querySelector('.yt-cc-chk');
+      const muteChk = card.querySelector('.yt-mute-chk');
+      const qualityInput = card.querySelector('.yt-quality-input');
+      if (ccChk) {
+        ccChk.addEventListener('change', e => {
+          saveSettings(streamId, { yt_cc: e.target.checked });
+        });
+      }
+      if (muteChk) {
+        muteChk.addEventListener('change', e => {
+          saveSettings(streamId, { yt_mute: e.target.checked });
+        });
+      }
+      if (qualityInput) {
+        qualityInput.addEventListener('change', e => {
+          saveSettings(streamId, { yt_quality: e.target.value });
+        });
+      }
+      // Reload images button
+      const reloadBtn = card.querySelector('.reload-images-btn');
+      if (reloadBtn) {
+        reloadBtn.addEventListener('click', () => {
+          const folder = folderSelect ? folderSelect.value : 'all';
+          loadImagesFor(streamId, folder);
+        });
+      }
+    });
+  });
+</script>
+</body>
+</html>
