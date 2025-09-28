@@ -86,9 +86,10 @@
           </select>
         </div>
         <div class="form-row nsfw-row" {% if conf.mode == 'livestream' %} style="display:none;" {% endif %}>
+          <label for="hide-nsfw-{{ stream_id }}">Hide NSFW</label>
           <label class="toggle inline" title="Hide folders and files containing 'nsfw'">
-            <input type="checkbox" class="hide-nsfw-toggle" data-stream="{{ stream_id }}" {% if hide_nsfw %}checked{% endif %}>
-            <span class="toggle-switch"></span><span class="toggle-label">Hide NSFW</span>
+            <input id="hide-nsfw-{{ stream_id }}" type="checkbox" class="hide-nsfw-toggle" data-stream="{{ stream_id }}" {% if hide_nsfw %}checked{% endif %}>
+            <span class="toggle-switch" aria-hidden="true"></span>
           </label>
         </div>
         <!-- Image Quality Selection -->
@@ -2333,3 +2334,4 @@
 </script>
 </body>
 </html>
+

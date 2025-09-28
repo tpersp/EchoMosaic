@@ -275,15 +275,24 @@ a {
 /* Card form layout */
 .form-grid {
   display: grid;
-  grid-template-columns: 1fr 2fr;
-  /* Slightly more breathing room between label/control */
-  gap: 0.6rem 1rem;
+  grid-template-columns: minmax(120px, max-content) minmax(0, 1fr);
+  column-gap: 1rem;
+  row-gap: 0.75rem;
   align-items: center;
 }
 .form-row { display: contents; }
-.form-row > label { align-self: center; opacity: 0.9; }
+.form-row > label:first-child {
+  align-self: center;
+  justify-self: flex-start;
+  font-weight: 500;
+  opacity: 0.9;
+}
 .form-row > input,
-.form-row > select { width: 100%; }
+.form-row > select,
+.form-row > textarea { width: 100%; }
+.form-row > :not(:first-child) { justify-self: stretch; }
+.form-row > .toggle.inline { justify-self: flex-start; }
+.form-row > .inline-controls { width: 100%; }
 
 /* Small helper text under inputs */
 .help-text {
@@ -974,3 +983,4 @@ body.ai-modal-active {
   font-size: 0.85rem;
   color: var(--muted-color);
 }
+
