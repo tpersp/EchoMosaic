@@ -1,5 +1,5 @@
 from flask import Flask, jsonify, send_from_directory, request, render_template
-from flask_socketio import SocketIO, emit
+from flask_socketio import SocketIO
 import os
 import json
 import subprocess
@@ -11,54 +11,27 @@ socketio = SocketIO(app)
 SETTINGS_FILE = "settings.json"
 IMAGE_DIR = "/mnt/viewers"  # Adjust if needed
 
+
+def default_stream_config():
+    """Return the default configuration for a new stream."""
+    return {
+        "mode": "random",
+        "folder": "all",
+        "selected_image": None,
+        "duration": 5,
+        "stream_url": None,
+        "yt_cc": False,
+        "yt_mute": True,
+        "yt_quality": "auto",
+    }
+
+
 def load_settings():
     if os.path.exists(SETTINGS_FILE):
         with open(SETTINGS_FILE, "r") as f:
             return json.load(f)
-    # Default structure: we also add placeholders for yt_cc, yt_mute, yt_quality
-    return {
-        "stream1": {
-            "mode": "random",
-            "folder": "all",
-            "selected_image": None,
-            "duration": 5,
-            "stream_url": None,
-            # Additional defaults for YouTube
-            "yt_cc": False,
-            "yt_mute": True,
-            "yt_quality": "auto"
-        },
-        "stream2": {
-            "mode": "random",
-            "folder": "all",
-            "selected_image": None,
-            "duration": 5,
-            "stream_url": None,
-            "yt_cc": False,
-            "yt_mute": True,
-            "yt_quality": "auto"
-        },
-        "stream3": {
-            "mode": "random",
-            "folder": "all",
-            "selected_image": None,
-            "duration": 5,
-            "stream_url": None,
-            "yt_cc": False,
-            "yt_mute": True,
-            "yt_quality": "auto"
-        },
-        "stream4": {
-            "mode": "random",
-            "folder": "all",
-            "selected_image": None,
-            "duration": 5,
-            "stream_url": None,
-            "yt_cc": False,
-            "yt_mute": True,
-            "yt_quality": "auto"
-        }
-    }
+    # Start with no streams; dashboard can add them dynamically.
+    return {}
 
 def save_settings(data):
     with open(SETTINGS_FILE, "w") as f:
@@ -117,33 +90,37 @@ def dashboard():
     subfolders = get_subfolders()
     return render_template("index.html", subfolders=subfolders, stream_settings=settings)
 
-@app.route("/stream")
-def main_stream():
-    return render_template("main_stream.html")
-
-@app.route("/stream1")
-def stream1():
-    conf = settings["stream1"]
+@app.route("/stream/<stream_id>")
+def render_stream(stream_id):
+    if stream_id not in settings:
+        return f"No stream '{stream_id}'", 404
+    conf = settings[stream_id]
     images = list_images(conf.get("folder", "all"))
-    return render_template("single_stream.html", stream_id="stream1", config=conf, images=images)
+    return render_template("single_stream.html", stream_id=stream_id, config=conf, images=images)
 
-@app.route("/stream2")
-def stream2():
-    conf = settings["stream2"]
-    images = list_images(conf.get("folder", "all"))
-    return render_template("single_stream.html", stream_id="stream2", config=conf, images=images)
 
-@app.route("/stream3")
-def stream3():
-    conf = settings["stream3"]
-    images = list_images(conf.get("folder", "all"))
-    return render_template("single_stream.html", stream_id="stream3", config=conf, images=images)
+@app.route("/streams", methods=["POST"])
+def add_stream():
+    """Create a new stream configuration and return its ID."""
+    idx = 1
+    while True:
+        new_id = f"stream{idx}"
+        if new_id not in settings:
+            settings[new_id] = default_stream_config()
+            save_settings(settings)
+            socketio.emit("streams_changed", {"action": "added", "stream_id": new_id})
+            return jsonify({"stream_id": new_id})
+        idx += 1
 
-@app.route("/stream4")
-def stream4():
-    conf = settings["stream4"]
-    images = list_images(conf.get("folder", "all"))
-    return render_template("single_stream.html", stream_id="stream4", config=conf, images=images)
+
+@app.route("/streams/<stream_id>", methods=["DELETE"])
+def delete_stream(stream_id):
+    if stream_id in settings:
+        settings.pop(stream_id)
+        save_settings(settings)
+        socketio.emit("streams_changed", {"action": "deleted", "stream_id": stream_id})
+        return jsonify({"status": "deleted"})
+    return jsonify({"error": "not found"}), 404
 
 @app.route("/get-settings/<stream_id>", methods=["GET"])
 def get_stream_settings(stream_id):
