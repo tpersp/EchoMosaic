@@ -107,7 +107,7 @@
         <!-- Background Blur Controls -->
         {% set blur_enabled = conf.background_blur_enabled|default(False) %}
         {% set blur_amount = conf.background_blur_amount|default(50) %}
-        <div class="form-row background-row">
+        <div class="form-row background-row" {% if conf.mode == 'livestream' %}style="display:none;"{% endif %}>
           <label for="background-toggle-{{ stream_id }}">Backdrop</label>
           <div class="background-controls">
             <label class="toggle inline">
@@ -2054,6 +2054,7 @@
     const folderRow = card.querySelector('.folder-row');
     const qualityRow = card.querySelector('.image-quality-row');
     const nsfwRow = card.querySelector('.nsfw-row');
+    const backgroundRow = card.querySelector('.background-row');
     if (durationDiv) durationDiv.style.display = (mode === 'random') ? '' : 'none';
     if (shuffleChk) shuffleChk.closest('label').style.display = (mode === 'random') ? '' : 'none';
     if (urlDiv) urlDiv.style.display = (mode === 'livestream') ? '' : 'none';
@@ -2074,6 +2075,7 @@
     if (folderRow) folderRow.style.display = (mode === 'livestream' || mode === 'ai') ? 'none' : '';
     if (nsfwRow) nsfwRow.style.display = (mode === 'livestream') ? 'none' : '';
     if (qualityRow) qualityRow.style.display = (mode === 'livestream') ? 'none' : '';
+    if (backgroundRow) backgroundRow.style.display = (mode === 'livestream') ? 'none' : '';
     // Only show YT options if URL looks like YouTube
     const type = detectUrlType(streamUrl);
     if (ytSettingsDiv) ytSettingsDiv.style.display = (mode === 'livestream' && type === 'YouTube') ? '' : 'none';
