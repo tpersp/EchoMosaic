@@ -151,7 +151,7 @@ async function displaySingleImage(path, container) {
     container.textContent = 'No image selected';
     return;
   }
-  container.textContent = 'Loading…';
+  container.textContent = 'Loading...';
   try {
     const sizedUrl = computeSizedImageUrl(path, container);
     const preload = startPreload(sizedUrl);
@@ -182,7 +182,7 @@ function startRandomRotation(config, container) {
     }
   };
 
-  container.textContent = 'Loading…';
+  container.textContent = 'Loading...';
 
   async function fetchNextPath() {
     if (config.shuffle === false) {
@@ -282,7 +282,7 @@ function startAiRotation(paths, config, container) {
     }
   };
 
-  container.textContent = 'Loading…';
+  container.textContent = 'Loading...';
 
   async function cycle() {
     if (cancelled) {
