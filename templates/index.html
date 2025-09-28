@@ -74,7 +74,10 @@
     {% for stream_id, conf in stream_settings.items() %}
     <div class="stream-card" data-stream="{{ stream_id }}">
       <div class="card-header">
-        <h2><a class="stream-link" href="{{ url_for('render_stream', name=(conf.label if conf.label else stream_id)|slugify) }}" target="_blank">{{ conf.label if conf.label else stream_id|capitalize }}</a></h2>
+        <div class="title-row">
+          <h2><a class="stream-link" href="{{ url_for('render_stream', name=(conf.label if conf.label else stream_id)|slugify) }}" target="_blank">{{ conf.label if conf.label else stream_id|capitalize }}</a></h2>
+          <button class="rename-stream" data-stream="{{ stream_id }}" title="Rename stream">Rename</button>
+        </div>
         <button class="remove-stream" data-stream="{{ stream_id }}" aria-label="Remove stream {{ stream_id }}">Remove</button>
       </div>
 
@@ -98,13 +101,6 @@
             <option value="livestream" {% if conf.mode == 'livestream' %} selected {% endif %}>Livestream</option>
           </select>
         </div>
-
-        <!-- Label -->
-        <div class="form-row">
-          <label for="label-{{ stream_id }}">Label</label>
-          <input id="label-{{ stream_id }}" type="text" class="label-input" data-stream="{{ stream_id }}" value="{{ conf.label if conf.label else stream_id|capitalize }}" placeholder="Display name">
-        </div>
-
 
         <!-- Include in Global /stream -->
         <div class="form-row">
@@ -439,7 +435,7 @@
       const muteChk = card.querySelector('.yt-mute-chk');
       const qualityInput = card.querySelector('.yt-quality-input');
       const includeChk = card.querySelector('.include-global-chk');
-      const labelInput = card.querySelector('.label-input');
+      const renameBtn = card.querySelector('.rename-stream');
       if (ccChk) {
         ccChk.addEventListener('change', e => {
           saveSettings(streamId, { yt_cc: e.target.checked });
@@ -463,14 +459,16 @@
       function slugify(s){
         return (s||'').toLowerCase().trim().replace(/[^a-z0-9]+/g,'-').replace(/-+/g,'-').replace(/^-|-$/g,'');
       }
-      if (labelInput) {
-        labelInput.addEventListener('change', e => {
-          saveSettings(streamId, { label: e.target.value });
-          // update header text immediately
+      if (renameBtn) {
+        renameBtn.addEventListener('click', () => {
           const a = card.querySelector('.card-header h2 a.stream-link');
+          const current = a ? a.textContent.trim() : streamId;
+          const next = prompt('Rename stream', current);
+          if (next === null) return; // cancelled
+          saveSettings(streamId, { label: next });
           if (a) {
-            a.textContent = e.target.value || streamId;
-            const slug = slugify(e.target.value || streamId);
+            a.textContent = next || streamId;
+            const slug = slugify(next || streamId);
             a.href = '/stream/' + encodeURIComponent(slug);
           }
         });
