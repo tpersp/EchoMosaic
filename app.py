@@ -470,6 +470,43 @@ def update_info():
     return jsonify(read_update_info())
 
 
+@app.route("/update_history", methods=["GET"])
+def update_history():
+    cfg = load_config()
+    api_key = cfg.get("API_KEY")
+    if api_key and request.headers.get("X-API-Key") != api_key:
+        return jsonify({"error": "Unauthorized"}), 401
+    repo_path = cfg.get("INSTALL_DIR") or os.getcwd()
+    history_path = os.path.join(repo_path, "update_history.json")
+    history = []
+    if os.path.exists(history_path):
+        try:
+            with open(history_path, "r") as hf:
+                history = json.load(hf)
+        except Exception:
+            history = []
+    def srun(cmd):
+        try:
+            return subprocess.check_output(cmd, cwd=repo_path, stderr=subprocess.STDOUT).decode().strip()
+        except Exception:
+            return None
+    enriched = []
+    for ent in history:
+        frm = ent.get("from")
+        to = ent.get("to")
+        frm_desc = srun(["git", "log", "-1", frm, "--pretty=%h %s (%cr)"]) if frm else None
+        to_desc = srun(["git", "log", "-1", to, "--pretty=%h %s (%cr)"]) if to else None
+        enriched.append({
+            "timestamp": ent.get("timestamp"),
+            "branch": ent.get("branch"),
+            "from": frm,
+            "to": to,
+            "from_desc": frm_desc or (frm[:7] if frm else None),
+            "to_desc": to_desc or (to[:7] if to else None),
+        })
+    return jsonify({"history": enriched})
+
+
 @app.route("/rollback_app", methods=["POST"])
 def rollback_app():
     cfg = load_config()
