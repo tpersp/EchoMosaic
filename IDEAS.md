@@ -63,3 +63,5 @@ Notes
 - Use checkboxes to track status (unchecked → planned, checked → done).
 - Optionally prefix entries with a date, e.g., `[2025-09-07] Idea text…`.
 - Group related items under short headings if this grows large.
+
+
