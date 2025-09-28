@@ -78,6 +78,17 @@
             {% endfor %}
           </select>
         </div>
+        <!-- Image Quality Selection -->
+        <div class="form-row image-quality-row" {% if conf.mode == 'livestream' %} style="display:none;" {% endif %}>
+          <label for="image-quality-{{ stream_id }}">Image Quality</label>
+          {% set image_q = (conf.image_quality or 'auto')|lower %}
+          <select id="image-quality-{{ stream_id }}" class="image-quality-select" data-stream="{{ stream_id }}">
+            <option value="auto" {% if image_q == 'auto' %} selected {% endif %}>Auto (fit display)</option>
+            <option value="thumb" {% if image_q == 'thumb' %} selected {% endif %}>Thumb (320px)</option>
+            <option value="medium" {% if image_q == 'medium' %} selected {% endif %}>Medium (1024px)</option>
+            <option value="full" {% if image_q == 'full' %} selected {% endif %}>Full resolution</option>
+          </select>
+        </div>
 
         
 
@@ -1852,6 +1863,12 @@
               highlightAiSelection(aiResults, selectedPath);
             }
           }
+          if (data.new_config && data.new_config.image_quality !== undefined) {
+            const qualitySelect = card.querySelector('.image-quality-select');
+            if (qualitySelect) {
+              qualitySelect.value = (data.new_config.image_quality || 'auto');
+            }
+          }
           const aiSettings = data.new_config && data.new_config.ai_settings;
           if (aiSettings) {
             const aiSection = card.querySelector('.ai-generator');
@@ -1886,6 +1903,7 @@
     const ytSettingsDiv = card.querySelector('.yt-settings');
     const selectedRow = card.querySelector('.selected-image-row');
     const folderRow = card.querySelector('.folder-row');
+    const qualityRow = card.querySelector('.image-quality-row');
     if (durationDiv) durationDiv.style.display = (mode === 'random') ? '' : 'none';
     if (shuffleChk) shuffleChk.closest('label').style.display = (mode === 'random') ? '' : 'none';
     if (urlDiv) urlDiv.style.display = (mode === 'livestream') ? '' : 'none';
@@ -1904,6 +1922,7 @@
     if (summaryUpdater) summaryUpdater();
     if (selectedRow) selectedRow.style.display = (mode === 'specific' || mode === 'ai') ? '' : 'none';
     if (folderRow) folderRow.style.display = (mode === 'livestream' || mode === 'ai') ? 'none' : '';
+    if (qualityRow) qualityRow.style.display = (mode === 'livestream') ? 'none' : '';
     // Only show YT options if URL looks like YouTube
     const type = detectUrlType(streamUrl);
     if (ytSettingsDiv) ytSettingsDiv.style.display = (mode === 'livestream' && type === 'YouTube') ? '' : 'none';
@@ -1923,7 +1942,7 @@
         imageGrid.innerHTML = '';
         imgs.forEach(path => {
           const imgEl = document.createElement('img');
-          imgEl.src = `/stream/image/${path}`;
+          imgEl.src = `/stream/image/${path}?size=thumb`;
           imgEl.title = path;
           imgEl.classList.add('picker-thumbnail');
           if (currentSelected === path) {
@@ -1968,6 +1987,13 @@
           const folder = e.target.value;
           e.target.title = folder;
           saveSettings(streamId, { folder, selected_image: null });
+        });
+      }
+      const imageQualitySelect = card.querySelector('.image-quality-select');
+      if (imageQualitySelect) {
+        imageQualitySelect.addEventListener('change', e => {
+          const nextValue = e.target.value || 'auto';
+          saveSettings(streamId, { image_quality: nextValue });
         });
       }
       // Mode change

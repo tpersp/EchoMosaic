@@ -7,49 +7,7 @@ without explicit instruction; content should be edge-to-edge for immersion. -->
   <title>{{ stream_id|capitalize }}</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='stream.css') }}">
-  <style>
-    #quality-control {
-      position: fixed;
-      top: 1rem;
-      right: 1rem;
-      z-index: 1000;
-      display: flex;
-      align-items: center;
-      gap: 0.5rem;
-      padding: 0.35rem 0.75rem;
-      border-radius: 999px;
-      background: rgba(0, 0, 0, 0.55);
-      color: #f5f5f5;
-      font-size: 0.9rem;
-      line-height: 1.2;
-      font-family: inherit;
-      box-shadow: 0 0 12px rgba(0, 0, 0, 0.25);
-    }
-    html[data-theme='light'] #quality-control {
-      background: rgba(255, 255, 255, 0.85);
-      color: #222;
-      box-shadow: 0 0 12px rgba(0, 0, 0, 0.15);
-    }
-    #quality-control label {
-      display: flex;
-      align-items: center;
-      gap: 0.35rem;
-      font-weight: 500;
-    }
-    #quality-control select {
-      border: 1px solid rgba(255, 255, 255, 0.5);
-      background: rgba(255, 255, 255, 0.08);
-      color: inherit;
-      border-radius: 0.5rem;
-      padding: 0.2rem 0.6rem;
-      font-size: 0.85rem;
-    }
-    html[data-theme='light'] #quality-control select {
-      border-color: rgba(0, 0, 0, 0.3);
-      background: rgba(0, 0, 0, 0.05);
-    }
-  </style>
-</head>
+  </head>
 <body>
 <!-- NOTE: No header/toolbars here; keep media full-screen friendly. -->
 <div id="container"></div>
@@ -69,19 +27,15 @@ let cancelRotation = null;
 let hlsLoaderPromise = null;
 let activeHls = null;
 
-const QUALITY_OPTIONS = [
-  { value: 'auto', label: 'Auto (fit display)' },
-  { value: 'thumb', label: 'Thumb (320px)' },
-  { value: 'medium', label: 'Medium (1024px)' },
-  { value: 'full', label: 'Full resolution' },
-];
-const QUALITY_SET = new Set(QUALITY_OPTIONS.map(opt => opt.value));
-const DEFAULT_QUALITY = {{ default_quality|tojson }};
-const initialQualityParam = (new URLSearchParams(window.location.search).get('size') || DEFAULT_QUALITY || '').toLowerCase();
-let imageQuality = QUALITY_SET.has(initialQualityParam) && initialQualityParam !== '' ? initialQualityParam : 'auto';
-let currentConfig = null;
-let qualityControlInitialized = false;
-
+const VALID_QUALITIES = new Set(['auto', 'thumb', 'medium', 'full']);
+const TEMPLATE_QUALITY = {{ default_quality|tojson }};
+const queryQualityRaw = (new URLSearchParams(window.location.search).get('size') || '').toLowerCase();
+const queryQuality = VALID_QUALITIES.has(queryQualityRaw) && queryQualityRaw !== '' ? queryQualityRaw : '';
+let imageQuality = queryQuality || (VALID_QUALITIES.has(TEMPLATE_QUALITY) ? TEMPLATE_QUALITY : 'auto');
+if (!VALID_QUALITIES.has(imageQuality)) {
+  imageQuality = 'auto';
+}
+const qualityOverride = queryQuality;
 // Request downsized images based on real display size so browsers avoid downloading full-resolution assets.
 function computeSizedImageUrl(path, container) {
   const base = `/stream/image/${path}`;
@@ -99,53 +53,6 @@ function computeSizedImageUrl(path, container) {
     height: targetHeight.toString(),
   });
   return `${base}?${params.toString()}`;
-}
-
-// Toggle between preset quality levels while preserving minimal UI footprint.
-function initQualityControl() {
-  if (qualityControlInitialized) {
-    return;
-  }
-  qualityControlInitialized = true;
-
-  const control = document.createElement('div');
-  control.id = 'quality-control';
-
-  const label = document.createElement('label');
-  label.htmlFor = 'quality-select';
-  label.textContent = 'Quality';
-  control.appendChild(label);
-
-  const select = document.createElement('select');
-  select.id = 'quality-select';
-  QUALITY_OPTIONS.forEach(opt => {
-    const option = document.createElement('option');
-    option.value = opt.value;
-    option.textContent = opt.label;
-    select.appendChild(option);
-  });
-  select.value = imageQuality;
-
-  select.addEventListener('change', () => {
-    const nextValue = select.value;
-    if (!QUALITY_SET.has(nextValue)) {
-      return;
-    }
-    imageQuality = nextValue;
-    const url = new URL(window.location.href);
-    if (imageQuality === 'auto') {
-      url.searchParams.delete('size');
-    } else {
-      url.searchParams.set('size', imageQuality);
-    }
-    history.replaceState(null, '', url.toString());
-    if (currentConfig) {
-      render(currentConfig).catch(err => console.error('Failed to rerender after quality change', err));
-    }
-  });
-
-  control.appendChild(select);
-  document.body.appendChild(control);
 }
 
 // Preload upcoming images off-screen so swaps are instant and flicker-free when the visible element is replaced.
@@ -425,7 +332,10 @@ function startAiRotation(paths, config, container) {
 }
 
 async function render(config) {
-  currentConfig = config;
+  if (!qualityOverride) {
+    const fromConfig = (config && typeof config.image_quality === 'string') ? config.image_quality.trim().toLowerCase() : 'auto';
+    imageQuality = VALID_QUALITIES.has(fromConfig) ? fromConfig : 'auto';
+  }
   const container = document.getElementById('container');
   stopRotationLoop();
   teardownHlsInstance();
@@ -536,7 +446,6 @@ socket.on('refresh', data => {
   }
 });
 
-initQualityControl();
 load();
 </script>
 </body>

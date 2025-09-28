@@ -45,6 +45,8 @@ THUMBNAIL_SIZE_PRESETS = {
 IMAGE_CACHE_TIMEOUT = 60 * 60 * 24 * 7  # One week default for conditional responses
 IMAGE_CACHE_CONTROL_MAX_AGE = 31536000  # One year for browser Cache-Control headers
 
+IMAGE_QUALITY_CHOICES = {"auto", "thumb", "medium", "full"}
+
 AI_MODE = "ai"
 AI_SETTINGS_KEY = "ai_settings"
 AI_STATE_KEY = "ai_state"
@@ -450,6 +452,7 @@ def default_stream_config():
         "yt_cc": False,
         "yt_mute": True,
         "yt_quality": "auto",
+        "image_quality": "auto",
         "label": "",
         AI_SETTINGS_KEY: default_ai_settings(),
         AI_STATE_KEY: default_ai_state(),
@@ -933,6 +936,8 @@ for k, v in list(settings.items()):
     if not k.startswith("_") and isinstance(v, dict):
         v.setdefault("label", k.capitalize())
         v.setdefault("shuffle", True)
+        if v.get("image_quality") not in IMAGE_QUALITY_CHOICES:
+            v["image_quality"] = "auto"
         ensure_ai_defaults(v)
 
 # Ensure notes key exists
@@ -977,6 +982,13 @@ def try_get_hls(original_url):
 def dashboard():
     subfolders = get_subfolders()
     streams = {k: v for k, v in settings.items() if not k.startswith("_")}
+    for conf in streams.values():
+        if isinstance(conf, dict):
+            quality = conf.get("image_quality")
+            if not isinstance(quality, str) or quality.strip().lower() not in IMAGE_QUALITY_CHOICES:
+                conf["image_quality"] = "auto"
+            else:
+                conf["image_quality"] = quality.strip().lower()
     mosaic = settings.get("_mosaic", default_mosaic_config())
     groups = sorted(list(settings.get("_groups", {}).keys()))
     return render_template(
@@ -1028,16 +1040,25 @@ def render_stream(name):
     if not key or key not in settings:
         return f"No stream '{name}'", 404
     conf = settings[key]
+    config_quality_raw = conf.get("image_quality", "auto")
+    if isinstance(config_quality_raw, str):
+        config_quality = config_quality_raw.strip().lower()
+    else:
+        config_quality = "auto"
+    if config_quality not in IMAGE_QUALITY_CHOICES:
+        config_quality = "auto"
+    conf["image_quality"] = config_quality
     images = list_images(conf.get("folder", "all"))
-    quality = (request.args.get("size") or "").strip().lower()
-    if quality and quality not in THUMBNAIL_SIZE_PRESETS:
-        quality = ""
+    requested_quality = (request.args.get("size") or "").strip().lower()
+    if requested_quality and requested_quality not in IMAGE_QUALITY_CHOICES:
+        requested_quality = ""
+    default_quality = requested_quality or config_quality
     return render_template(
         "single_stream.html",
         stream_id=key,
         config=conf,
         images=images,
-        default_quality=quality,
+        default_quality=default_quality,
     )
 
 
@@ -1086,7 +1107,7 @@ def update_stream_settings(stream_id):
 
     # We'll add new keys for YouTube: "yt_cc", "yt_mute", "yt_quality"
     for key in ["mode", "folder", "selected_image", "duration", "shuffle", "stream_url",
-                "yt_cc", "yt_mute", "yt_quality", "label"]:
+                "image_quality", "yt_cc", "yt_mute", "yt_quality", "label"]:
         if key in data:
             val = data[key]
             if key == "stream_url":
@@ -1104,6 +1125,11 @@ def update_stream_settings(stream_id):
                         if _slugify(other_label) == new_slug:
                             return jsonify({"error": "Another stream already uses this name"}), 400
                 conf[key] = new_label
+            elif key == "image_quality":
+                normalized = (val or "").strip().lower() if isinstance(val, str) else ""
+                if normalized not in IMAGE_QUALITY_CHOICES:
+                    normalized = "auto"
+                conf[key] = normalized
             else:
                 conf[key] = val
 

@@ -39,6 +39,7 @@ The `/stream/image/<path:filename>` endpoint now supports optional sizing hints
 so browsers do not need to download full-resolution assets when thumbnails will do.
 
 - Use `?size=thumb`, `?size=medium`, or `?size=full` to pick preset bounds (respectively 320px, 1024px, or the original size).
+- Stream cards on the dashboard now include an *Image Quality* drop-down so you can switch between Auto, Thumb, Medium, or Full without touching the URL; remote `/stream/<name>` views pick up the change instantly.
 - Supply `?width=` and/or `?height=` for custom bounds; aspect ratio is preserved automatically.
 - The first request writes the resized copy under `${IMAGE_DIR}/_thumbnails/...`; later requests reuse the cached file.
 - Responses include `Cache-Control: public, max-age=31536000` and strong `ETag` headers so standard HTTP caching works.
