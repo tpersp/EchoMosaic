@@ -21,11 +21,14 @@
       </select>
     </label>
     <label>Stream Layout:
-      <select id="mosaic-layout-select">
-        <option value="1" {% if mosaic_settings.cols == 1 %}selected{% endif %}>1 column</option>
-        <option value="2" {% if mosaic_settings.cols == 2 %}selected{% endif %}>2 columns</option>
-        <option value="3" {% if mosaic_settings.cols == 3 %}selected{% endif %}>3 columns</option>
-        <option value="4" {% if mosaic_settings.cols == 4 %}selected{% endif %}>4 columns</option>
+      <select id="mosaic-layout-select" data-current-cols="{{ mosaic_settings.cols }}">
+        <option value="grid" data-cols="1" {% if mosaic_settings.layout == 'grid' and mosaic_settings.cols == 1 %}selected{% endif %}>Grid 1 column</option>
+        <option value="grid" data-cols="2" {% if mosaic_settings.layout == 'grid' and mosaic_settings.cols == 2 %}selected{% endif %}>Grid 2 columns</option>
+        <option value="grid" data-cols="3" {% if mosaic_settings.layout == 'grid' and mosaic_settings.cols == 3 %}selected{% endif %}>Grid 3 columns</option>
+        <option value="grid" data-cols="4" {% if mosaic_settings.layout == 'grid' and mosaic_settings.cols == 4 %}selected{% endif %}>Grid 4 columns</option>
+        <option value="horizontal" {% if mosaic_settings.layout == 'horizontal' %}selected{% endif %}>Horizontal Stack</option>
+        <option value="vertical" {% if mosaic_settings.layout == 'vertical' %}selected{% endif %}>Vertical Stack</option>
+        <option value="focus" {% if mosaic_settings.layout == 'focus' %}selected{% endif %}>Main + Thumbs</option>
       </select>
     </label>
     <button id="open-mosaic">View Streams</button>
@@ -135,10 +138,14 @@
 
   if (mosaicLayoutSelect) {
     mosaicLayoutSelect.addEventListener('change', e => {
+      const opt = e.target.selectedOptions[0];
+      const layout = opt.value;
+      const cols = opt.dataset.cols || mosaicLayoutSelect.dataset.currentCols;
+      mosaicLayoutSelect.dataset.currentCols = cols;
       fetch('/mosaic-settings', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ cols: e.target.value })
+        body: JSON.stringify({ layout, cols })
       }).then(res => res.json()).then(() => {
         showNotification('Stream layout updated');
       });
