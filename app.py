@@ -41,6 +41,7 @@ def default_stream_config():
         "yt_cc": False,
         "yt_mute": True,
         "yt_quality": "auto",
+        "include_in_global": True,
     }
 
 
@@ -73,6 +74,11 @@ else:
     settings["_mosaic"].setdefault("pip_pip", None)
     settings["_mosaic"].setdefault("pip_corner", "bottom-right")
     settings["_mosaic"].setdefault("pip_size", 25)
+
+# Backfill defaults for existing stream entries
+for k, v in list(settings.items()):
+    if not k.startswith("_") and isinstance(v, dict):
+        v.setdefault("include_in_global", True)
 
 
 def get_subfolders():
@@ -136,7 +142,8 @@ def dashboard():
 
 @app.route("/stream")
 def mosaic_streams():
-    streams = {k: v for k, v in settings.items() if not k.startswith("_")}
+    streams = {k: v for k, v in settings.items()
+               if not k.startswith("_") and v.get("include_in_global", True)}
     mosaic = settings.get("_mosaic", default_mosaic_config())
     return render_template("streams.html", stream_settings=streams, mosaic_settings=mosaic)
 
@@ -188,7 +195,7 @@ def update_stream_settings(stream_id):
 
     # We'll add new keys for YouTube: "yt_cc", "yt_mute", "yt_quality"
     for key in ["mode", "folder", "selected_image", "duration", "stream_url",
-                "yt_cc", "yt_mute", "yt_quality"]:
+                "yt_cc", "yt_mute", "yt_quality", "include_in_global"]:
         if key in data:
             val = data[key]
             if key == "stream_url":
