@@ -20,16 +20,7 @@
       <h2>Groups</h2>
     </div>
     <div class="group-section">
-      <h3>Create or Update Group</h3>
-      <div style="margin-bottom:0.5rem;">
-        <label>Group name: <input id="gm-group-name" type="text" placeholder="e.g., Favorites"></label>
-        <button id="gm-save-group" type="button">Save Group</button>
-      </div>
-      <div id="gm-streams-list" class="group-list"></div>
-    </div>
-    <div class="group-section">
-      <h3>Existing Groups</h3>
-      <div id="gm-groups-list" class="group-chips"></div>
+      <div id="group-tiles" class="group-tiles"></div>
     </div>
   </div>
 
@@ -145,10 +136,7 @@
   const openGroupBtn = document.getElementById('open-group');
   const groupSelect = document.getElementById('group-select');
   // Group Manager elements
-  const gmName = document.getElementById('gm-group-name');
-  const gmSaveGroup = document.getElementById('gm-save-group');
-  const gmStreamsList = document.getElementById('gm-streams-list');
-  const gmGroupsList = document.getElementById('gm-groups-list');
+  const groupTiles = document.getElementById('group-tiles');
 
   function showNotification(msg) {
     notification.textContent = msg;
@@ -179,39 +167,27 @@
         fetch('/streams_meta').then(r=>r.json()),
         fetch('/groups').then(r=>r.json())
       ]);
-      // Populate streams list for create/update
-      if (gmStreamsList) {
-        gmStreamsList.innerHTML = '';
-        Object.keys(streamsMeta).forEach(id => {
-          const chk = makeEl('input', {type:'checkbox', value:id});
-          const lbl = makeEl('label', {}, [chk, ' ', (streamsMeta[id].label || id)]);
-          const wrap = makeEl('div', {class:'group-item'}, [lbl]);
-          gmStreamsList.appendChild(wrap);
+      // Build tiles
+      if (groupTiles) {
+        groupTiles.innerHTML = '';
+        // Add tile
+        const addTile = makeEl('div', {class:'group-tile add'}, [
+          makeEl('div', {class:'tile-header'}, ['+ New Group'])
+        ]);
+        addTile.addEventListener('click', () => {
+          const tile = createGroupTile(streamsMeta, groups, null);
+          groupTiles.prepend(tile);
+          // open editor immediately
+          const body = tile.querySelector('.tile-body');
+          if (body) body.hidden = false;
+          const nameInput = tile.querySelector('.tile-name');
+          if (nameInput) nameInput.focus();
         });
-      }
-      // Populate existing groups chips
-      if (gmGroupsList) {
-        gmGroupsList.innerHTML = '';
+        groupTiles.appendChild(addTile);
+
+        // Existing group tiles
         Object.keys(groups).forEach(name => {
-          const view = makeEl('a', {href:`/stream/group/${encodeURIComponent(name)}`, target:'_blank', class:'chip-link'}, [name]);
-          const edit = makeEl('button', {class:'chip-del', title:'Edit'}, ['Edit']);
-          edit.addEventListener('click', () => {
-            // Prefill form with group membership
-            gmName.value = name;
-            const selected = new Set(groups[name] || []);
-            gmStreamsList.querySelectorAll('input[type="checkbox"]').forEach(c => {
-              c.checked = selected.has(c.value);
-            });
-            window.scrollTo({ top: document.getElementById('group-manager').offsetTop, behavior: 'smooth' });
-          });
-          const del = makeEl('button', {class:'chip-del'}, ['Delete']);
-          del.addEventListener('click', async () => {
-            if (!confirm(`Delete group ${name}?`)) return;
-            await fetch(`/groups/${encodeURIComponent(name)}`, {method:'DELETE'});
-            loadGroupsUI();
-          });
-          const chip = makeEl('div', {class:'group-chip'}, [view, edit, del]);
-          gmGroupsList.appendChild(chip);
+          groupTiles.appendChild(createGroupTile(streamsMeta, groups, name));
         });
       }
     } catch (e) { console.error('Failed to load groups UI', e); }
@@ -219,22 +195,71 @@
   function selectedIds(container) {
     return Array.from(container.querySelectorAll('input[type="checkbox"]:checked')).map(c=>c.value);
   }
-  if (gmSaveGroup && gmStreamsList) {
-    gmSaveGroup.addEventListener('click', async ()=>{
-      const name = (gmName.value||'').trim();
-      if (!name) { alert('Enter a group name'); return; }
-      const ids = selectedIds(gmStreamsList);
-      const res = await fetch('/groups', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({name, streams: ids})});
-      if (res.ok) {
-        gmName.value = '';
-        gmStreamsList.querySelectorAll('input[type="checkbox"]').forEach(c=>c.checked=false);
+  function createGroupTile(streamsMeta, groups, name) {
+    const members = new Set(name ? (groups[name]||[]) : []);
+    const isNew = !name;
+    const tile = makeEl('div', {class:'group-tile'}, []);
+    const header = makeEl('div', {class:'tile-header'}, []);
+    const title = makeEl('span', {class:'tile-title'}, [name || 'New Group']);
+    const actions = makeEl('div', {class:'tile-actions'}, []);
+    const open = name ? makeEl('a', {href:`/stream/group/${encodeURIComponent(name)}`, target:'_blank'}, ['Open']) : null;
+    const edit = makeEl('button', {class:'tile-edit'}, ['Edit']);
+    const del = name ? makeEl('button', {class:'tile-del'}, ['Delete']) : null;
+    if (open) actions.appendChild(open);
+    actions.appendChild(edit);
+    if (del) actions.appendChild(del);
+    header.appendChild(title);
+    header.appendChild(actions);
+    tile.appendChild(header);
+    const body = makeEl('div', {class:'tile-body', hidden: true}, []);
+    const nameRow = makeEl('div', {class:'tile-row'}, [
+      makeEl('label', {}, ['Name: ', makeEl('input', {type:'text', class:'tile-name', value: name || ''}, [])])
+    ]);
+    body.appendChild(nameRow);
+    const list = makeEl('div', {class:'group-list'}, []);
+    Object.keys(streamsMeta).forEach(id => {
+      const chk = makeEl('input', {type:'checkbox', value:id}, []);
+      chk.checked = members.has(id);
+      const lbl = makeEl('label', {}, [chk, ' ', (streamsMeta[id].label || id)]);
+      const wrap = makeEl('div', {class:'group-item'}, [lbl]);
+      list.appendChild(wrap);
+    });
+    body.appendChild(list);
+    const btns = makeEl('div', {class:'tile-buttons'}, []);
+    const save = makeEl('button', {class:'tile-save'}, ['Save']);
+    const cancel = makeEl('button', {class:'tile-cancel'}, ['Cancel']);
+    btns.appendChild(save);
+    btns.appendChild(cancel);
+    body.appendChild(btns);
+    tile.appendChild(body);
+
+    // interactions
+    edit.addEventListener('click', () => { body.hidden = !body.hidden; });
+    if (del) {
+      del.addEventListener('click', async () => {
+        if (!confirm(`Delete group ${name}?`)) return;
+        await fetch(`/groups/${encodeURIComponent(name)}`, {method:'DELETE'});
         loadGroupsUI();
+      });
+    }
+    save.addEventListener('click', async () => {
+      const nameVal = (tile.querySelector('.tile-name').value || '').trim();
+      if (!nameVal) { alert('Enter a group name'); return; }
+      const ids = selectedIds(list);
+      const res = await fetch('/groups', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({name: nameVal, streams: ids})});
+      if (res.ok) {
         showNotification('Saved group');
+        loadGroupsUI();
       } else {
         alert('Failed to save group');
       }
     });
+    cancel.addEventListener('click', () => { body.hidden = true; });
+    return tile;
   }
+
+  // initial load
+  document.addEventListener('DOMContentLoaded', loadGroupsUI);
 
   if (openGroupBtn && groupSelect) {
     openGroupBtn.addEventListener('click', () => {

@@ -138,11 +138,16 @@ a {
 .group-section { margin-bottom: 0.5rem; }
 .group-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 6px; }
 .group-item { border: 1px solid var(--border); padding: 6px; border-radius: 4px; background: var(--surface); }
-.group-chips { display: flex; flex-wrap: wrap; gap: 6px; }
-.group-chip { border: 1px solid var(--border); padding: 4px 6px; border-radius: 16px; background: var(--surface); display: inline-flex; align-items: center; gap: 6px; }
-.chip-link { color: var(--accent); text-decoration: none; }
-.chip-badge { font-size: 0.75rem; opacity: 0.8; }
-.chip-del { font-size: 0.75rem; padding: 0.15rem 0.4rem; }
+.group-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 8px; }
+.group-tile { border: 1px solid var(--border); border-radius: 6px; background: var(--surface); padding: 6px; }
+.group-tile.add { cursor: pointer; display: flex; align-items: center; justify-content: center; color: var(--accent); border-style: dashed; }
+.tile-header { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
+.tile-title { font-weight: 600; }
+.tile-actions a { color: var(--accent); text-decoration: none; margin-right: 6px; }
+.tile-actions button { font-size: 0.75rem; padding: 0.15rem 0.4rem; }
+.tile-body { margin-top: 6px; }
+.tile-row { margin-bottom: 6px; }
+.tile-buttons { display: flex; gap: 6px; margin-top: 6px; }
 
 /* Stream card adjustments */
 .stream-card {
