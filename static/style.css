@@ -540,13 +540,14 @@ a {
 .toggle.compact .toggle-label {
   order: 0;
   flex: 1 1 auto;
-  padding-right: 0.75rem;
+  padding-right: 0.4rem;
 }
 
 .toggle.compact .toggle-switch {
   order: 1;
   width: 40px;
   height: 20px;
+  margin-left: 0;
 }
 
 .toggle.compact .toggle-switch::after {
