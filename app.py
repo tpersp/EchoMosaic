@@ -301,11 +301,13 @@ def update_app():
     repo_path = cfg.get("INSTALL_DIR", os.getcwd())
     branch = cfg.get("UPDATE_BRANCH", "main")
     service_name = cfg.get("SERVICE_NAME", "echomosaic.service")
+    if not os.path.isdir(repo_path):
+        return f"Repository path '{repo_path}' not found", 500
     try:
         subprocess.check_call(["git", "fetch"], cwd=repo_path)
         subprocess.check_call(["git", "checkout", branch], cwd=repo_path)
         subprocess.check_call(["git", "reset", "--hard", f"origin/{branch}"], cwd=repo_path)
-    except subprocess.CalledProcessError as e:
+    except (subprocess.CalledProcessError, OSError) as e:
         return f"Git update failed: {e}", 500
     try:
         subprocess.check_call([
@@ -315,9 +317,12 @@ def update_app():
             "-r",
             "requirements.txt",
         ], cwd=repo_path)
-    except subprocess.CalledProcessError:
+    except (subprocess.CalledProcessError, OSError):
         pass
-    subprocess.Popen(["sudo", "systemctl", "restart", service_name])
+    try:
+        subprocess.Popen(["sudo", "systemctl", "restart", service_name])
+    except OSError:
+        pass
     return render_template("update_status.html", message="Soft update complete. Restarting service...")
 
 if __name__ == "__main__":
