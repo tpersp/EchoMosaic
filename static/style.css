@@ -159,6 +159,7 @@ a {
 .member-item:last-child { border-bottom: 0; }
 .member-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .member-remove { font-size: 0.75rem; padding: 0.2rem 0.5rem; }
+.member-item.overflow .member-name { text-decoration: line-through; opacity: 0.6; }
 
 /* Stream card adjustments */
 .stream-card {
