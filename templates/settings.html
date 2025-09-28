@@ -58,8 +58,8 @@
     Object.entries(streams).forEach(([id,meta]) => {
       const lbl = el('label');
       const chk = el('input', {type:'checkbox', value:id});
-      const dot = el('span', {style:`display:inline-block;width:10px;height:10px;border-radius:50%;border:1px solid var(--border);background:${meta.color};margin:0 6px;`});
-      lbl.appendChild(chk); lbl.appendChild(dot); lbl.appendChild(document.createTextNode(meta.label||id));
+      lbl.appendChild(chk);
+      lbl.appendChild(document.createTextNode(' ' + (meta.label||id)));
       const wrap = el('div', {style:'border:1px solid var(--border);padding:6px;border-radius:4px;background:var(--surface);'} , [lbl]);
       list.appendChild(wrap);
     });
