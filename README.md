@@ -1,7 +1,7 @@
-# EchoView Dashboard
+# EchoMosaic
 
-EchoView Dashboard is a web‑based control panel and viewer for one or more
-EchoView receivers. It provides a simple way to configure up to four
+EchoMosaic is a web‑based control panel and viewer for one or more
+EchoMosaic receivers. It provides a simple way to configure up to four
 independent streams, each of which can display images from a folder or
 play a live stream from a service such as YouTube or Twitch. The
 application is built with Flask and uses Socket.IO to update the
@@ -60,8 +60,8 @@ chmod +x update.sh
 ```
 
 By default it assumes the application is installed in
-`/opt/echoview-dashboard` and managed by the
-`echoview-dashboard.service` unit, but you can override these values
+`/opt/echomosaic` and managed by the
+`echomosaic.service` unit, but you can override these values
 when prompted.
 
 ## Manual installation
