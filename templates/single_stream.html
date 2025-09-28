@@ -178,6 +178,7 @@ async function displaySingleImage(path, container) {
 
 function startRandomRotation(config, container) {
   const folder = config.folder || 'all';
+  const hideNsfw = Boolean(config.hide_nsfw);
   const delayMs = Math.max((Number(config.duration) || 5) * 1000, 1000);
   let cancelled = false;
   let seqIndex = 0;
@@ -198,8 +199,11 @@ function startRandomRotation(config, container) {
 
   async function fetchNextPath() {
     if (config.shuffle === false) {
-      const url = `/images?folder=${encodeURIComponent(folder)}&offset=${seqIndex}&limit=1`;
-      const res = await fetch(url);
+      const params = new URLSearchParams({ folder, offset: String(seqIndex), limit: '1' });
+      if (hideNsfw) {
+        params.set('hide_nsfw', '1');
+      }
+      const res = await fetch(`/images?${params.toString()}`);
       if (!res.ok) {
         throw new Error(`Image list request failed (${res.status})`);
       }
@@ -215,7 +219,11 @@ function startRandomRotation(config, container) {
       return null;
     }
 
-    const res = await fetch(`/images/random?folder=${encodeURIComponent(folder)}`);
+    const params = new URLSearchParams({ folder });
+    if (hideNsfw) {
+      params.set('hide_nsfw', '1');
+    }
+    const res = await fetch(`/images/random?${params.toString()}`);
     if (!res.ok) {
       if (res.status === 404) {
         return null;

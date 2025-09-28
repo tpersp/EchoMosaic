@@ -90,7 +90,6 @@ except AttributeError:  # Pillow < 9.1
 
 IMAGE_EXTENSIONS = (".png", ".jpg", ".jpeg", ".gif", ".webp")
 
-NSFW_FILTER_KEY = "_nsfw_filter_enabled"
 NSFW_KEYWORD = "nsfw"
 
 # Cache image paths per folder so we can serve repeated requests without rescanning the disk.
@@ -451,6 +450,7 @@ def default_stream_config():
         "selected_image": None,
         "duration": 5,
         "shuffle": True,
+        "hide_nsfw": False,
         "stream_url": None,
         "yt_cc": False,
         "yt_mute": True,
@@ -939,6 +939,7 @@ for k, v in list(settings.items()):
     if not k.startswith("_") and isinstance(v, dict):
         v.setdefault("label", k.capitalize())
         v.setdefault("shuffle", True)
+        v.setdefault("hide_nsfw", False)
         if v.get("image_quality") not in IMAGE_QUALITY_CHOICES:
             v["image_quality"] = "auto"
         ensure_ai_defaults(v)
@@ -949,46 +950,14 @@ settings.setdefault("_notes", "")
 # Ensure groups key exists
 settings.setdefault("_groups", {})
 
-# Ensure NSFW filter flag exists
-settings.setdefault(NSFW_FILTER_KEY, False)
-
-
-
-
-def _nsfw_filter_enabled() -> bool:
-    return bool(settings.get(NSFW_FILTER_KEY))
-
-
-
 def _path_contains_nsfw(value: Optional[str]) -> bool:
     return bool(value and NSFW_KEYWORD in value.lower())
 
 
-
-def _filter_nsfw_images(paths: List[str]) -> List[str]:
-    if not _nsfw_filter_enabled():
+def _filter_nsfw_images(paths: List[str], hide_nsfw: bool) -> List[str]:
+    if not hide_nsfw:
         return paths
     return [p for p in paths if not _path_contains_nsfw(p)]
-
-
-def get_subfolders():
-    subfolders = ["all"]
-    if os.path.isdir(IMAGE_DIR):
-        for root, dirs, _ in os.walk(IMAGE_DIR):
-            for d in dirs:
-                rel_path = os.path.relpath(os.path.join(root, d), IMAGE_DIR)
-                normalized = rel_path.replace('\\', '/')
-                if _nsfw_filter_enabled() and _path_contains_nsfw(normalized):
-                    continue
-                subfolders.append(rel_path)
-            break
-    return subfolders
-
-
-@app.route("/folders", methods=["GET"])
-def folders_collection():
-    return jsonify(get_subfolders())
-
 
 
 def _parse_truthy(value: Any) -> bool:
@@ -997,21 +966,30 @@ def _parse_truthy(value: Any) -> bool:
     return bool(value)
 
 
-@app.route("/nsfw-filter", methods=["GET", "POST"])
-def nsfw_filter_settings():
-    if request.method == "GET":
-        return jsonify({"enabled": _nsfw_filter_enabled()})
-    data = request.get_json(silent=True) or {}
-    enabled = _parse_truthy(data.get("enabled"))
-    settings[NSFW_FILTER_KEY] = enabled
-    save_settings(settings)
-    return jsonify({"status": "ok", "enabled": enabled})
+def get_subfolders(hide_nsfw: bool = False) -> List[str]:
+    subfolders = ["all"]
+    if os.path.isdir(IMAGE_DIR):
+        for root, dirs, _ in os.walk(IMAGE_DIR):
+            for d in dirs:
+                rel_path = os.path.relpath(os.path.join(root, d), IMAGE_DIR)
+                normalized = rel_path.replace("\\", "/")
+                if hide_nsfw and _path_contains_nsfw(normalized):
+                    continue
+                subfolders.append(rel_path)
+            break
+    return subfolders
 
 
-def list_images(folder="all"):
+@app.route("/folders", methods=["GET"])
+def folders_collection():
+    hide_nsfw = _parse_truthy(request.args.get("hide_nsfw"))
+    return jsonify(get_subfolders(hide_nsfw=hide_nsfw))
+
+
+def list_images(folder="all", hide_nsfw: bool = False):
     """Return cached image paths for the folder, refreshing when necessary."""
     images = refresh_image_cache(folder)
-    return _filter_nsfw_images(images)
+    return _filter_nsfw_images(images, hide_nsfw)
 
 
 def try_get_hls(original_url):
@@ -1055,7 +1033,6 @@ def dashboard():
         clip_skip_range=STABLE_HORDE_CLIP_SKIP_RANGE,
         strength_range=STABLE_HORDE_STRENGTH_RANGE,
         denoise_range=STABLE_HORDE_DENOISE_RANGE,
-        nsfw_filter_enabled=_nsfw_filter_enabled(),
     )
 
 
@@ -1102,7 +1079,7 @@ def render_stream(name):
     if config_quality not in IMAGE_QUALITY_CHOICES:
         config_quality = "auto"
     conf["image_quality"] = config_quality
-    images = list_images(conf.get("folder", "all"))
+    images = list_images(conf.get("folder", "all"), hide_nsfw=conf.get("hide_nsfw", False))
     requested_quality = (request.args.get("size") or "").strip().lower()
     if requested_quality and requested_quality not in IMAGE_QUALITY_CHOICES:
         requested_quality = ""
@@ -1161,7 +1138,7 @@ def update_stream_settings(stream_id):
 
     # We'll add new keys for YouTube: "yt_cc", "yt_mute", "yt_quality"
     for key in ["mode", "folder", "selected_image", "duration", "shuffle", "stream_url",
-                "image_quality", "yt_cc", "yt_mute", "yt_quality", "label"]:
+                "image_quality", "yt_cc", "yt_mute", "yt_quality", "label", "hide_nsfw"]:
         if key in data:
             val = data[key]
             if key == "stream_url":
@@ -1179,6 +1156,8 @@ def update_stream_settings(stream_id):
                         if _slugify(other_label) == new_slug:
                             return jsonify({"error": "Another stream already uses this name"}), 400
                 conf[key] = new_label
+            elif key == "hide_nsfw":
+                conf[key] = bool(val)
             elif key == "image_quality":
                 normalized = (val or "").strip().lower() if isinstance(val, str) else ""
                 if normalized not in IMAGE_QUALITY_CHOICES:
@@ -1725,7 +1704,8 @@ def get_images():
     if offset < 0 or (limit is not None and limit < 0):
         return jsonify({"error": "limit and offset must be non-negative"}), 400
 
-    images = list_images(folder)
+    hide_nsfw = _parse_truthy(request.args.get("hide_nsfw"))
+    images = list_images(folder, hide_nsfw=hide_nsfw)
     if limit_arg is not None or offset_arg is not None:
         # Only slice when pagination is explicitly requested to preserve legacy behaviour.
         end = offset + limit if limit is not None else None
@@ -1738,7 +1718,8 @@ def get_images():
 def get_random_image():
     """Return a random image path from the cached folder listing."""
     folder = request.args.get("folder", "all")
-    images = list_images(folder)
+    hide_nsfw = _parse_truthy(request.args.get("hide_nsfw"))
+    images = list_images(folder, hide_nsfw=hide_nsfw)
     if not images:
         return jsonify({"error": "No images found"}), 404
     return jsonify({"path": random.choice(images)})
