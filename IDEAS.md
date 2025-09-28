@@ -33,6 +33,11 @@ A running list of ideas and future improvements. Add new items anywhere below.
 
 - [ ]  [2025-09-08] Add configurable logging and monitoring. Operations like yt‑dlp calls and update scripts either fail silently or log to the console. Implementing configurable logging levels and persistent logs (e.g., rotating file logs) would aid debugging and provide insight into system health.
 
+- [ ]  Similarly to the stablehorde.py, add a page and function that can pull images from https://picsum.photos/ with the available options showed to the user.
+
+- [ ] Similarly to the stablehorde.py, add a page and function that can pull images from https://www.pexels.com/api/ with the available options showed to the user.
+
+
 
 ---
 
