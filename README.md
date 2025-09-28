@@ -46,6 +46,23 @@ browser at `http://your‑server:PORT/`.
 > than the default `/mnt/viewers` you can edit the `IMAGE_DIR`
 > constant near the top of `app.py` before installing.
 
+## Updating
+
+To pull in new changes from GitHub and restart the running service,
+use the provided `update.sh` script. The script prompts for the
+installation directory and systemd service name, fetches the latest
+code, updates Python dependencies, and restarts the service.
+
+```
+chmod +x update.sh
+./update.sh
+```
+
+By default it assumes the application is installed in
+`/opt/echoview-dashboard` and managed by the
+`echoview-dashboard.service` unit, but you can override these values
+when prompted.
+
 ## Manual installation
 
 If you prefer a manual setup, follow these steps:
