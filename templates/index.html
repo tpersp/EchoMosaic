@@ -12,7 +12,7 @@
 
   <div class="controls">
     <button id="add-stream">Add Stream</button>
-    <label>Layout:
+    <label>Dashboard Layout:
       <select id="layout-select">
         <option value="1">1 column</option>
         <option value="2" selected>2 columns</option>
@@ -20,6 +20,15 @@
         <option value="4">4 columns</option>
       </select>
     </label>
+    <label>Stream Layout:
+      <select id="mosaic-layout-select">
+        <option value="1" {% if mosaic_settings.cols == 1 %}selected{% endif %}>1 column</option>
+        <option value="2" {% if mosaic_settings.cols == 2 %}selected{% endif %}>2 columns</option>
+        <option value="3" {% if mosaic_settings.cols == 3 %}selected{% endif %}>3 columns</option>
+        <option value="4" {% if mosaic_settings.cols == 4 %}selected{% endif %}>4 columns</option>
+      </select>
+    </label>
+    <button id="open-mosaic">View Streams</button>
   </div>
 
   <div id="dashboard-grid" class="dashboard-grid cols-2">
@@ -106,6 +115,8 @@
   const grid = document.getElementById('dashboard-grid');
   const layoutSelect = document.getElementById('layout-select');
   const addStreamBtn = document.getElementById('add-stream');
+  const mosaicLayoutSelect = document.getElementById('mosaic-layout-select');
+  const openMosaicBtn = document.getElementById('open-mosaic');
 
   function showNotification(msg) {
     notification.textContent = msg;
@@ -121,6 +132,24 @@
     grid.classList.remove('cols-1','cols-2','cols-3','cols-4');
     grid.classList.add('cols-' + cols);
   });
+
+  if (mosaicLayoutSelect) {
+    mosaicLayoutSelect.addEventListener('change', e => {
+      fetch('/mosaic-settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ cols: e.target.value })
+      }).then(res => res.json()).then(() => {
+        showNotification('Stream layout updated');
+      });
+    });
+  }
+
+  if (openMosaicBtn) {
+    openMosaicBtn.addEventListener('click', () => {
+      window.open('/stream', '_blank');
+    });
+  }
 
   // Add a new stream by posting to /streams
   addStreamBtn.addEventListener('click', () => {
