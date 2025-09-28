@@ -43,7 +43,7 @@ After installation completes you can access the dashboard from a
 browser at `http://your‑server:PORT/`.
 
 > **Note**: If you need to store images in a different location
-> than the default `/mnt/piviewers` you can edit the `IMAGE_DIR`
+> than the default `/mnt/viewers` you can edit the `IMAGE_DIR`
 > constant near the top of `app.py` before installing.
 
 ## Manual installation
