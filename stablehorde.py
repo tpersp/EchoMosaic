@@ -15,4 +15,7 @@
 
 # this stablehorde.py should be called by the main.py file when the user selects Stable Horde as the AI model
 # the main.py file should import the StableHorde class from this file and create an instance
-# This way the image generation can be handled in a modular way and not clutter the main.py file or be hardcoded
+# This way the image generation can be handled in a modular way and not clutter the main.py file or be hardcoded.
+# It should have the option to save images to a specified folder directory, also stated in .env file.
+# if user does not whish to save images, they should be temporarily saved to a temp folder and deleted after use.
+
