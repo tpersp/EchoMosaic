@@ -9,6 +9,7 @@ import subprocess
 import threading
 import time
 import secrets
+from copy import deepcopy
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
@@ -65,41 +66,55 @@ STABLE_HORDE_DENOISE_RANGE = (0.01, 1.0)
 
 IMAGE_DIR_PATH = Path(IMAGE_DIR)
 
+AI_FALLBACK_DEFAULTS: Dict[str, Any] = {
+    "prompt": "",
+    "negative_prompt": "",
+    "model": AI_DEFAULT_MODEL,
+    "sampler": AI_DEFAULT_SAMPLER,
+    "steps": AI_DEFAULT_STEPS,
+    "cfg_scale": AI_DEFAULT_CFG,
+    "width": AI_DEFAULT_WIDTH,
+    "height": AI_DEFAULT_HEIGHT,
+    "samples": AI_DEFAULT_SAMPLES,
+    "seed": "random",
+    "nsfw": False,
+    "censor_nsfw": False,
+    "save_output": AI_DEFAULT_PERSIST,
+    "post_processing": [],
+    "hires_fix": False,
+    "hires_fix_denoising_strength": None,
+    "denoising_strength": None,
+    "facefixer_strength": None,
+    "clip_skip": None,
+    "karras": False,
+    "tiling": False,
+    "transparent": False,
+    "loras": [],
+    "style": "",
+    "trusted_workers": False,
+    "validated_backends": True,
+    "slow_workers": True,
+    "extra_slow_workers": False,
+    "disable_batching": False,
+    "allow_downgrade": False,
+    "timeout": AI_TIMEOUT,
+}
+
 
 def default_ai_settings() -> Dict[str, Any]:
-    return {
-        "prompt": "",
-        "negative_prompt": "",
-        "model": AI_DEFAULT_MODEL,
-        "sampler": AI_DEFAULT_SAMPLER,
-        "steps": AI_DEFAULT_STEPS,
-        "cfg_scale": AI_DEFAULT_CFG,
-        "width": AI_DEFAULT_WIDTH,
-        "height": AI_DEFAULT_HEIGHT,
-        "samples": AI_DEFAULT_SAMPLES,
-        "seed": "random",
-        "nsfw": False,
-        "censor_nsfw": False,
-        "save_output": AI_DEFAULT_PERSIST,
-        "post_processing": [],
-        "hires_fix": False,
-        "hires_fix_denoising_strength": None,
-        "denoising_strength": None,
-        "facefixer_strength": None,
-        "clip_skip": None,
-        "karras": False,
-        "tiling": False,
-        "transparent": False,
-        "loras": [],
-        "style": "",
-        "trusted_workers": False,
-        "validated_backends": True,
-        "slow_workers": True,
-        "extra_slow_workers": False,
-        "disable_batching": False,
-        "allow_downgrade": False,
-        "timeout": AI_TIMEOUT,
-    }
+    """Return the current default AI settings (global overrides + fallbacks)."""
+
+    overrides: Optional[Dict[str, Any]] = None
+    settings_ref = globals().get("settings")
+    if isinstance(settings_ref, dict):
+        candidate = settings_ref.get("_ai_defaults")
+        if isinstance(candidate, dict):
+            overrides = candidate
+
+    merged = deepcopy(AI_FALLBACK_DEFAULTS)
+    if overrides:
+        merged = _sanitize_ai_settings(overrides, merged, defaults=AI_FALLBACK_DEFAULTS)
+    return deepcopy(merged)
 
 
 def default_ai_state() -> Dict[str, Any]:
@@ -117,21 +132,25 @@ def default_ai_state() -> Dict[str, Any]:
 
 
 def ensure_ai_defaults(conf: Dict[str, Any]) -> None:
+    ai_defaults = default_ai_settings()
     ai_settings = conf.get(AI_SETTINGS_KEY)
     if not isinstance(ai_settings, dict):
-        conf[AI_SETTINGS_KEY] = default_ai_settings()
+        conf[AI_SETTINGS_KEY] = deepcopy(ai_defaults)
     else:
-        defaults = default_ai_settings()
-        for key, value in defaults.items():
-            ai_settings.setdefault(key, value)
+        for key, value in ai_defaults.items():
+            if key not in ai_settings:
+                ai_settings[key] = deepcopy(value) if isinstance(value, (dict, list)) else value
 
     ai_state = conf.get(AI_STATE_KEY)
     if not isinstance(ai_state, dict):
         conf[AI_STATE_KEY] = default_ai_state()
     else:
-        defaults = default_ai_state()
-        for key, value in defaults.items():
+        state_defaults = default_ai_state()
+        for key, value in state_defaults.items():
             ai_state.setdefault(key, value)
+
+    if "_ai_customized" not in conf:
+        conf["_ai_customized"] = not _ai_settings_match_defaults(conf[AI_SETTINGS_KEY], defaults=ai_defaults)
 
 
 def _ensure_dir(path: Path) -> Path:
@@ -142,8 +161,15 @@ def _ensure_dir(path: Path) -> Path:
     return path
 
 
-def _sanitize_ai_settings(payload: Dict[str, Any], base: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-    defaults = default_ai_settings()
+def _sanitize_ai_settings(
+    payload: Dict[str, Any],
+    base: Optional[Dict[str, Any]] = None,
+    defaults: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    if defaults is None:
+        defaults = default_ai_settings()
+    else:
+        defaults = deepcopy(defaults)
     current = dict(base or defaults)
     bool_keys = {
         "save_output",
@@ -231,6 +257,16 @@ def _sanitize_ai_settings(payload: Dict[str, Any], base: Optional[Dict[str, Any]
     return current
 
 
+def _ai_settings_match_defaults(candidate: Dict[str, Any], defaults: Optional[Dict[str, Any]] = None) -> bool:
+    if not isinstance(candidate, dict):
+        return False
+    baseline = defaults or default_ai_settings()
+    for key in AI_FALLBACK_DEFAULTS.keys():
+        if candidate.get(key) != baseline.get(key):
+            return False
+    return True
+
+
 def default_mosaic_config():
     """Return the default configuration for the mosaic /stream page."""
     # ``layout`` controls how streams are arranged. ``grid`` uses the
@@ -262,6 +298,7 @@ def default_stream_config():
         "label": "",
         AI_SETTINGS_KEY: default_ai_settings(),
         AI_STATE_KEY: default_ai_state(),
+        "_ai_customized": False,
     }
 
 
@@ -699,6 +736,7 @@ def _run_ai_generation(stream_id: str, options: Dict[str, Any]) -> None:
         ensure_ai_defaults(conf)
         conf[AI_SETTINGS_KEY] = _sanitize_ai_settings(options, conf[AI_SETTINGS_KEY])
         conf[AI_SETTINGS_KEY]['save_output'] = persist
+        conf['_ai_customized'] = not _ai_settings_match_defaults(conf[AI_SETTINGS_KEY])
         conf[AI_STATE_KEY].update(updates)
         if images:
             conf['selected_image'] = images[0]['path']
@@ -726,6 +764,14 @@ else:
     settings["_mosaic"].setdefault("pip_pip", None)
     settings["_mosaic"].setdefault("pip_corner", "bottom-right")
     settings["_mosaic"].setdefault("pip_size", 25)
+
+# Ensure global AI defaults exist and are sanitized
+raw_ai_defaults = settings.get("_ai_defaults") if isinstance(settings.get("_ai_defaults"), dict) else None
+settings["_ai_defaults"] = _sanitize_ai_settings(
+    raw_ai_defaults or {},
+    deepcopy(AI_FALLBACK_DEFAULTS),
+    defaults=AI_FALLBACK_DEFAULTS,
+)
 
 # Backfill defaults for existing stream entries
 for k, v in list(settings.items()):
@@ -887,6 +933,7 @@ def update_stream_settings(stream_id):
     data = request.json
     conf = settings[stream_id]
     ensure_ai_defaults(conf)
+    previous_mode = conf.get("mode")
 
     # We'll add new keys for YouTube: "yt_cc", "yt_mute", "yt_quality"
     for key in ["mode", "folder", "selected_image", "duration", "shuffle", "stream_url",
@@ -911,12 +958,58 @@ def update_stream_settings(stream_id):
             else:
                 conf[key] = val
 
+    mode_requested = data.get("mode")
+    if (
+        mode_requested == AI_MODE
+        and previous_mode != AI_MODE
+        and not conf.get("_ai_customized", False)
+    ):
+        conf[AI_SETTINGS_KEY] = default_ai_settings()
+        conf[AI_STATE_KEY] = default_ai_state()
+        conf["_ai_customized"] = False
+
     if isinstance(data.get("ai_settings"), dict):
         conf[AI_SETTINGS_KEY] = _sanitize_ai_settings(data["ai_settings"], conf[AI_SETTINGS_KEY])
+        conf["_ai_customized"] = not _ai_settings_match_defaults(conf[AI_SETTINGS_KEY])
 
     save_settings(settings)
     socketio.emit("refresh", {"stream_id": stream_id, "config": conf})
     return jsonify({"status": "success", "new_config": conf})
+
+
+@app.route("/settings/ai-defaults", methods=["GET"])
+def get_ai_defaults():
+    return jsonify({
+        "defaults": default_ai_settings(),
+        "fallback": deepcopy(AI_FALLBACK_DEFAULTS),
+    })
+
+
+@app.route("/settings/ai-defaults", methods=["POST"])
+def update_ai_defaults():
+    payload = request.get_json(silent=True) or {}
+    if not isinstance(payload, dict):
+        return jsonify({"error": "Invalid payload"}), 400
+
+    current_defaults = default_ai_settings()
+    sanitized = _sanitize_ai_settings(
+        payload,
+        current_defaults,
+        defaults=AI_FALLBACK_DEFAULTS,
+    )
+    settings["_ai_defaults"] = sanitized
+    new_defaults = default_ai_settings()
+
+    for stream_id, conf in settings.items():
+        if stream_id.startswith("_") or not isinstance(conf, dict):
+            continue
+        ensure_ai_defaults(conf)
+        if not conf.get("_ai_customized", False):
+            conf[AI_SETTINGS_KEY] = deepcopy(new_defaults)
+            conf["_ai_customized"] = False
+
+    save_settings(settings)
+    return jsonify({"status": "success", "defaults": new_defaults})
 
 
 @app.route('/ai/loras')
@@ -1032,6 +1125,7 @@ def ai_generate(stream_id: str):
     if not prompt:
         return jsonify({'error': 'Prompt is required'}), 400
     conf[AI_SETTINGS_KEY] = ai_settings
+    conf["_ai_customized"] = not _ai_settings_match_defaults(conf[AI_SETTINGS_KEY])
     persist = bool(ai_settings.get('save_output', AI_DEFAULT_PERSIST))
     previous_state = conf.get(AI_STATE_KEY) or {}
     previous_images = list(previous_state.get('images') or [])
@@ -1318,7 +1412,12 @@ def get_images():
 @app.route("/settings")
 def app_settings():
     cfg = load_config()
-    return render_template("settings.html", config=cfg)
+    return render_template(
+        "settings.html",
+        config=cfg,
+        ai_defaults=default_ai_settings(),
+        ai_fallback_defaults=AI_FALLBACK_DEFAULTS,
+    )
 
 
 @app.route("/update_app", methods=["POST"])

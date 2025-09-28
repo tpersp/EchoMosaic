@@ -102,6 +102,17 @@
     </div>
 
     <div style="margin: 1rem 0; padding: 0.75rem; border:1px solid var(--border); border-radius:4px; background: var(--surface-alt);">
+      <h3 style="margin-top:0;">Stable Horde Defaults</h3>
+      <p style="margin-top:0;">These values seed AI image settings when a stream switches to AI mode without custom preferences.</p>
+      <textarea id="ai-defaults-editor" style="width:100%; min-height:200px; font-family:monospace; font-size:0.9rem; line-height:1.4; padding:0.5rem; border:1px solid var(--border); border-radius:4px; background:var(--surface); color:inherit;">{{ ai_defaults|tojson(indent=2) }}</textarea>
+      <div style="display:flex; gap:.5rem; align-items:center; flex-wrap:wrap; margin-top:0.5rem;">
+        <button type="button" id="ai-defaults-save">Save Defaults</button>
+        <button type="button" id="ai-defaults-reset">Reset to Fallback</button>
+        <span id="ai-defaults-status" style="opacity:0.9;"></span>
+      </div>
+    </div>
+
+    <div style="margin: 1rem 0; padding: 0.75rem; border:1px solid var(--border); border-radius:4px; background: var(--surface-alt);">
       <h3 style="margin-top:0;">Backup / Restore</h3>
       <p style="margin-top:0;">Export or import your dashboard streams, groups, layout and notes.</p>
       <div style="display:flex; gap:.5rem; align-items:center; flex-wrap:wrap;">
@@ -132,6 +143,60 @@
       apply(next);
       try { localStorage.setItem('theme', next); } catch(e){}
     });
+  })();
+  </script>
+  <script>
+  (function(){
+    const editor = document.getElementById('ai-defaults-editor');
+    const saveBtn = document.getElementById('ai-defaults-save');
+    const resetBtn = document.getElementById('ai-defaults-reset');
+    const status = document.getElementById('ai-defaults-status');
+    const fallback = {{ ai_fallback_defaults|tojson }};
+    if (!editor || !saveBtn) return;
+
+    const setStatus = (msg, ok = true) => {
+      if (!status) return;
+      status.textContent = msg;
+      status.style.color = ok ? 'inherit' : '#f77';
+    };
+
+    const parseEditor = () => {
+      try {
+        return JSON.parse(editor.value || '{}');
+      } catch (err) {
+        setStatus('Invalid JSON: ' + err.message, false);
+        return null;
+      }
+    };
+
+    saveBtn.addEventListener('click', async () => {
+      const payload = parseEditor();
+      if (!payload) return;
+      setStatus('Saving…');
+      try {
+        const res = await fetch('/settings/ai-defaults', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || data.status !== 'success') {
+          setStatus(data.error || 'Failed to save defaults', false);
+          return;
+        }
+        editor.value = JSON.stringify(data.defaults, null, 2);
+        setStatus('Defaults saved');
+      } catch (err) {
+        setStatus('Failed to save defaults', false);
+      }
+    });
+
+    if (resetBtn) {
+      resetBtn.addEventListener('click', () => {
+        editor.value = JSON.stringify(fallback, null, 2);
+        setStatus('Fallback defaults loaded');
+      });
+    }
   })();
   </script>
   <script>
