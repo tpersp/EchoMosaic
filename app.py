@@ -12,6 +12,11 @@ SETTINGS_FILE = "settings.json"
 IMAGE_DIR = "/mnt/viewers"  # Adjust if needed
 
 
+def default_mosaic_config():
+    """Return the default configuration for the mosaic /stream page."""
+    return {"cols": 2}
+
+
 def default_stream_config():
     """Return the default configuration for a new stream."""
     return {
@@ -38,6 +43,9 @@ def save_settings(data):
         json.dump(data, f, indent=4)
 
 settings = load_settings()
+if "_mosaic" not in settings:
+    settings["_mosaic"] = default_mosaic_config()
+
 
 def get_subfolders():
     subfolders = ["all"]
@@ -88,7 +96,21 @@ def try_get_hls(original_url):
 @app.route("/")
 def dashboard():
     subfolders = get_subfolders()
-    return render_template("index.html", subfolders=subfolders, stream_settings=settings)
+    streams = {k: v for k, v in settings.items() if not k.startswith("_")}
+    mosaic = settings.get("_mosaic", default_mosaic_config())
+    return render_template(
+        "index.html",
+        subfolders=subfolders,
+        stream_settings=streams,
+        mosaic_settings=mosaic,
+    )
+
+
+@app.route("/stream")
+def mosaic_streams():
+    streams = {k: v for k, v in settings.items() if not k.startswith("_")}
+    mosaic = settings.get("_mosaic", default_mosaic_config())
+    return render_template("streams.html", stream_settings=streams, mosaic_settings=mosaic)
 
 @app.route("/stream/<stream_id>")
 def render_stream(stream_id):
@@ -150,6 +172,14 @@ def update_stream_settings(stream_id):
     save_settings(settings)
     socketio.emit("refresh", {"stream_id": stream_id, "config": conf})
     return jsonify({"status": "success", "new_config": conf})
+
+
+@app.route("/mosaic-settings", methods=["POST"])
+def update_mosaic_settings():
+    data = request.json or {}
+    settings["_mosaic"] = {"cols": int(data.get("cols", 2))}
+    save_settings(settings)
+    return jsonify({"status": "success", "mosaic": settings["_mosaic"]})
 
 @app.route("/stream/image/<path:filename>")
 def serve_stream_image(filename):

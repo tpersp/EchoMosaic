@@ -1,0 +1,31 @@
+html, body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  background: #000;
+  color: #eee;
+}
+
+.mosaic-grid {
+  display: grid;
+  grid-gap: 4px;
+  width: 100%;
+  height: 100vh;
+  grid-auto-rows: 1fr;
+}
+
+.mosaic-grid.cols-1 { grid-template-columns: repeat(1, 1fr); }
+.mosaic-grid.cols-2 { grid-template-columns: repeat(2, 1fr); }
+.mosaic-grid.cols-3 { grid-template-columns: repeat(3, 1fr); }
+.mosaic-grid.cols-4 { grid-template-columns: repeat(4, 1fr); }
+
+.mosaic-cell {
+  position: relative;
+  overflow: hidden;
+  background: #000;
+}
+.mosaic-cell iframe {
+  width: 100%;
+  height: 100%;
+  border: 0;
+}
