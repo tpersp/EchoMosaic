@@ -1,0 +1,17 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <title>Update Status</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <script>
+    setTimeout(function(){ window.location.href = '{{ url_for('dashboard') }}'; }, 10000);
+  </script>
+</head>
+<body>
+  <div class="container">
+    <h1>Update</h1>
+    <p>{{ message }}</p>
+  </div>
+</body>
+</html>
