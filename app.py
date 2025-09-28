@@ -234,6 +234,18 @@ def update_stream_settings(stream_id):
             if key == "stream_url":
                 val = val.strip()
                 conf[key] = val if val and val.lower() != "none" else None
+            elif key == "label":
+                # Enforce unique label slug across streams (ignoring case/spacing)
+                new_label = (val or "").strip()
+                new_slug = _slugify(new_label) if ' ' in globals() or True else ""
+                if new_slug:
+                    for other_id, other_conf in settings.items():
+                        if other_id.startswith("_") or other_id == stream_id:
+                            continue
+                        other_label = (other_conf.get("label") or other_id)
+                        if _slugify(other_label) == new_slug:
+                            return jsonify({"error": "Another stream already uses this name"}), 400
+                conf[key] = new_label
             else:
                 conf[key] = val
 
@@ -574,7 +586,13 @@ def groups_collection():
     layout = data.get("layout") or None
     if not name:
         return jsonify({"error": "Name required"}), 400
+    # Prevent reserved name and duplicates (case-insensitive)
+    if name.lower() == "default":
+        return jsonify({"error": "'default' is a reserved group name"}), 400
     settings.setdefault("_groups", {})
+    for existing in list(settings["_groups"].keys()):
+        if existing.lower() == name.lower() and existing != name:
+            return jsonify({"error": "Group name already exists (case-insensitive)"}), 409
     cleaned = [s for s in streams if s in settings]
     # Store as object with streams + optional layout
     if layout and isinstance(layout, dict):

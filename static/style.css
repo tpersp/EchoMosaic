@@ -293,3 +293,19 @@ a {
 .notification.show {
   opacity: 1;
 }
+.tile-pip-wrap { display: grid; grid-template-columns: 1fr; gap: 6px; margin-top: 6px; }
+.tile-pip-wrap .pip-row { display: grid; grid-template-columns: 90px 1fr; gap: 8px; align-items: center; }
+.tile-pip-wrap .pip-row label { opacity: 0.9; }
+.stream-card input,
+.stream-card select,
+.stream-card button {
+  font-size: 0.9rem;
+  padding: 0.3rem 0.5rem;
+}
+
+.group-tile input,
+.group-tile select,
+.group-tile button {
+  font-size: 0.9rem;
+  padding: 0.25rem 0.45rem;
+}
