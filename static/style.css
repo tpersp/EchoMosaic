@@ -516,12 +516,16 @@ a {
   margin-right: 1rem;
 }
 
-.toggle.inline:last-child {
-  margin-right: 0;
+.toggle.inline .toggle-switch {
+  margin-right: 0.45rem;
 }
 
 .toggle.inline .toggle-label {
-  margin-left: 0.35rem;
+  margin-left: 0;
+}
+
+.toggle.inline:last-child {
+  margin-right: 0;
 }
 
 .toggle.compact {
