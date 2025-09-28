@@ -97,7 +97,10 @@ def _load_env_file(path: Union[str, os.PathLike[str]]) -> None:
             continue
         key, value = stripped.split("=", 1)
         key = key.strip()
-        if not key or key in os.environ:
+        if not key:
+            continue
+        existing = os.environ.get(key)
+        if existing not in (None, ""):
             continue
         value = value.strip().strip('"').strip("'")
         os.environ[key] = value
