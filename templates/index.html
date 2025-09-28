@@ -216,7 +216,9 @@
     return Array.from(container.querySelectorAll('input[type="checkbox"]:checked')).map(c=>c.value);
   }
   function createGroupTile(streamsMeta, groups, name) {
-    const members = new Set(name ? (groups[name]||[]) : []);
+    const gdata = name ? (groups[name]||[]) : [];
+    const members = new Set(Array.isArray(gdata) ? gdata : (gdata?.streams || []));
+    const gLayout = Array.isArray(gdata) ? {} : (gdata?.layout || {});
     const isNew = !name;
     const tile = makeEl('div', {class:'group-tile'}, []);
     const header = makeEl('div', {class:'tile-header'}, []);
@@ -237,6 +239,30 @@
       makeEl('label', {}, ['Name: ', makeEl('input', {type:'text', class:'tile-name', value: name || ''}, [])])
     ]);
     body.appendChild(nameRow);
+    // Layout selection
+    const layoutRow = makeEl('div', {class:'tile-row'}, []);
+    const layoutSelect = makeEl('select', {class:'tile-layout'}, []);
+    ['grid','horizontal','vertical','focus','pip'].forEach(opt => {
+      const o = makeEl('option', {value:opt}, [opt.charAt(0).toUpperCase()+opt.slice(1)]);
+      layoutSelect.appendChild(o);
+    });
+    layoutRow.appendChild(makeEl('label', {}, ['Layout: ', layoutSelect]));
+    const colsInput = makeEl('input', {type:'number', min:'1', max:'6', class:'tile-cols', value: gLayout.cols || 2}, []);
+    const colsWrap = makeEl('span', {class:'tile-cols-wrap'}, [' Columns: ', colsInput]);
+    layoutRow.appendChild(colsWrap);
+    // PIP options
+    const pipWrap = makeEl('span', {class:'tile-pip-wrap', style:'display:none;'}, []);
+    const pipMain = makeEl('select', {class:'tile-pip-main'}, []);
+    const pipPip = makeEl('select', {class:'tile-pip-pip'}, []);
+    const pipCorner = makeEl('select', {class:'tile-pip-corner'}, []);
+    ['top-left','top-right','bottom-left','bottom-right'].forEach(c => pipCorner.appendChild(makeEl('option', {value:c}, [c])));
+    const pipSize = makeEl('input', {type:'number', min:'10', max:'50', class:'tile-pip-size', value: gLayout.pip_size || 25}, []);
+    pipWrap.appendChild(document.createTextNode(' Main: ')); pipWrap.appendChild(pipMain);
+    pipWrap.appendChild(document.createTextNode(' Corner: ')); pipWrap.appendChild(pipCorner);
+    pipWrap.appendChild(document.createTextNode(' PIP: ')); pipWrap.appendChild(pipPip);
+    pipWrap.appendChild(document.createTextNode(' Size%: ')); pipWrap.appendChild(pipSize);
+    layoutRow.appendChild(pipWrap);
+    body.appendChild(layoutRow);
     // Bulk row (Add all / Remove all) above the combo
     const bulkRow = makeEl('div', {class:'tile-row tile-bulk-row'}, []);
     const addAllBtn = makeEl('button', {class:'tile-addall-btn', type:'button'}, ['Add all']);
@@ -270,6 +296,27 @@
       const count = members.size;
       title.textContent = (tile.querySelector('.tile-name')?.value?.trim() || name || 'New Group') + ` (${count})`;
     }
+    function refreshPipSelects() {
+      function fill(sel, selected) {
+        sel.innerHTML='';
+        Array.from(members).forEach(id => {
+          const o = makeEl('option', {value:id}, [labelOf(id)]);
+          if (selected && selected===id) o.selected = true;
+          sel.appendChild(o);
+        });
+      }
+      fill(pipMain, gLayout.pip_main && members.has(gLayout.pip_main) ? gLayout.pip_main : Array.from(members)[0]);
+      fill(pipPip, gLayout.pip_pip && members.has(gLayout.pip_pip) ? gLayout.pip_pip : Array.from(members)[1]);
+      // corner
+      Array.from(pipCorner.options).forEach(opt => opt.selected = (opt.value === (gLayout.pip_corner || 'bottom-right')));
+      pipSize.value = gLayout.pip_size || 25;
+    }
+    function updateLayoutVisibility() {
+      const v = layoutSelect.value;
+      colsWrap.style.display = (v==='grid') ? '' : 'none';
+      pipWrap.style.display = (v==='pip') ? '' : 'none';
+      if (v==='pip') refreshPipSelects();
+    }
     function refreshDatalist() {
       datalist.innerHTML = '';
       candidates(combo.value).forEach(id => {
@@ -296,6 +343,9 @@
       chips.appendChild(list);
       refreshTitleCount();
     }
+    // init layout controls
+    layoutSelect.value = gLayout.layout || 'grid';
+    updateLayoutVisibility();
     refreshDatalist();
     refreshChips();
     combo.addEventListener('input', refreshDatalist);
@@ -320,6 +370,7 @@
       combo.value = '';
       refreshDatalist();
       refreshChips();
+      updateLayoutVisibility();
     });
     addAllBtn.addEventListener('click', () => {
       const q = combo.value;
@@ -327,13 +378,16 @@
       combo.value = '';
       refreshDatalist();
       refreshChips();
+      updateLayoutVisibility();
     });
     removeAllBtn.addEventListener('click', () => {
       members.clear();
       combo.value = '';
       refreshDatalist();
       refreshChips();
+      updateLayoutVisibility();
     });
+    layoutSelect.addEventListener('change', updateLayoutVisibility);
     const btns = makeEl('div', {class:'tile-buttons'}, []);
     const save = makeEl('button', {class:'tile-save'}, ['Save']);
     const cancel = makeEl('button', {class:'tile-cancel'}, ['Cancel']);
@@ -361,7 +415,24 @@
       const nameVal = (tile.querySelector('.tile-name').value || '').trim();
       if (!nameVal) { alert('Enter a group name'); return; }
       const ids = Array.from(members);
+      // Build layout payload
+      const layoutVal = layoutSelect.value;
+      const payloadLayout = { layout: layoutVal };
+      if (layoutVal==='grid') payloadLayout.cols = parseInt(colsInput.value||'2',10);
+      if (layoutVal==='pip') {
+        payloadLayout.pip_main = pipMain.value || null;
+        payloadLayout.pip_pip = pipPip.value || null;
+        payloadLayout.pip_corner = pipCorner.value || 'bottom-right';
+        payloadLayout.pip_size = parseInt(pipSize.value||'25',10);
+      }
       const res = await fetch('/groups', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({name: nameVal, streams: ids})});
+      // retry with layout included (keeping backward compat if server ignores)
+      if (!res.ok) {
+        await fetch('/groups', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({name: nameVal, streams: ids, layout: payloadLayout})});
+      } else {
+        // send layout update too
+        await fetch('/groups', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({name: nameVal, streams: ids, layout: payloadLayout})});
+      }
       if (res.ok) {
         showNotification('Saved group');
         // Collapse after save (and handle rename)

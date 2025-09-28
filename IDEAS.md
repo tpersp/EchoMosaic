@@ -3,7 +3,7 @@
 A running list of ideas and future improvements. Add new items anywhere below.
 
 - [ ] Stream real-time update logs via Socket.IO instead of a client-side animation.
-- [ ] Add a simple “Update history” view in Settings showing prior updates and commit messages.
+- [x] Add a simple “Update history” view in Settings showing prior updates and commit messages.
 - [ ] Add a “Show only selected” count or filter in the dashboard to quickly see which streams are included.
 - [ ] Provide bulk toggle actions (e.g., include/exclude all).
 - [ ] “Slideshow sync”: sync transitions across all streams (e.g., all change every 10s together), to prevent them from changing at "random interval" when having multiple streams on one screen or near eachother.
