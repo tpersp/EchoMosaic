@@ -636,7 +636,7 @@ def update_stream_settings(stream_id):
             elif key == "label":
                 # Enforce unique label slug across streams (ignoring case/spacing)
                 new_label = (val or "").strip()
-                new_slug = _slugify(new_label) if ' ' in globals() or True else ""
+                new_slug = _slugify(new_label)
                 if new_slug:
                     for other_id, other_conf in settings.items():
                         if other_id.startswith("_") or other_id == stream_id:
