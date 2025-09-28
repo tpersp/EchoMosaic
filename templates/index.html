@@ -10,7 +10,7 @@
   <h1>EchoMosaic</h1>
   <nav>
     <a href="{{ url_for('app_settings') }}">Settings</a>
-    <button id="theme-toggle" type="button" style="margin-left:.5rem;">Toggle Theme</button>
+    <button id="theme-toggle" class="icon-btn" type="button" aria-label="Toggle theme" title="Toggle theme" style="margin-left:.5rem;"></button>
   </nav>
 </header>
 <div class="container">
@@ -153,11 +153,15 @@
 
 <script src="https://cdn.socket.io/4.0.1/socket.io.min.js"></script>
 <script>
-  // Theme toggle
+  // Theme toggle (sun/moon)
   (function(){
     const root = document.documentElement;
     const btn = document.getElementById('theme-toggle');
-    function apply(theme){ root.setAttribute('data-theme', theme === 'light' ? 'light' : 'dark'); }
+    function apply(theme){
+      const t = (theme === 'light') ? 'light' : 'dark';
+      root.setAttribute('data-theme', t);
+      if (btn) btn.textContent = t === 'light' ? '☀️' : '🌙';
+    }
     const saved = localStorage.getItem('theme') || 'dark';
     apply(saved);
     if (btn) btn.addEventListener('click', () => {

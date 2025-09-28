@@ -249,6 +249,20 @@ a {
 .menu-dropdown button { background: transparent; border: 0; text-align: left; padding: 6px 10px; color: var(--text); }
 .menu-dropdown button:hover { background: var(--surface-alt); }
 
+/* Small icon button for theme toggle */
+.icon-btn {
+  background: var(--surface-alt);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 999px;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
 /* Details/summary styling within cards */
 .stream-card details {
   background: var(--surface-alt);
