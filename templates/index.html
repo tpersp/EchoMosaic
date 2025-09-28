@@ -425,14 +425,7 @@
         payloadLayout.pip_corner = pipCorner.value || 'bottom-right';
         payloadLayout.pip_size = parseInt(pipSize.value||'25',10);
       }
-      const res = await fetch('/groups', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({name: nameVal, streams: ids})});
-      // retry with layout included (keeping backward compat if server ignores)
-      if (!res.ok) {
-        await fetch('/groups', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({name: nameVal, streams: ids, layout: payloadLayout})});
-      } else {
-        // send layout update too
-        await fetch('/groups', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({name: nameVal, streams: ids, layout: payloadLayout})});
-      }
+      const res = await fetch('/groups', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({name: nameVal, streams: ids, layout: payloadLayout})});
       if (res.ok) {
         showNotification('Saved group');
         // Collapse after save (and handle rename)

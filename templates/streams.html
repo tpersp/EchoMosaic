@@ -11,12 +11,12 @@
   {% if mosaic_settings.layout == 'pip' %}
     {% if mosaic_settings.pip_main %}
     <div class="mosaic-cell main">
-      <iframe src="{{ url_for('render_stream', stream_id=mosaic_settings.pip_main) }}" allow="autoplay" loading="lazy" scrolling="no"></iframe>
+      <iframe src="{{ url_for('render_stream', name=mosaic_settings.pip_main) }}" allow="autoplay" loading="lazy" scrolling="no"></iframe>
     </div>
     {% endif %}
     {% if mosaic_settings.pip_pip %}
     <div class="mosaic-cell pip">
-      <iframe src="{{ url_for('render_stream', stream_id=mosaic_settings.pip_pip) }}" allow="autoplay" loading="lazy" scrolling="no"></iframe>
+      <iframe src="{{ url_for('render_stream', name=mosaic_settings.pip_pip) }}" allow="autoplay" loading="lazy" scrolling="no"></iframe>
     </div>
     {% endif %}
   {% else %}

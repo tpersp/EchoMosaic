@@ -582,6 +582,10 @@ def groups_collection():
     else:
         settings["_groups"][name] = cleaned
     save_settings(settings)
+    try:
+        socketio.emit("mosaic_refresh", {"group": name})
+    except Exception:
+        pass
     return jsonify({"status": "ok", "group": {name: settings["_groups"][name]}})
 
 
