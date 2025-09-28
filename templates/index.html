@@ -18,6 +18,10 @@
   <div class="stream-card" id="group-manager">
     <div class="card-header">
       <h2>Groups</h2>
+      <div class="card-actions">
+        <button id="gm-expand-all" type="button">Expand All</button>
+        <button id="gm-collapse-all" type="button">Collapse All</button>
+      </div>
     </div>
     <div class="group-section">
       <div id="group-tiles" class="group-tiles"></div>
@@ -151,12 +155,44 @@
     children.forEach(c => e.appendChild(typeof c==='string' ? document.createTextNode(c) : c));
     return e;
   }
+  // Persist expanded/collapsed tile state
+  function getOpenSet() {
+    try { return new Set(JSON.parse(localStorage.getItem('gmOpen') || '[]')); } catch { return new Set(); }
+  }
+  function setOpenSet(s) { try { localStorage.setItem('gmOpen', JSON.stringify(Array.from(s))); } catch {} }
+  function markOpen(name, open) {
+    if (!name) return; // only persist named groups
+    const s = getOpenSet();
+    if (open) s.add(name); else s.delete(name);
+    setOpenSet(s);
+  }
+  let gmOpenSet = new Set();
+  let gmCurrentGroups = {};
+  async function loadOpenSet() {
+    try {
+      const d = await fetch('/groups_ui').then(r=>r.json());
+      gmOpenSet = new Set((d && d.open) || []);
+    } catch (e) { gmOpenSet = new Set(); }
+  }
+  async function persistOpenSet() {
+    try { await fetch('/groups_ui', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({open: Array.from(gmOpenSet)})}); } catch (e) {}
+  }
+  function markOpen(name, open) {
+    if (!name) return;
+    if (open) gmOpenSet.add(name); else gmOpenSet.delete(name);
+    persistOpenSet();
+  }
+  function isOpen(name) { return name && gmOpenSet.has(name); }
+
   async function loadGroupsUI() {
     try {
-      const [streamsMeta, groups] = await Promise.all([
+      const [streamsMeta, groupsData] = await Promise.all([
         fetch('/streams_meta').then(r=>r.json()),
-        fetch('/groups').then(r=>r.json())
+        fetch('/groups').then(r=>r.json()),
+        loadOpenSet()
       ]);
+      const groups = groupsData || {};
+      gmCurrentGroups = groups;
       // Build tiles
       if (groupTiles) {
         groupTiles.innerHTML = '';
@@ -201,20 +237,89 @@
     header.appendChild(title);
     header.appendChild(actions);
     tile.appendChild(header);
-    const body = makeEl('div', {class:'tile-body', hidden: true}, []);
+    const body = makeEl('div', {class:'tile-body', hidden: !isOpen(name)}, []);
     const nameRow = makeEl('div', {class:'tile-row'}, [
       makeEl('label', {}, ['Name: ', makeEl('input', {type:'text', class:'tile-name', value: name || ''}, [])])
     ]);
     body.appendChild(nameRow);
-    const list = makeEl('div', {class:'group-list'}, []);
-    Object.keys(streamsMeta).forEach(id => {
-      const chk = makeEl('input', {type:'checkbox', value:id}, []);
-      chk.checked = members.has(id);
-      const lbl = makeEl('label', {}, [chk, ' ', (streamsMeta[id].label || id)]);
-      const wrap = makeEl('div', {class:'group-item'}, [lbl]);
-      list.appendChild(wrap);
+    // Add row with dropdown to add members
+    const addRow = makeEl('div', {class:'tile-row tile-add-row'}, []);
+    const searchInput = makeEl('input', {type:'text', class:'tile-add-search', placeholder:'Search…'}, []);
+    const addSelect = makeEl('select', {class:'tile-add-select'}, []);
+    const addBtn = makeEl('button', {class:'tile-add-btn', type:'button'}, ['Add']);
+    const addAllBtn = makeEl('button', {class:'tile-addall-btn', type:'button'}, ['Add all']);
+    const removeAllBtn = makeEl('button', {class:'tile-removeall-btn', type:'button'}, ['Remove all']);
+    addRow.appendChild(makeEl('label', {}, ['Add: ']));
+    addRow.appendChild(searchInput);
+    addRow.appendChild(addSelect);
+    addRow.appendChild(addBtn);
+    addRow.appendChild(addAllBtn);
+    addRow.appendChild(removeAllBtn);
+    body.appendChild(addRow);
+    // Chips container for current members
+    const chips = makeEl('div', {class:'member-chips'}, []);
+    body.appendChild(chips);
+    // helpers to refresh UI
+    function labelOf(id) { return (streamsMeta[id]?.label || id) + ''; }
+    function refreshTitleCount() {
+      const count = members.size;
+      title.textContent = (tile.querySelector('.tile-name')?.value?.trim() || name || 'New Group') + ` (${count})`;
+    }
+    function refreshSelect() {
+      addSelect.innerHTML = '';
+      const placeholder = makeEl('option', {value:''}, ['Select stream']);
+      placeholder.disabled = true; placeholder.selected = true;
+      addSelect.appendChild(placeholder);
+      const q = (searchInput.value||'').toLowerCase();
+      const candidates = Object.keys(streamsMeta)
+        .filter(id => !members.has(id))
+        .filter(id => labelOf(id).toLowerCase().includes(q))
+        .sort((a,b) => labelOf(a).localeCompare(labelOf(b)));
+      candidates.forEach(id => {
+        const opt = makeEl('option', {value:id}, [labelOf(id)]);
+        addSelect.appendChild(opt);
+      });
+    }
+    function refreshChips() {
+      chips.innerHTML = '';
+      const sorted = Array.from(members).sort((a,b) => labelOf(a).localeCompare(labelOf(b)));
+      sorted.forEach(id => {
+        const chip = makeEl('span', {class:'member-chip'}, [labelOf(id)]);
+        const rm = makeEl('button', {class:'chip-remove', title:'Remove'}, ['×']);
+        rm.addEventListener('click', () => {
+          members.delete(id);
+          refreshSelect();
+          refreshChips();
+        });
+        chip.appendChild(rm);
+        chips.appendChild(chip);
+      });
+      refreshTitleCount();
+    }
+    refreshSelect();
+    refreshChips();
+    searchInput.addEventListener('input', refreshSelect);
+    addBtn.addEventListener('click', () => {
+      const id = addSelect.value;
+      if (!id) return;
+      members.add(id);
+      refreshSelect();
+      refreshChips();
     });
-    body.appendChild(list);
+    addAllBtn.addEventListener('click', () => {
+      const q = (searchInput.value||'').toLowerCase();
+      Object.keys(streamsMeta)
+        .filter(id => !members.has(id))
+        .filter(id => labelOf(id).toLowerCase().includes(q))
+        .forEach(id => members.add(id));
+      refreshSelect();
+      refreshChips();
+    });
+    removeAllBtn.addEventListener('click', () => {
+      members.clear();
+      refreshSelect();
+      refreshChips();
+    });
     const btns = makeEl('div', {class:'tile-buttons'}, []);
     const save = makeEl('button', {class:'tile-save'}, ['Save']);
     const cancel = makeEl('button', {class:'tile-cancel'}, ['Cancel']);
@@ -224,29 +329,53 @@
     tile.appendChild(body);
 
     // interactions
-    edit.addEventListener('click', () => { body.hidden = !body.hidden; });
+    edit.addEventListener('click', () => {
+      body.hidden = !body.hidden;
+      markOpen(name, !body.hidden);
+    });
     if (del) {
       del.addEventListener('click', async () => {
         if (!confirm(`Delete group ${name}?`)) return;
         await fetch(`/groups/${encodeURIComponent(name)}`, {method:'DELETE'});
+        markOpen(name, false);
         loadGroupsUI();
       });
     }
     save.addEventListener('click', async () => {
       const nameVal = (tile.querySelector('.tile-name').value || '').trim();
       if (!nameVal) { alert('Enter a group name'); return; }
-      const ids = selectedIds(list);
+      const ids = Array.from(members);
       const res = await fetch('/groups', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({name: nameVal, streams: ids})});
       if (res.ok) {
         showNotification('Saved group');
+        // Update persisted open state for rename/new
+        if (name && nameVal !== name) markOpen(name, false);
+        markOpen(nameVal, true);
         loadGroupsUI();
       } else {
         alert('Failed to save group');
       }
     });
     cancel.addEventListener('click', () => { body.hidden = true; });
+    // Keep count/title in sync with name edits
+    const nameInputEl = nameRow.querySelector('.tile-name');
+    if (nameInputEl) nameInputEl.addEventListener('input', () => { refreshTitleCount(); });
     return tile;
   }
+
+  // Expand/Collapse All controls
+  const gmExpandAll = document.getElementById('gm-expand-all');
+  const gmCollapseAll = document.getElementById('gm-collapse-all');
+  if (gmExpandAll) gmExpandAll.addEventListener('click', async () => {
+    Object.keys(gmCurrentGroups).forEach(name => gmOpenSet.add(name));
+    await persistOpenSet();
+    loadGroupsUI();
+  });
+  if (gmCollapseAll) gmCollapseAll.addEventListener('click', async () => {
+    gmOpenSet.clear();
+    await persistOpenSet();
+    loadGroupsUI();
+  });
 
   // initial load
   document.addEventListener('DOMContentLoaded', loadGroupsUI);
