@@ -21,6 +21,8 @@ html, body {
 .mosaic-grid.layout-grid.cols-2 { grid-template-columns: repeat(2, 1fr); }
 .mosaic-grid.layout-grid.cols-3 { grid-template-columns: repeat(3, 1fr); }
 .mosaic-grid.layout-grid.cols-4 { grid-template-columns: repeat(4, 1fr); }
+.mosaic-grid.layout-grid.cols-5 { grid-template-columns: repeat(5, 1fr); }
+.mosaic-grid.layout-grid.cols-6 { grid-template-columns: repeat(6, 1fr); }
 
 .mosaic-grid.layout-horizontal {
   grid-auto-flow: column;
@@ -32,6 +34,27 @@ html, body {
   grid-template-columns: 1fr;
   grid-auto-rows: 1fr;
 }
+
+.mosaic-grid.layout-pip {
+  position: relative;
+}
+
+.mosaic-grid.layout-pip .mosaic-cell.main {
+  width: 100%;
+  height: 100%;
+}
+
+.mosaic-grid.layout-pip .mosaic-cell.pip {
+  position: absolute;
+  width: var(--pip-size, 25%);
+  height: var(--pip-size, 25%);
+  z-index: 2;
+}
+
+.mosaic-grid.layout-pip.corner-top-left .mosaic-cell.pip { top: 1%; left: 1%; }
+.mosaic-grid.layout-pip.corner-top-right .mosaic-cell.pip { top: 1%; right: 1%; }
+.mosaic-grid.layout-pip.corner-bottom-left .mosaic-cell.pip { bottom: 1%; left: 1%; }
+.mosaic-grid.layout-pip.corner-bottom-right .mosaic-cell.pip { bottom: 1%; right: 1%; }
 
 .mosaic-grid.layout-focus.stream-count-6 {
   grid-template-columns: repeat(3, 1fr);
@@ -57,4 +80,5 @@ html, body {
   width: 100%;
   height: 100%;
   border: 0;
+  overflow: hidden;
 }
