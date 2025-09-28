@@ -4,6 +4,7 @@ import os
 import json
 import subprocess
 import time
+import shutil
 
 app = Flask(__name__, static_folder="static", static_url_path="/static")
 socketio = SocketIO(app)
@@ -306,10 +307,16 @@ def update_app():
             "update_status.html",
             message=f"Repository path '{repo_path}' not found. Check INSTALL_DIR in config.json",
         )
+    git_cmd = shutil.which("git")
+    if not git_cmd:
+        return render_template(
+            "update_status.html",
+            message="Git executable not found. Please install Git to update the application.",
+        )
     try:
-        subprocess.check_call(["git", "fetch"], cwd=repo_path)
-        subprocess.check_call(["git", "checkout", branch], cwd=repo_path)
-        subprocess.check_call(["git", "reset", "--hard", f"origin/{branch}"], cwd=repo_path)
+        subprocess.check_call([git_cmd, "fetch"], cwd=repo_path)
+        subprocess.check_call([git_cmd, "checkout", branch], cwd=repo_path)
+        subprocess.check_call([git_cmd, "reset", "--hard", f"origin/{branch}"], cwd=repo_path)
     except (subprocess.CalledProcessError, OSError) as e:
         return render_template("update_status.html", message=f"Git update failed: {e}")
     try:
