@@ -64,60 +64,67 @@
     {# Generate a card for each stream dynamically #}
     {% for stream_id, conf in stream_settings.items() %}
     <div class="stream-card" data-stream="{{ stream_id }}">
-      <h2><a href="{{ url_for('render_stream', stream_id=stream_id) }}" target="_blank">{{ stream_id|capitalize }}</a></h2>
-      <button class="remove-stream" data-stream="{{ stream_id }}">Remove</button>
-
-      <!-- Folder Selection -->
-      <label>Folder:</label>
-      <select class="folder-select" data-stream="{{ stream_id }}">
-        {% for f in subfolders %}
-          <option value="{{ f }}"
-            {% if conf.folder == f %} selected {% endif %}>{{ f }}</option>
-        {% endfor %}
-      </select>
-
-      <!-- Mode Selection -->
-      <label>Mode:</label>
-      <select class="mode-select" data-stream="{{ stream_id }}">
-        <option value="random" {% if conf.mode == 'random' %} selected {% endif %}>Random</option>
-        <option value="specific" {% if conf.mode == 'specific' %} selected {% endif %}>Specific</option>
-        <option value="livestream" {% if conf.mode == 'livestream' %} selected {% endif %}>Livestream</option>
-      </select>
-
-      <!-- Duration -->
-      <div class="duration-container" {% if conf.mode != 'random' %} style="display:none;" {% endif %}>
-        <label>Duration (sec):</label>
-        <input type="number" class="duration-input" data-stream="{{ stream_id }}"
-               value="{{ conf.duration }}" min="1">
+      <div class="card-header">
+        <h2><a href="{{ url_for('render_stream', stream_id=stream_id) }}" target="_blank">{{ stream_id|capitalize }}</a></h2>
+        <button class="remove-stream" data-stream="{{ stream_id }}" aria-label="Remove stream {{ stream_id }}">Remove</button>
       </div>
 
-      <!-- Stream URL -->
-      <div class="stream-url-container" {% if conf.mode != 'livestream' %} style="display:none;" {% endif %}>
-        <label>Stream URL:</label>
-        <input type="text" class="stream-url-input" data-stream="{{ stream_id }}"
-               value="{{ conf.stream_url if conf.stream_url else '' }}">
-      </div>
+      <div class="form-grid">
+        <!-- Folder Selection -->
+        <div class="form-row">
+          <label for="folder-{{ stream_id }}">Folder</label>
+          <select id="folder-{{ stream_id }}" class="folder-select" data-stream="{{ stream_id }}" title="{{ conf.folder }}">
+            {% for f in subfolders %}
+              <option value="{{ f }}" title="{{ f }}" {% if conf.folder == f %} selected {% endif %}>{{ f }}</option>
+            {% endfor %}
+          </select>
+        </div>
 
-      <!-- YT Settings -->
-      <div class="yt-settings" data-stream="{{ stream_id }}" style="display:none;">
-        <label><input type="checkbox" class="yt-cc-chk" data-stream="{{ stream_id }}" {% if conf.yt_cc %} checked {% endif %}> CC (on/off)</label>
-        <label><input type="checkbox" class="yt-mute-chk" data-stream="{{ stream_id }}" {% if conf.yt_mute %} checked {% endif %}> Mute</label>
-        <label for="yt-quality-{{ stream_id }}">Quality:</label>
-        <input type="text" id="yt-quality-{{ stream_id }}" class="yt-quality-input" data-stream="{{ stream_id }}" value="{{ conf.yt_quality }}" placeholder="auto/hd720/etc">
+        <!-- Mode Selection -->
+        <div class="form-row">
+          <label for="mode-{{ stream_id }}">Mode</label>
+          <select id="mode-{{ stream_id }}" class="mode-select" data-stream="{{ stream_id }}">
+            <option value="random" {% if conf.mode == 'random' %} selected {% endif %}>Random</option>
+            <option value="specific" {% if conf.mode == 'specific' %} selected {% endif %}>Specific</option>
+            <option value="livestream" {% if conf.mode == 'livestream' %} selected {% endif %}>Livestream</option>
+          </select>
+        </div>
+
+        <!-- Duration -->
+        <div class="form-row duration-container" {% if conf.mode != 'random' %} style="display:none;" {% endif %}>
+          <label for="duration-{{ stream_id }}">Duration (sec)</label>
+          <input id="duration-{{ stream_id }}" type="number" class="duration-input" data-stream="{{ stream_id }}" value="{{ conf.duration }}" min="1">
+        </div>
+
+        <!-- Stream URL -->
+        <div class="form-row stream-url-container" {% if conf.mode != 'livestream' %} style="display:none;" {% endif %}>
+          <label for="stream-url-{{ stream_id }}">Stream URL</label>
+          <input id="stream-url-{{ stream_id }}" type="text" class="stream-url-input" data-stream="{{ stream_id }}" value="{{ conf.stream_url if conf.stream_url else '' }}" placeholder="https://...">
+        </div>
+
+        <!-- YT Settings -->
+        <div class="form-row yt-settings" data-stream="{{ stream_id }}" style="display:none;">
+          <div class="inline-controls">
+            <label><input type="checkbox" class="yt-cc-chk" data-stream="{{ stream_id }}" {% if conf.yt_cc %} checked {% endif %}> CC</label>
+            <label><input type="checkbox" class="yt-mute-chk" data-stream="{{ stream_id }}" {% if conf.yt_mute %} checked {% endif %}> Mute</label>
+            <label for="yt-quality-{{ stream_id }}">Quality</label>
+            <input type="text" id="yt-quality-{{ stream_id }}" class="yt-quality-input" data-stream="{{ stream_id }}" value="{{ conf.yt_quality }}" placeholder="auto/hd720/etc">
+          </div>
+        </div>
       </div>
 
       <!-- Specific Image Picker -->
       <div class="image-picker" data-stream="{{ stream_id }}" {% if conf.mode != 'specific' %} style="display:none;" {% endif %}>
-        <label>Pick an Image (Folder: {{ conf.folder }}):</label>
-        <button type="button" class="reload-images-btn" data-stream="{{ stream_id }}">Reload Images</button>
+        <div class="image-picker-header">
+          <label>Pick an Image (Folder: {{ conf.folder }})</label>
+          <button type="button" class="reload-images-btn" data-stream="{{ stream_id }}">Reload</button>
+        </div>
         <div class="image-grid"></div>
       </div>
 
-      <p>
+      <p class="selected-image-row">
         <strong>Selected Image:</strong>
-        <span class="selected-image-display">
-          {{ conf.selected_image if conf.selected_image else "None" }}
-        </span>
+        <span class="selected-image-display">{{ conf.selected_image if conf.selected_image else "None" }}</span>
       </p>
     </div>
     {% endfor %}
@@ -336,8 +343,10 @@
       // Folder change
       const folderSelect = card.querySelector('.folder-select');
       if (folderSelect) {
+        // Ensure tooltip shows full folder name on hover
         folderSelect.addEventListener('change', e => {
           const folder = e.target.value;
+          e.target.title = folder;
           saveSettings(streamId, { folder, selected_image: null });
         });
       }
