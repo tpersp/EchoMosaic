@@ -1,4 +1,4 @@
-from flask import Flask, jsonify, send_from_directory, request, render_template, redirect, url_for
+from flask import Flask, jsonify, send_file, request, render_template, redirect, url_for
 from flask_socketio import SocketIO
 import json
 import logging
@@ -16,6 +16,9 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
 from urllib.parse import urlparse
 
+from PIL import Image
+from werkzeug.http import generate_etag
+
 try:
     import requests
 except Exception:
@@ -31,6 +34,16 @@ logger = logging.getLogger(__name__)
 SETTINGS_FILE = "settings.json"
 CONFIG_FILE = "config.json"
 IMAGE_DIR = "/mnt/viewers"  # Adjust if needed
+
+# Bounding boxes for optional thumbnail sizes requested via ?size=.
+THUMBNAIL_SUBDIR = "_thumbnails"
+THUMBNAIL_SIZE_PRESETS = {
+    "thumb": (320, 320),
+    "medium": (1024, 1024),
+    "full": None,  # Alias for the original size
+}
+IMAGE_CACHE_TIMEOUT = 60 * 60 * 24 * 7  # One week default for conditional responses
+IMAGE_CACHE_CONTROL_MAX_AGE = 31536000  # One year for browser Cache-Control headers
 
 AI_MODE = "ai"
 AI_SETTINGS_KEY = "ai_settings"
@@ -66,6 +79,12 @@ STABLE_HORDE_STRENGTH_RANGE = (0.0, 1.0)
 STABLE_HORDE_DENOISE_RANGE = (0.01, 1.0)
 
 IMAGE_DIR_PATH = Path(IMAGE_DIR)
+
+THUMBNAIL_CACHE_DIR = IMAGE_DIR_PATH / THUMBNAIL_SUBDIR
+try:
+    IMAGE_THUMBNAIL_FILTER = Image.Resampling.LANCZOS  # type: ignore[attr-defined]
+except AttributeError:  # Pillow < 9.1
+    IMAGE_THUMBNAIL_FILTER = Image.LANCZOS
 
 IMAGE_EXTENSIONS = (".png", ".jpg", ".jpeg", ".gif", ".webp")
 
@@ -1310,12 +1329,89 @@ def update_mosaic_settings():
     socketio.emit("mosaic_refresh", {"mosaic": settings["_mosaic"]})
     return jsonify({"status": "success", "mosaic": settings["_mosaic"]})
 
+def _send_image_response(path: Union[str, Path]):
+    """Return an image response with consistent caching headers."""
+    abs_path = os.fspath(path)
+    stat = os.stat(abs_path)
+    etag_value = generate_etag(f"{stat.st_mtime_ns}-{stat.st_size}")
+    response = send_file(
+        abs_path,
+        conditional=True,
+        max_age=IMAGE_CACHE_TIMEOUT,
+        etag=etag_value,
+    )
+    # Long-lived cache headers let browsers reuse thumbnails/originals without redownloading.
+    # max_age mirrors Flask's cache_timeout value for forward compatibility.
+    response.headers["Cache-Control"] = f"public, max-age={IMAGE_CACHE_CONTROL_MAX_AGE}"
+    return response
+
+
+def _generate_thumbnail(source_path: str, destination: Path, max_width: Optional[int], max_height: Optional[int]) -> None:
+    """Create a thumbnail bounded by the requested dimensions and store it on disk."""
+    with Image.open(source_path) as img:
+        if getattr(img, "is_animated", False):
+            raise ValueError("Animated images are not resized to preserve animation frames")
+        img_format = img.format
+        working = img.copy()
+        bound_width = max_width or img.width
+        bound_height = max_height or img.height
+        working.thumbnail((bound_width, bound_height), resample=IMAGE_THUMBNAIL_FILTER)
+        save_kwargs = {}
+        if img_format:
+            save_kwargs["format"] = img_format
+        working.save(destination, **save_kwargs)
+
+
 @app.route("/stream/image/<path:filename>")
 def serve_stream_image(filename):
     full_path = os.path.join(IMAGE_DIR, filename)
     if not os.path.exists(full_path):
         return jsonify({"error": f"File {filename} not found"}), 404
-    return send_from_directory(IMAGE_DIR, filename)
+
+    # Optional sizing parameters let clients request cached thumbnails instead of full-resolution images.
+    size_param = (request.args.get("size") or "").strip().lower()
+    requested_width = request.args.get("width", type=int)
+    requested_height = request.args.get("height", type=int)
+
+    for dim_name, value in (("width", requested_width), ("height", requested_height)):
+        if value is not None and value <= 0:
+            return jsonify({"error": f"{dim_name} must be a positive integer"}), 400
+
+    target_width: Optional[int] = None
+    target_height: Optional[int] = None
+    thumbnail_key: Optional[str] = None
+
+    if requested_width or requested_height:
+        target_width = requested_width
+        target_height = requested_height
+        thumbnail_key = f"{target_width or 'auto'}x{target_height or 'auto'}"
+    elif size_param:
+        if size_param not in THUMBNAIL_SIZE_PRESETS:
+            return jsonify({"error": f"Unsupported size '{size_param}'"}), 400
+        preset = THUMBNAIL_SIZE_PRESETS[size_param]
+        # size=full maps to None so we fall back to the original image.
+        if preset is not None:
+            target_width, target_height = preset
+            thumbnail_key = size_param
+
+    if thumbnail_key:
+        thumbnail_root = THUMBNAIL_CACHE_DIR / thumbnail_key
+        thumbnail_path = thumbnail_root / filename
+        if not thumbnail_path.exists():
+            os.makedirs(thumbnail_path.parent, exist_ok=True)
+            try:
+                _generate_thumbnail(full_path, thumbnail_path, target_width, target_height)
+            except Exception:
+                logger.exception("Failed to generate thumbnail for %s", filename)
+                if thumbnail_path.exists():
+                    try:
+                        thumbnail_path.unlink()
+                    except OSError:
+                        pass
+                return _send_image_response(full_path)
+        return _send_image_response(thumbnail_path)
+
+    return _send_image_response(full_path)
 
 
 @app.route("/notes", methods=["GET", "POST"])
