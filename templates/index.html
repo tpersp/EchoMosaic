@@ -27,6 +27,16 @@
   <div class="controls">
     <button id="add-stream">Add Stream</button>
     <button id="open-mosaic">View Streams</button>
+    <label for="mosaic-layout-select" style="margin-left: .5rem;">Layout</label>
+    <select id="mosaic-layout-select">
+      <option value="grid" {% if mosaic_settings.layout == 'grid' %}selected{% endif %}>Grid</option>
+      <option value="horizontal" {% if mosaic_settings.layout == 'horizontal' %}selected{% endif %}>Horizontal</option>
+      <option value="vertical" {% if mosaic_settings.layout == 'vertical' %}selected{% endif %}>Vertical</option>
+      <option value="focus" {% if mosaic_settings.layout == 'focus' %}selected{% endif %}>Focus</option>
+      <option value="pip" {% if mosaic_settings.layout == 'pip' %}selected{% endif %}>PiP</option>
+    </select>
+    <label for="mosaic-cols-input" id="mosaic-cols-label" style="display: {% if mosaic_settings.layout == 'grid' %}inline{% else %}none{% endif %};">Cols</label>
+    <input id="mosaic-cols-input" type="number" min="1" max="6" value="{{ mosaic_settings.cols }}" style="width: 4.5rem; display: {% if mosaic_settings.layout == 'grid' %}inline-block{% else %}none{% endif %};" />
   </div>
 
   <div id="dashboard-grid" class="dashboard-grid">
@@ -36,6 +46,7 @@
       <div class="card-header">
         <div class="title-row">
           <h2><a class="stream-link" href="{{ url_for('render_stream', name=(conf.label if conf.label else stream_id)|slugify) }}" target="_blank">{{ conf.label if conf.label else stream_id|capitalize }}</a></h2>
+          <a class="open-stream" href="{{ url_for('render_stream', name=(conf.label if conf.label else stream_id)|slugify) }}" target="_blank" title="Open stream in new tab">Open</a>
           <button class="rename-stream" data-stream="{{ stream_id }}" title="Rename stream">Rename</button>
         </div>
         <button class="remove-stream" data-stream="{{ stream_id }}" aria-label="Remove stream {{ stream_id }}">Remove</button>
@@ -73,17 +84,23 @@
         <!-- Stream URL -->
         <div class="form-row stream-url-container" {% if conf.mode != 'livestream' %} style="display:none;" {% endif %}>
           <label for="stream-url-{{ stream_id }}">Stream URL</label>
-          <input id="stream-url-{{ stream_id }}" type="text" class="stream-url-input" data-stream="{{ stream_id }}" value="{{ conf.stream_url if conf.stream_url else '' }}" placeholder="https://...">
+          <div>
+            <input id="stream-url-{{ stream_id }}" type="text" class="stream-url-input" data-stream="{{ stream_id }}" value="{{ conf.stream_url if conf.stream_url else '' }}" placeholder="YouTube/Twitch/HLS or embeddable page">
+            <div class="help-text">Examples: https://youtube.com/watch?v=… • https://twitch.tv/… • direct .m3u8/.mpd</div>
+          </div>
         </div>
 
         <!-- YT Settings -->
         <div class="form-row yt-settings" data-stream="{{ stream_id }}" style="display:none;">
-          <div class="inline-controls">
-            <label><input type="checkbox" class="yt-cc-chk" data-stream="{{ stream_id }}" {% if conf.yt_cc %} checked {% endif %}> CC</label>
-            <label><input type="checkbox" class="yt-mute-chk" data-stream="{{ stream_id }}" {% if conf.yt_mute %} checked {% endif %}> Mute</label>
-            <label for="yt-quality-{{ stream_id }}">Quality</label>
-            <input type="text" id="yt-quality-{{ stream_id }}" class="yt-quality-input" data-stream="{{ stream_id }}" value="{{ conf.yt_quality }}" placeholder="auto/hd720/etc">
-          </div>
+          <details>
+            <summary>YouTube Options</summary>
+            <div class="inline-controls" style="margin-top: .4rem;">
+              <label title="Closed Captions"><input type="checkbox" class="yt-cc-chk" data-stream="{{ stream_id }}" {% if conf.yt_cc %} checked {% endif %}> CC</label>
+              <label title="Start muted"><input type="checkbox" class="yt-mute-chk" data-stream="{{ stream_id }}" {% if conf.yt_mute %} checked {% endif %}> Mute</label>
+              <label for="yt-quality-{{ stream_id }}">Quality</label>
+              <input type="text" id="yt-quality-{{ stream_id }}" class="yt-quality-input" data-stream="{{ stream_id }}" value="{{ conf.yt_quality }}" placeholder="auto/hd720/etc">
+            </div>
+          </details>
         </div>
       </div>
 
@@ -124,6 +141,8 @@
   const notification = document.getElementById('notification');
   const addStreamBtn = document.getElementById('add-stream');
   const openMosaicBtn = document.getElementById('open-mosaic');
+  const mosaicLayoutSel = document.getElementById('mosaic-layout-select');
+  const mosaicColsInput = document.getElementById('mosaic-cols-input');
   
   // Group Manager elements
   const groupTiles = document.getElementById('group-tiles');
@@ -149,6 +168,34 @@
       window.open('/stream', '_blank');
     });
   }
+
+  // Mosaic controls
+  function updateMosaicControlsVisibility() {
+    if (!mosaicLayoutSel || !mosaicColsInput) return;
+    const layout = mosaicLayoutSel.value;
+    const colsLabel = document.getElementById('mosaic-cols-label');
+    const showCols = layout === 'grid';
+    mosaicColsInput.style.display = showCols ? 'inline-block' : 'none';
+    if (colsLabel) colsLabel.style.display = showCols ? 'inline' : 'none';
+  }
+  function saveMosaic() {
+    if (!mosaicLayoutSel) return;
+    const payload = { layout: mosaicLayoutSel.value };
+    if (payload.layout === 'grid' && mosaicColsInput) {
+      payload.cols = parseInt(mosaicColsInput.value || '2', 10);
+    }
+    fetch('/mosaic-settings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) })
+      .then(r => r.json())
+      .then(() => showNotification('Mosaic updated'))
+      .catch(() => showNotification('Failed to update mosaic'));
+  }
+  if (mosaicLayoutSel) {
+    mosaicLayoutSel.addEventListener('change', () => { updateMosaicControlsVisibility(); saveMosaic(); });
+  }
+  if (mosaicColsInput) {
+    mosaicColsInput.addEventListener('change', saveMosaic);
+  }
+  updateMosaicControlsVisibility();
 
   // Group manager logic
   function makeEl(tag, attrs = {}, children = []) {

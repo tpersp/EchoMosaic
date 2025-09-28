@@ -10,7 +10,7 @@ html, body {
 
 .mosaic-grid {
   display: grid;
-  gap: 4px;
+  gap: 6px;
   width: 100vw;
   height: 100vh;
   box-sizing: border-box;
