@@ -41,51 +41,6 @@
       });
   }
   document.addEventListener('DOMContentLoaded', loadUpdateInfo);
-  // Groups UI logic
-  function el(tag, attrs={}, children=[]) {
-    const e = document.createElement(tag);
-    Object.entries(attrs).forEach(([k,v]) => { if (k==='class') e.className=v; else if (k==='style') e.style.cssText=v; else e.setAttribute(k,v); });
-    children.forEach(c => e.appendChild(typeof c==='string'?document.createTextNode(c):c));
-    return e;
-  }
-  async function loadGroupsUI() {
-    const streams = await fetch('/streams_meta').then(r=>r.json());
-    const groups = await fetch('/groups').then(r=>r.json());
-    const container = document.getElementById('groups-ui');
-    if (!container) return;
-    const list = document.getElementById('streams-list');
-    list.innerHTML='';
-    Object.entries(streams).forEach(([id,meta]) => {
-      const lbl = el('label');
-      const chk = el('input', {type:'checkbox', value:id});
-      lbl.appendChild(chk);
-      lbl.appendChild(document.createTextNode(' ' + (meta.label||id)));
-      const wrap = el('div', {style:'border:1px solid var(--border);padding:6px;border-radius:4px;background:var(--surface);'} , [lbl]);
-      list.appendChild(wrap);
-    });
-    const gl = document.getElementById('groups-list');
-    gl.innerHTML='';
-    Object.keys(groups).forEach(name => {
-      const view = el('a', {href:`/stream/group/${encodeURIComponent(name)}`, target:'_blank', style:'color:var(--accent);text-decoration:none;'}, [name]);
-      const delBtn = el('button', {style:'margin-left:6px;'}, ['Delete']);
-      delBtn.addEventListener('click', async ()=>{
-        if (!confirm(`Delete group ${name}?`)) return;
-        await fetch(`/groups/${encodeURIComponent(name)}`, {method:'DELETE'});
-        loadGroupsUI();
-      });
-      const chip = el('div', {style:'border:1px solid var(--border);padding:4px 6px;border-radius:16px;background:var(--surface);display:flex;align-items:center;gap:6px;'}, [view, delBtn]);
-      gl.appendChild(chip);
-    });
-    document.getElementById('save-group').onclick = async () => {
-      const name = document.getElementById('group-name').value.trim();
-      if (!name) { alert('Enter a group name'); return; }
-      const selected = Array.from(list.querySelectorAll('input[type="checkbox"]:checked')).map(c=>c.value);
-      const res = await fetch('/groups', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({name, streams:selected})});
-      if (res.ok) { document.getElementById('group-name').value=''; loadGroupsUI(); }
-      else { alert('Failed to save group'); }
-    };
-  }
-  document.addEventListener('DOMContentLoaded', loadGroupsUI);
   </script>
 </head>
 <body>
@@ -112,20 +67,6 @@
       </div>
     </div>
 
-    <div style="margin: 1rem 0; padding: 0.75rem; border:1px solid var(--border); border-radius:4px; background: var(--surface-alt);">
-      <h3 style="margin-top:0;">Stream Groups</h3>
-      <div id="groups-ui">
-        <div style="margin-bottom:0.5rem;">
-          <label>Group name: <input id="group-name" type="text" placeholder="e.g., Favorites"></label>
-          <button id="save-group">Save Group</button>
-        </div>
-        <div id="streams-list" style="display:grid; grid-template-columns: repeat(auto-fill,minmax(180px,1fr)); gap:6px;"></div>
-        <div style="margin-top:0.75rem;">
-          <h4>Existing Groups</h4>
-          <div id="groups-list" style="display:flex; flex-wrap:wrap; gap:6px;"></div>
-        </div>
-      </div>
-    </div>
   </div>
 </body>
 </html>
