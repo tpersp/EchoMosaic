@@ -293,10 +293,12 @@ class StableHorde:
         persist_flag = self.persist_images if persist is None else bool(persist)
         destination, temp_dir = self._resolve_output_dir(persist_flag, output_dir)
 
+        poll_value = poll_interval or self.default_poll_interval
+        timeout_value = self.default_timeout if timeout is None else timeout
         status = self._poll_job(
             job_id,
-            poll_interval or self.default_poll_interval,
-            timeout or self.default_timeout,
+            poll_value,
+            timeout_value,
             status_callback=status_callback,
         )
 
@@ -417,10 +419,14 @@ class StableHorde:
         self,
         job_id: str,
         poll_interval: float,
-        timeout: float,
+        timeout: Optional[float],
         status_callback: Optional[Callable[[str, Dict[str, Any]], None]] = None,
     ) -> Dict[str, Any]:
-        deadline = time.time() + timeout
+        poll_value = float(poll_interval) if isinstance(poll_interval, (int, float)) and poll_interval > 0 else self.default_poll_interval
+        effective_timeout = self.default_timeout if timeout is None else float(timeout)
+        deadline = None
+        if effective_timeout and effective_timeout > 0:
+            deadline = time.time() + effective_timeout
         while True:
             status = self._request("GET", f"/generate/status/{job_id}")
             _fire_callback(status_callback, "status", {"job_id": job_id, "status": status})
@@ -434,14 +440,14 @@ class StableHorde:
             if status.get("done") and not generations:
                 time.sleep(1.0)
                 continue
-            if time.time() >= deadline:
+            if deadline is not None and time.time() >= deadline:
                 _fire_callback(status_callback, "timeout", {"job_id": job_id, "status": status})
                 raise StableHordeError(f"Timed out waiting for Stable Horde job {job_id}")
             wait_time = status.get("wait_time")
             if isinstance(wait_time, (int, float)) and wait_time > 0:
                 sleep_for = max(1.0, min(float(wait_time), 15.0))
             else:
-                sleep_for = poll_interval
+                sleep_for = poll_value
             time.sleep(sleep_for)
 
     def _save_image(
