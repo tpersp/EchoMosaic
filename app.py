@@ -9,10 +9,11 @@ import subprocess
 import threading
 import time
 import secrets
+import random
 from copy import deepcopy
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 from urllib.parse import urlparse
 
 try:
@@ -65,6 +66,141 @@ STABLE_HORDE_STRENGTH_RANGE = (0.0, 1.0)
 STABLE_HORDE_DENOISE_RANGE = (0.01, 1.0)
 
 IMAGE_DIR_PATH = Path(IMAGE_DIR)
+
+IMAGE_EXTENSIONS = (".png", ".jpg", ".jpeg", ".gif", ".webp")
+
+# Cache image paths per folder so we can serve repeated requests without rescanning the disk.
+IMAGE_CACHE: Dict[str, Dict[str, Any]] = {}
+IMAGE_CACHE_LOCK = threading.Lock()
+
+
+def _normalize_folder_key(folder: Optional[str]) -> str:
+    """Normalize request folder values into the cache key used internally."""
+    if not folder or folder in ("all", "."):
+        return "all"
+    return folder.replace("\\", "/")
+
+
+def _resolve_folder_path(folder_key: str) -> str:
+    """Return the absolute filesystem path for a cache key."""
+    return IMAGE_DIR if folder_key == "all" else os.path.join(IMAGE_DIR, folder_key)
+
+
+def _scan_folder_for_cache(folder_key: str) -> Tuple[List[str], Dict[str, float]]:
+    """Scan a folder on disk and build the cached payload for it."""
+    target_dir = _resolve_folder_path(folder_key)
+    dir_markers: Dict[str, float] = {}
+    try:
+        dir_markers[target_dir] = os.stat(target_dir).st_mtime
+    except FileNotFoundError:
+        dir_markers[target_dir] = 0.0
+        return [], dir_markers
+    except OSError:
+        dir_markers[target_dir] = 0.0
+        return [], dir_markers
+
+    images: List[str] = []
+    for root, _, files in os.walk(target_dir):
+        if root != target_dir:
+            try:
+                dir_markers[root] = os.stat(root).st_mtime
+            except OSError:
+                # If a directory becomes unavailable, surface that as a change on the next poll.
+                dir_markers[root] = time.time()
+        for file_name in files:
+            if file_name.lower().endswith(IMAGE_EXTENSIONS):
+                rel_path = os.path.relpath(os.path.join(root, file_name), IMAGE_DIR)
+                images.append(rel_path.replace("\\", "/"))
+    images.sort(key=str.lower)
+    return images, dir_markers
+
+
+def _directory_markers_changed(markers: Dict[str, float]) -> bool:
+    """Return True when any tracked directory timestamp has diverged."""
+    for path, previous_mtime in markers.items():
+        try:
+            current_mtime = os.stat(path).st_mtime
+        except FileNotFoundError:
+            return True
+        except OSError:
+            return True
+        if current_mtime != previous_mtime:
+            return True
+    return False
+
+
+def refresh_image_cache(folder: str = "all", force: bool = False) -> List[str]:
+    """Return the cached image list for a folder, refreshing if anything changed."""
+    folder_key = _normalize_folder_key(folder)
+
+    with IMAGE_CACHE_LOCK:
+        cached_entry = IMAGE_CACHE.get(folder_key)
+        if cached_entry:
+            cached_images = list(cached_entry.get("images", []))
+            markers_snapshot = dict(cached_entry.get("dir_markers", {}))
+        else:
+            cached_images = []
+            markers_snapshot = None
+
+    needs_refresh = force or cached_entry is None
+    if not needs_refresh and markers_snapshot is not None:
+        if _directory_markers_changed(markers_snapshot):
+            needs_refresh = True
+
+    if not needs_refresh:
+        return cached_images
+
+    images, dir_markers = _scan_folder_for_cache(folder_key)
+    entry = {
+        "images": images,
+        "dir_markers": dir_markers,
+        "last_updated": time.time(),
+    }
+    with IMAGE_CACHE_LOCK:
+        IMAGE_CACHE[folder_key] = entry
+    return list(images)
+
+
+def initialize_image_cache() -> None:
+    """Warm the cache for the root folder and any existing subfolders on startup."""
+    all_images = refresh_image_cache("all", force=True)
+    if not os.path.isdir(IMAGE_DIR):
+        return
+
+    with IMAGE_CACHE_LOCK:
+        all_entry = IMAGE_CACHE.get("all")
+        if not all_entry:
+            return
+        base_markers = dict(all_entry.get("dir_markers", {}))
+        base_updated = all_entry.get("last_updated", time.time())
+
+    for root, _, _ in os.walk(IMAGE_DIR):
+        rel = os.path.relpath(root, IMAGE_DIR)
+        if rel == ".":
+            continue
+        folder_key = rel.replace("\\", "/")
+        folder_root = _resolve_folder_path(folder_key)
+        folder_images = [img for img in all_images if img.startswith(f"{folder_key}/")]
+        folder_markers = {
+            path: mtime
+            for path, mtime in base_markers.items()
+            if path == folder_root or path.startswith(folder_root + os.sep)
+        }
+        if folder_root not in folder_markers:
+            try:
+                folder_markers[folder_root] = os.stat(folder_root).st_mtime
+            except OSError:
+                folder_markers[folder_root] = 0.0
+        entry = {
+            "images": folder_images,
+            "dir_markers": folder_markers,
+            "last_updated": base_updated,
+        }
+        with IMAGE_CACHE_LOCK:
+            IMAGE_CACHE[folder_key] = entry
+
+
+initialize_image_cache()
 
 AI_FALLBACK_DEFAULTS: Dict[str, Any] = {
     "prompt": "",
@@ -797,24 +933,9 @@ def get_subfolders():
     return subfolders
 
 def list_images(folder="all"):
-    """
-    List all images (including .webp) in the chosen folder (or 'all'),
-    then sort them alphabetically.
-    """
-    exts = (".png", ".jpg", ".jpeg", ".gif", ".webp")
-    target_dir = IMAGE_DIR if folder == "all" else os.path.join(IMAGE_DIR, folder)
-    if not os.path.exists(target_dir):
-        return []
-    images = []
-    for root, _, files in os.walk(target_dir):
-        for file in files:
-            if file.lower().endswith(exts):
-                relative_path = os.path.relpath(os.path.join(root, file), IMAGE_DIR)
-                relative_path = relative_path.replace("\\", "/")
-                images.append(relative_path)
-    # Sort them alphabetically
-    images.sort(key=str.lower)
-    return images
+    """Return cached image paths for the folder, refreshing when necessary."""
+    return refresh_image_cache(folder)
+
 
 def try_get_hls(original_url):
     if not original_url:
@@ -1404,9 +1525,37 @@ def test_embed():
 
 @app.route("/images", methods=["GET"])
 def get_images():
+    """Return cached images, optionally slicing via offset/limit query params."""
     folder = request.args.get("folder", "all")
-    imgs = list_images(folder)
-    return jsonify(imgs)
+    limit_arg = request.args.get("limit")
+    offset_arg = request.args.get("offset")
+
+    try:
+        offset = int(offset_arg) if offset_arg is not None else 0
+        limit = int(limit_arg) if limit_arg is not None else None
+    except (TypeError, ValueError):
+        return jsonify({"error": "limit and offset must be integers"}), 400
+
+    if offset < 0 or (limit is not None and limit < 0):
+        return jsonify({"error": "limit and offset must be non-negative"}), 400
+
+    images = list_images(folder)
+    if limit_arg is not None or offset_arg is not None:
+        # Only slice when pagination is explicitly requested to preserve legacy behaviour.
+        end = offset + limit if limit is not None else None
+        images = images[offset:end]
+
+    return jsonify(images)
+
+
+@app.route("/images/random", methods=["GET"])
+def get_random_image():
+    """Return a random image path from the cached folder listing."""
+    folder = request.args.get("folder", "all")
+    images = list_images(folder)
+    if not images:
+        return jsonify({"error": "No images found"}), 404
+    return jsonify({"path": random.choice(images)})
 
 
 @app.route("/settings")
