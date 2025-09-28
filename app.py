@@ -352,6 +352,43 @@ def stream_live():
     })
 
 
+def _classify_embed_target(url: str):
+    """Return (kind, test_url) for a given input URL matching how we embed.
+    kind: 'youtube' | 'twitch' | 'hls' | 'website'
+    test_url: the URL we should probe for embeddability.
+    """
+    u = (url or "").strip()
+    lu = u.lower()
+    # YouTube: use the embed endpoint which is iframe-friendly
+    if "youtube.com" in lu or "youtu.be/" in lu:
+        vid = None
+        if "watch?v=" in u:
+            try:
+                vid = u.split("watch?v=")[1].split("&")[0].split("#")[0]
+            except Exception:
+                vid = None
+        elif "youtu.be/" in u:
+            try:
+                vid = u.split("youtu.be/")[1].split("?")[0].split("&")[0]
+            except Exception:
+                vid = None
+        if vid:
+            return "youtube", f"https://www.youtube.com/embed/{vid}"
+        # Fallback: treat generic YouTube URL as embeddable via player
+        return "youtube", "https://www.youtube.com/embed/"
+    # Twitch: use the player endpoint
+    if "twitch.tv" in lu:
+        try:
+            channel = u.split("twitch.tv/")[1].split("/")[0]
+        except Exception:
+            channel = ""
+        return "twitch", f"https://player.twitch.tv/?channel={channel}"
+    # HLS/DASH
+    if lu.endswith(".m3u8") or lu.endswith(".mpd"):
+        return "hls", u
+    return "website", u
+
+
 @app.route("/test_embed", methods=["POST"])
 def test_embed():
     data = request.get_json(silent=True) or {}
@@ -364,9 +401,14 @@ def test_embed():
     if not parsed.scheme or not parsed.netloc or parsed.scheme not in ("http", "https"):
         return jsonify({"status": "not_valid", "note": "Not valid"})
 
+    kind, target = _classify_embed_target(url)
+
+    # For YouTube/Twitch, assume OK because we embed via their player endpoints
+    if kind in ("youtube", "twitch"):
+        return jsonify({"status": "ok", "note": "OK", "final_url": target, "kind": kind})
+
     if requests is None:
-        # If requests isn't installed, provide best-effort classification
-        return jsonify({"status": "ok", "note": "OK (basic)", "final_url": url})
+        return jsonify({"status": "ok", "note": "OK", "final_url": target})
 
     def check_headers(headers):
         xf = (headers.get("x-frame-options") or headers.get("X-Frame-Options") or "").lower()
@@ -386,9 +428,9 @@ def test_embed():
 
     try:
         # Try HEAD first, then fall back to GET for servers that don't support it
-        resp = requests.head(url, allow_redirects=True, timeout=6)
+        resp = requests.head(target, allow_redirects=True, timeout=6)
         if resp.status_code >= 400 or resp.status_code in (405, 501):
-            resp = requests.get(url, allow_redirects=True, timeout=8, stream=True)
+            resp = requests.get(target, allow_redirects=True, timeout=8, stream=True)
         ok_headers, reason = check_headers(resp.headers or {})
         if resp.status_code >= 400:
             return jsonify({"status": "unreachable", "http_status": resp.status_code, "note": "Unreachable"})
