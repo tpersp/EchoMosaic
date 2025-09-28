@@ -86,7 +86,7 @@
           <label for="duration-{{ stream_id }}">Duration (sec)</label>
           <div class="inline-controls">
             <input id="duration-{{ stream_id }}" type="number" class="duration-input" data-stream="{{ stream_id }}" value="{{ conf.duration }}" min="1" style="max-width: 110px;">
-            <label title="Randomize order each time"><input type="checkbox" class="shuffle-chk" data-stream="{{ stream_id }}" {% if conf.shuffle %} checked {% endif %}> Shuffle</label>
+            <label class="toggle inline" title="Randomize order each time"><input type="checkbox" class="shuffle-chk" data-stream="{{ stream_id }}" {% if conf.shuffle %} checked {% endif %}><span class="toggle-switch"></span><span class="toggle-label">Shuffle</span></label>
           </div>
         </div>
 
@@ -107,8 +107,8 @@
           <details>
             <summary>YouTube Options</summary>
             <div class="inline-controls" style="margin-top: .4rem;">
-              <label title="Closed Captions"><input type="checkbox" class="yt-cc-chk" data-stream="{{ stream_id }}" {% if conf.yt_cc %} checked {% endif %}> CC</label>
-              <label title="Start muted"><input type="checkbox" class="yt-mute-chk" data-stream="{{ stream_id }}" {% if conf.yt_mute %} checked {% endif %}> Mute</label>
+              <label class="toggle inline" title="Closed Captions"><input type="checkbox" class="yt-cc-chk" data-stream="{{ stream_id }}" {% if conf.yt_cc %} checked {% endif %}><span class="toggle-switch"></span><span class="toggle-label">CC</span></label>
+              <label class="toggle inline" title="Start muted"><input type="checkbox" class="yt-mute-chk" data-stream="{{ stream_id }}" {% if conf.yt_mute %} checked {% endif %}><span class="toggle-switch"></span><span class="toggle-label">Mute</span></label>
               <label for="yt-quality-{{ stream_id }}">Quality</label>
               {% set q = (conf.yt_quality or 'auto') %}
               <select id="yt-quality-{{ stream_id }}" class="yt-quality-select" data-stream="{{ stream_id }}">
@@ -206,16 +206,16 @@
             <summary>Advanced Options</summary>
             <div class="ai-advanced-grid">
               <div class="ai-advanced-group">
-                <label class="ai-toggle"><input type="checkbox" class="ai-hires-fix" data-stream="{{ stream_id }}" {% if ai.hires_fix %}checked{% endif %}> Hires Fix</label>
-                <label class="ai-toggle"><input type="checkbox" class="ai-karras" data-stream="{{ stream_id }}" {% if ai.karras %}checked{% endif %}> Karras Noise</label>
-                <label class="ai-toggle"><input type="checkbox" class="ai-tiling" data-stream="{{ stream_id }}" {% if ai.tiling %}checked{% endif %}> Tiling</label>
-                <label class="ai-toggle"><input type="checkbox" class="ai-transparent" data-stream="{{ stream_id }}" {% if ai.transparent %}checked{% endif %}> Transparent BG</label>
-                <label class="ai-toggle"><input type="checkbox" class="ai-trusted-workers" data-stream="{{ stream_id }}" {% if ai.trusted_workers %}checked{% endif %}> Trusted Workers</label>
-                <label class="ai-toggle"><input type="checkbox" class="ai-validated-backends" data-stream="{{ stream_id }}" {% if ai.validated_backends %}checked{% endif %}> Validated Backends</label>
-                <label class="ai-toggle"><input type="checkbox" class="ai-slow-workers" data-stream="{{ stream_id }}" {% if ai.slow_workers %}checked{% endif %}> Allow Slow Workers</label>
-                <label class="ai-toggle"><input type="checkbox" class="ai-extra-slow-workers" data-stream="{{ stream_id }}" {% if ai.extra_slow_workers %}checked{% endif %}> Allow Extra Slow</label>
-                <label class="ai-toggle"><input type="checkbox" class="ai-disable-batching" data-stream="{{ stream_id }}" {% if ai.disable_batching %}checked{% endif %}> Disable Batching</label>
-                <label class="ai-toggle"><input type="checkbox" class="ai-allow-downgrade" data-stream="{{ stream_id }}" {% if ai.allow_downgrade %}checked{% endif %}> Allow Downgrade</label>
+                <label class="toggle compact"><input type="checkbox" class="ai-hires-fix" data-stream="{{ stream_id }}" {% if ai.hires_fix %}checked{% endif %}><span class="toggle-switch"></span><span class="toggle-label">Hires Fix</span></label>
+                <label class="toggle compact"><input type="checkbox" class="ai-karras" data-stream="{{ stream_id }}" {% if ai.karras %}checked{% endif %}><span class="toggle-switch"></span><span class="toggle-label">Karras Noise</span></label>
+                <label class="toggle compact"><input type="checkbox" class="ai-tiling" data-stream="{{ stream_id }}" {% if ai.tiling %}checked{% endif %}><span class="toggle-switch"></span><span class="toggle-label">Tiling</span></label>
+                <label class="toggle compact"><input type="checkbox" class="ai-transparent" data-stream="{{ stream_id }}" {% if ai.transparent %}checked{% endif %}><span class="toggle-switch"></span><span class="toggle-label">Transparent BG</span></label>
+                <label class="toggle compact"><input type="checkbox" class="ai-trusted-workers" data-stream="{{ stream_id }}" {% if ai.trusted_workers %}checked{% endif %}><span class="toggle-switch"></span><span class="toggle-label">Trusted Workers</span></label>
+                <label class="toggle compact"><input type="checkbox" class="ai-validated-backends" data-stream="{{ stream_id }}" {% if ai.validated_backends %}checked{% endif %}><span class="toggle-switch"></span><span class="toggle-label">Validated Backends</span></label>
+                <label class="toggle compact"><input type="checkbox" class="ai-slow-workers" data-stream="{{ stream_id }}" {% if ai.slow_workers %}checked{% endif %}><span class="toggle-switch"></span><span class="toggle-label">Allow Slow Workers</span></label>
+                <label class="toggle compact"><input type="checkbox" class="ai-extra-slow-workers" data-stream="{{ stream_id }}" {% if ai.extra_slow_workers %}checked{% endif %}><span class="toggle-switch"></span><span class="toggle-label">Allow Extra Slow</span></label>
+                <label class="toggle compact"><input type="checkbox" class="ai-disable-batching" data-stream="{{ stream_id }}" {% if ai.disable_batching %}checked{% endif %}><span class="toggle-switch"></span><span class="toggle-label">Disable Batching</span></label>
+                <label class="toggle compact"><input type="checkbox" class="ai-allow-downgrade" data-stream="{{ stream_id }}" {% if ai.allow_downgrade %}checked{% endif %}><span class="toggle-switch"></span><span class="toggle-label">Allow Downgrade</span></label>
               </div>
               <div class="ai-advanced-group">
                 <label for="ai-style-{{ stream_id }}">Style Preset</label>
@@ -235,7 +235,7 @@
               <div class="post-processing-options">
                 {% set selected_post = ai.post_processing or [] %}
                 {% for proc in post_processors %}
-                  <label><input type="checkbox" class="ai-post-proc" data-stream="{{ stream_id }}" value="{{ proc }}" {% if proc in selected_post %}checked{% endif %}> {{ proc }}</label>
+                  <label class="toggle compact"><input type="checkbox" class="ai-post-proc" data-stream="{{ stream_id }}" value="{{ proc }}" {% if proc in selected_post %}checked{% endif %}><span class="toggle-switch"></span><span class="toggle-label">{{ proc }}</span></label>
                 {% endfor %}
               </div>
             </div>
@@ -260,7 +260,7 @@
                   <input type="number" class="ai-lora-model" placeholder="Model" step="0.05" min="-5" max="5" value="{{ lora.model if lora.model is not none else '' }}">
                   <input type="number" class="ai-lora-clip" placeholder="Clip" step="0.05" min="-5" max="5" value="{{ lora.clip if lora.clip is not none else '' }}">
                   <input type="text" class="ai-lora-trigger" placeholder="Trigger (optional)" value="{{ lora.inject_trigger or '' }}">
-                  <label class="ai-lora-flag"><input type="checkbox" class="ai-lora-is-version" {% if lora.is_version %}checked{% endif %}> Version ID</label>
+                  <label class="toggle compact ai-lora-flag"><input type="checkbox" class="ai-lora-is-version" {% if lora.is_version %}checked{% endif %}><span class="toggle-switch"></span><span class="toggle-label">Version ID</span></label>
                   <button type="button" class="ai-lora-remove">Remove</button>
                 </div>
                 {% endfor %}
@@ -269,9 +269,9 @@
             </div>
           </details>
           <div class="ai-flags">
-            <label><input type="checkbox" class="ai-save-output" data-stream="{{ stream_id }}" {% if ai.save_output %}checked{% endif %}> Save to library</label>
-            <label><input type="checkbox" class="ai-nsfw" data-stream="{{ stream_id }}" {% if ai.nsfw %}checked{% endif %}> Allow NSFW</label>
-            <label><input type="checkbox" class="ai-censor" data-stream="{{ stream_id }}" {% if ai.censor_nsfw %}checked{% endif %}> Censor NSFW</label>
+            <label class="toggle inline"><input type="checkbox" class="ai-save-output" data-stream="{{ stream_id }}" {% if ai.save_output %}checked{% endif %}><span class="toggle-switch"></span><span class="toggle-label">Save to library</span></label>
+            <label class="toggle inline"><input type="checkbox" class="ai-nsfw" data-stream="{{ stream_id }}" {% if ai.nsfw %}checked{% endif %}><span class="toggle-switch"></span><span class="toggle-label">Allow NSFW</span></label>
+            <label class="toggle inline"><input type="checkbox" class="ai-censor" data-stream="{{ stream_id }}" {% if ai.censor_nsfw %}checked{% endif %}><span class="toggle-switch"></span><span class="toggle-label">Censor NSFW</span></label>
           </div>
           <div class="ai-modal-actions">
             <button type="button" class="ai-generate-btn" data-stream="{{ stream_id }}">Queue Images</button>
@@ -1559,7 +1559,7 @@
         <input type="number" class="ai-lora-model" placeholder="Model" step="0.05" min="-5" max="5">
         <input type="number" class="ai-lora-clip" placeholder="Clip" step="0.05" min="-5" max="5">
         <input type="text" class="ai-lora-trigger" placeholder="Trigger (optional)">
-        <label class="ai-lora-flag"><input type="checkbox" class="ai-lora-is-version"> Version ID</label>
+        <label class="toggle compact ai-lora-flag"><input type="checkbox" class="ai-lora-is-version"><span class="toggle-switch"></span><span class="toggle-label">Version ID</span></label>
         <button type="button" class="ai-lora-remove">Remove</button>
       `;
       loraList.appendChild(row);
