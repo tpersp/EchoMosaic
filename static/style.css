@@ -221,6 +221,7 @@ a {
   box-shadow: 0 6px 16px rgba(0,0,0,0.35);
   z-index: 20;
 }
+.menu-dropdown[hidden] { display: none !important; }
 .menu-dropdown button { background: transparent; border: 0; text-align: left; padding: 6px 10px; color: var(--text); }
 .menu-dropdown button:hover { background: var(--surface-alt); }
 
