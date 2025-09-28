@@ -249,6 +249,21 @@ a {
 .url-type-badge[data-type="hls"] { color: #2ecc71; border-color: #1d6b45; }
 .url-type-badge[data-type="website"] { color: var(--accent); }
 
+/* Background embed test status */
+.embed-status-badge {
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 0.1rem 0.5rem;
+  font-size: 0.75rem;
+}
+.embed-status-badge[data-state="testing"] { color: #f1c40f; border-color: #6b5d12; }
+.embed-status-badge[data-state="ok"] { color: #2ecc71; border-color: #1d6b45; }
+.embed-status-badge[data-state="not_valid"],
+.embed-status-badge[data-state="not-showable"],
+.embed-status-badge[data-state="not_showable"],
+.embed-status-badge[data-state="unreachable"],
+.embed-status-badge[data-state="error"] { color: #e74c3c; border-color: #7e2a22; }
+
 /* Inline controls (e.g., YT CC/Mute/Quality) */
 .inline-controls {
   display: grid;

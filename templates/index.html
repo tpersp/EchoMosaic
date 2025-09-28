@@ -83,14 +83,13 @@
 
         <!-- Stream URL -->
         <div class="form-row stream-url-container" {% if conf.mode != 'livestream' %} style="display:none;" {% endif %}>
-          <label for="stream-url-{{ stream_id }}">URL to Embed</label>
+          <label for="stream-url-{{ stream_id }}">URL</label>
           <div>
             <div style="display:flex; align-items:center; gap:8px; flex-wrap: wrap;">
-              <input id="stream-url-{{ stream_id }}" type="text" class="stream-url-input" data-stream="{{ stream_id }}" value="{{ conf.stream_url if conf.stream_url else '' }}" placeholder="YouTube / Twitch / HLS (.m3u8) / embeddable site">
+              <input id="stream-url-{{ stream_id }}" type="text" class="stream-url-input" data-stream="{{ stream_id }}" value="{{ conf.stream_url if conf.stream_url else '' }}" placeholder="https://…">
               <span class="url-type-badge" aria-live="polite"></span>
-              <button type="button" class="test-embed-btn" data-stream="{{ stream_id }}" title="Open this stream in a new tab to test">Test</button>
+              <span class="embed-status-badge" aria-live="polite"></span>
             </div>
-            <div class="help-text">Works with many sites that allow embedding. If a site blocks embedding (e.g., with X-Frame-Options), it won’t load.</div>
           </div>
         </div>
 
@@ -724,7 +723,7 @@
           saveSettings(streamId, { duration: e.target.value });
         });
       }
-      // URL helpers: type badge + save
+      // URL helpers: type badge + background embed test + save
       function setUrlBadge(url) {
         const badge = card.querySelector('.url-type-badge');
         if (!badge) return;
@@ -733,25 +732,47 @@
         badge.dataset.type = (t || '').toLowerCase();
         badge.style.visibility = t ? 'visible' : 'hidden';
       }
+      let testAbort = null;
+      let testTimer = null;
+      async function runEmbedTest(url) {
+        const statusEl = card.querySelector('.embed-status-badge');
+        if (!statusEl || !url) { if (statusEl) statusEl.textContent=''; return; }
+        // Debounce rapid typing
+        if (testTimer) clearTimeout(testTimer);
+        statusEl.textContent = 'Testing…';
+        statusEl.dataset.state = 'testing';
+        testTimer = setTimeout(async () => {
+          if (testAbort) { try { testAbort.abort(); } catch {} }
+          const ctrl = new AbortController();
+          testAbort = ctrl;
+          try {
+            const res = await fetch('/test_embed', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ url }),
+              signal: ctrl.signal
+            });
+            const data = await res.json();
+            const state = (data.status || 'error').toLowerCase();
+            statusEl.dataset.state = state;
+            statusEl.textContent = (data.note || data.status || '').toUpperCase();
+          } catch (e) {
+            statusEl.dataset.state = 'error';
+            statusEl.textContent = 'ERROR';
+          }
+        }, 700);
+      }
       if (urlInput) {
         setUrlBadge(urlInput.value || '');
+        runEmbedTest(urlInput.value || '');
         urlInput.addEventListener('input', e => {
           setUrlBadge(e.target.value);
           toggleVisibilityForMode(card, modeSelect.value, e.target.value);
+          runEmbedTest(e.target.value);
         });
         urlInput.addEventListener('change', e => {
           saveSettings(streamId, { stream_url: e.target.value });
           toggleVisibilityForMode(card, modeSelect.value, e.target.value);
-        });
-      }
-      const testBtn = card.querySelector('.test-embed-btn');
-      if (testBtn && urlInput) {
-        testBtn.addEventListener('click', async () => {
-          // Save current URL before testing so the stream page loads it
-          try { await fetch(`/settings/${encodeURIComponent(streamId)}`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ stream_url: urlInput.value }) }); } catch {}
-          const link = card.querySelector('.card-header a.stream-link');
-          const href = link ? link.href : `/stream/${encodeURIComponent(streamId)}`;
-          window.open(href, '_blank');
         });
       }
       // YT settings changes

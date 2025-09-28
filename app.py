@@ -7,6 +7,12 @@ import time
 import shutil
 from datetime import datetime
 import re
+from urllib.parse import urlparse
+
+try:
+    import requests
+except Exception:
+    requests = None
 
 app = Flask(__name__, static_folder="static", static_url_path="/static")
 socketio = SocketIO(app)
@@ -344,6 +350,53 @@ def stream_live():
         "hls_url": None,
         "original_url": stream_url
     })
+
+
+@app.route("/test_embed", methods=["POST"])
+def test_embed():
+    data = request.get_json(silent=True) or {}
+    url = (data.get("url") or "").strip()
+    # Validate URL shape
+    try:
+        parsed = urlparse(url)
+    except Exception:
+        return jsonify({"status": "not_valid", "note": "Not valid"})
+    if not parsed.scheme or not parsed.netloc or parsed.scheme not in ("http", "https"):
+        return jsonify({"status": "not_valid", "note": "Not valid"})
+
+    if requests is None:
+        # If requests isn't installed, provide best-effort classification
+        return jsonify({"status": "ok", "note": "OK (basic)", "final_url": url})
+
+    def check_headers(headers):
+        xf = (headers.get("x-frame-options") or headers.get("X-Frame-Options") or "").lower()
+        if xf in ("deny", "sameorigin"):
+            return False, "X-Frame-Options"
+        csp = headers.get("content-security-policy") or headers.get("Content-Security-Policy")
+        if csp:
+            csp_l = csp.lower()
+            if "frame-ancestors" in csp_l:
+                # conservatively mark not showable unless wildcard present
+                fa = csp_l.split("frame-ancestors", 1)[1]
+                # Stop at semicolon
+                fa = fa.split(";", 1)[0]
+                if "'none'" in fa or ("*" not in fa and "http" not in fa and "https" not in fa and "'self'" not in fa):
+                    return False, "CSP frame-ancestors"
+        return True, None
+
+    try:
+        # Try HEAD first, then fall back to GET for servers that don't support it
+        resp = requests.head(url, allow_redirects=True, timeout=6)
+        if resp.status_code >= 400 or resp.status_code in (405, 501):
+            resp = requests.get(url, allow_redirects=True, timeout=8, stream=True)
+        ok_headers, reason = check_headers(resp.headers or {})
+        if resp.status_code >= 400:
+            return jsonify({"status": "unreachable", "http_status": resp.status_code, "note": "Unreachable"})
+        if not ok_headers:
+            return jsonify({"status": "not_showable", "http_status": resp.status_code, "note": "Not showable"})
+        return jsonify({"status": "ok", "http_status": resp.status_code, "note": "OK", "final_url": str(resp.url)})
+    except requests.exceptions.RequestException:
+        return jsonify({"status": "unreachable", "note": "Unreachable"})
 
 @app.route("/images", methods=["GET"])
 def get_images():
