@@ -740,7 +740,7 @@ def stream_group(name):
     mosaic = default_mosaic_config()
     if g_layout:
         # safe merge
-        for k in ["layout", "cols", "rows", "pip_main", "pip_pip", "pip_corner", "pip_size"]:
+        for k in ["layout", "cols", "rows", "pip_main", "pip_pip", "pip_corner", "pip_size", "focus_mode", "focus_pos"]:
             if k in g_layout:
                 mosaic[k] = g_layout[k]
     return render_template("streams.html", stream_settings=streams, mosaic_settings=mosaic)
