@@ -30,7 +30,7 @@ A running list of ideas and future improvements. Add new items anywhere below.
 - [ ] Add option to shuffle display order of media in folders - should by default shuffle, with the option to turn off shuffle.
 
 ## Suggestions from a friend:
-- [ ]  [2025-09-08] Add optional authentication or API‑key protection for the dashboard and update endpoints. The README notes that after installation you can access the dashboard directly at http://your‑server:PORT/, so anyone on the network can modify streams and run updates. Implementing a simple login or token-based auth would improve security.
+- [ ]  [2025-09-08] Add optional authentication or API‑key protection for the dashboard and update endpoints. The README notes that after installation you can access the dashboard directly at http://your‑server:PORT/, so anyone on the network can modify streams and run updates. Implementing a simple login or token-based auth would improve security. - Lets drop the api key but use a simple login with session cache for some time to not annoy the user.
 
 - [ ]  [2025-09-08] Make paths and constants configurable via config.json or environment variables. Users currently have to edit app.py to change where images are stored. Exposing settings like IMAGE_DIR (and other constants) through configuration files or a settings UI would improve maintainability and avoid manual code changes.
 
