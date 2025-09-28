@@ -11,4 +11,5 @@ html, body {
   object-fit: contain;
   display: block;
   background: #000;
+  border: 0;
 }
