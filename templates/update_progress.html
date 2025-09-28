@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <title>Updating EchoMosaic…</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <style>
+    .progress { height: 10px; background: #333; border-radius: 6px; overflow: hidden; }
+    .bar { height: 100%; width: 0%; background: var(--accent); transition: width 0.6s ease; }
+    .steps { list-style: none; padding: 0; margin: 0.5rem 0 0; }
+    .steps li { opacity: 0.7; margin: 0.25rem 0; }
+    .steps li.active { opacity: 1; color: var(--text); }
+    .steps li.done { opacity: 0.9; }
+  </style>
+</head>
+<body>
+  <header class="top-bar">
+    <h1>Updating…</h1>
+    <nav>
+      <a href="{{ url_for('dashboard') }}">Dashboard</a>
+    </nav>
+  </header>
+  <div class="container">
+    <p>We’re applying the latest update. This may take a minute.</p>
+    <div class="progress"><div id="bar" class="bar"></div></div>
+    <ul id="steps" class="steps">
+      <li class="active">Fetching latest code</li>
+      <li>Checking out branch</li>
+      <li>Applying update</li>
+      <li>Updating dependencies</li>
+      <li>Restarting service</li>
+    </ul>
+    <p id="status" style="margin-top:0.5rem; opacity:0.9;">Starting…</p>
+  </div>
+  <script>
+    const steps = Array.from(document.querySelectorAll('#steps li'));
+    const bar = document.getElementById('bar');
+    const statusEl = document.getElementById('status');
+
+    let i = 0;
+    function advance(msg) {
+      if (i < steps.length) {
+        steps[i].classList.remove('active');
+        steps[i].classList.add('done');
+      }
+      i = Math.min(i + 1, steps.length - 1);
+      steps[i].classList.add('active');
+      bar.style.width = Math.round(((i) / (steps.length)) * 100) + '%';
+      if (msg) statusEl.textContent = msg;
+    }
+
+    // Animate progress locally while the server does real work
+    const msgs = [
+      'Fetching latest code…',
+      'Switching to update branch…',
+      'Applying updates…',
+      'Updating dependencies…',
+      'Restarting service…'
+    ];
+    let t = 0;
+    function tick() { if (t < msgs.length) { advance(msgs[t++]); setTimeout(tick, 900); } }
+    setTimeout(tick, 500);
+
+    // Kick off update; when done, finalize and redirect
+    const headers = {};
+    {% if api_key %}headers['X-API-Key'] = '{{ api_key }}';{% endif %}
+    fetch('/update_app', { method: 'POST', headers })
+      .then(r => r.text())
+      .then(txt => {
+        const lower = txt.toLowerCase();
+        const isError = lower.includes('failed') || lower.includes('unauthorized') || lower.includes('error');
+        if (isError) {
+          statusEl.textContent = 'Update encountered an error. See details below.';
+          // show returned HTML so the message is visible
+          const detail = document.createElement('div');
+          detail.style.marginTop = '0.75rem';
+          detail.innerHTML = txt;
+          document.querySelector('.container').appendChild(detail);
+          return;
+        }
+        // push bar to end and mark all steps done
+        while (i < steps.length - 1) { advance(); }
+        bar.style.width = '100%';
+        statusEl.textContent = 'Update complete. Redirecting to dashboard…';
+        setTimeout(() => { window.location.href = '/'; }, 2500);
+      })
+      .catch(err => {
+        statusEl.textContent = 'Update failed: ' + err;
+      });
+  </script>
+</body>
+</html>

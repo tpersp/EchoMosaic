@@ -1,10 +1,11 @@
-from flask import Flask, jsonify, send_from_directory, request, render_template
+from flask import Flask, jsonify, send_from_directory, request, render_template, redirect, url_for
 from flask_socketio import SocketIO
 import os
 import json
 import subprocess
 import time
 import shutil
+from datetime import datetime
 
 app = Flask(__name__, static_folder="static", static_url_path="/static")
 socketio = SocketIO(app)
@@ -307,6 +308,13 @@ def update_app():
             "update_status.html",
             message=f"Repository path '{repo_path}' not found. Check INSTALL_DIR in config.json",
         )
+    # capture current commit before update
+    def git_cmd(args, cwd=repo_path):
+        return subprocess.check_output(["git", *args], cwd=cwd, stderr=subprocess.STDOUT).decode().strip()
+    try:
+        current_commit = git_cmd(["rev-parse", "HEAD"]) 
+    except Exception:
+        current_commit = None
     try:
         subprocess.check_call(["git", "fetch"], cwd=repo_path)
         subprocess.check_call(["git", "checkout", branch], cwd=repo_path)
@@ -318,6 +326,24 @@ def update_app():
         )
     except subprocess.CalledProcessError as e:
         return render_template("update_status.html", message=f"Git update failed: {e}")
+    # record update history
+    try:
+        new_commit = git_cmd(["rev-parse", "HEAD"]) if 'git_cmd' in locals() else None
+        history_path = os.path.join(repo_path, "update_history.json")
+        history = []
+        if os.path.exists(history_path):
+            with open(history_path, "r") as hf:
+                history = json.load(hf)
+        history.append({
+            "timestamp": datetime.utcnow().isoformat() + "Z",
+            "from": current_commit,
+            "to": new_commit,
+            "branch": branch,
+        })
+        with open(history_path, "w") as hf:
+            json.dump(history[-50:], hf, indent=2)
+    except Exception:
+        pass
     try:
         subprocess.check_call([
             os.path.join(repo_path, "venv", "bin", "pip"),
@@ -335,6 +361,99 @@ def update_app():
     return render_template(
         "update_status.html", message="Soft update complete. Restarting service..."
     )
+
+
+def read_update_info():
+    cfg = load_config()
+    repo_path = cfg.get("INSTALL_DIR") or os.getcwd()
+    branch = cfg.get("UPDATE_BRANCH", "main")
+    info = {"branch": branch}
+    def safe(cmd):
+        try:
+            return subprocess.check_output(cmd, cwd=repo_path, stderr=subprocess.STDOUT).decode().strip()
+        except Exception:
+            return None
+    current = safe(["git", "rev-parse", "HEAD"]) or ""
+    current_short = safe(["git", "rev-parse", "--short", "HEAD"]) or ""
+    current_desc = safe(["git", "log", "-1", "--pretty=%h %s (%cr)"]) or current_short
+    # fetch remote to learn about latest without changing local state
+    _ = safe(["git", "fetch", "--quiet"])  # ignore errors silently
+    remote = safe(["git", "rev-parse", f"origin/{branch}"]) or ""
+    remote_short = remote[:7] if remote else ""
+    remote_desc = safe(["git", "log", "-1", f"origin/{branch}", "--pretty=%h %s (%cr)"]) or remote_short
+    info.update({
+        "current_commit": current,
+        "current_desc": current_desc,
+        "remote_commit": remote,
+        "remote_desc": remote_desc,
+        "update_available": (current and remote and current != remote)
+    })
+    # previous commit from history
+    history_path = os.path.join(repo_path, "update_history.json")
+    if os.path.exists(history_path):
+        try:
+            with open(history_path, "r") as hf:
+                history = json.load(hf)
+            if history:
+                last = history[-1]
+                info["previous_commit"] = last.get("from")
+                # resolve desc for previous
+                prev = last.get("from")
+                if prev:
+                    prev_desc = safe(["git", "log", "-1", prev, "--pretty=%h %s (%cr)"]) or (prev[:7])
+                else:
+                    prev_desc = None
+                info["previous_desc"] = prev_desc
+        except Exception:
+            pass
+    return info
+
+
+@app.route("/update_info", methods=["GET"])
+def update_info():
+    cfg = load_config()
+    api_key = cfg.get("API_KEY")
+    if api_key and request.headers.get("X-API-Key") != api_key:
+        return jsonify({"error": "Unauthorized"}), 401
+    return jsonify(read_update_info())
+
+
+@app.route("/rollback_app", methods=["POST"])
+def rollback_app():
+    cfg = load_config()
+    api_key = cfg.get("API_KEY")
+    if api_key and request.headers.get("X-API-Key") != api_key:
+        return "Unauthorized", 401
+    repo_path = cfg.get("INSTALL_DIR") or os.getcwd()
+    service_name = cfg.get("SERVICE_NAME", "echomosaic.service")
+    # decide target: previous commit from history
+    history_path = os.path.join(repo_path, "update_history.json")
+    try:
+        with open(history_path, "r") as hf:
+            history = json.load(hf)
+    except Exception:
+        return render_template("update_status.html", message="No previous version to roll back to."), 400
+    if not history:
+        return render_template("update_status.html", message="No previous version to roll back to."), 400
+    target = history[-1].get("from")
+    if not target:
+        return render_template("update_status.html", message="History does not include a valid commit."), 400
+    try:
+        subprocess.check_call(["git", "reset", "--hard", target], cwd=repo_path)
+    except subprocess.CalledProcessError as e:
+        return render_template("update_status.html", message=f"Rollback failed: {e}")
+    try:
+        subprocess.Popen(["sudo", "systemctl", "restart", service_name])
+    except OSError:
+        pass
+    return render_template("update_status.html", message=f"Rolled back to {target[:7]}. Restarting service...")
+
+
+@app.route("/update")
+def update_view():
+    # A simple progress UI that will kick off the update via fetch
+    cfg = load_config()
+    return render_template("update_progress.html", api_key=cfg.get("API_KEY", ""))
 
 if __name__ == "__main__":
     socketio.run(app, host="0.0.0.0", port=5000, debug=True)

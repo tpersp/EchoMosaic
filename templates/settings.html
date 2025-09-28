@@ -6,18 +6,41 @@
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
   <script>
   function triggerUpdate() {
-    fetch('/update_app', {
+    window.location.href = '/update';
+  }
+  function triggerRollback() {
+    if (!confirm('Roll back to previous version?')) return;
+    fetch('/rollback_app', {
       method: 'POST',
-      headers: {
-        'X-API-Key': '{{ config.get("API_KEY", "") }}'
-      }
+      headers: { 'X-API-Key': '{{ config.get("API_KEY", "") }}' }
     })
     .then(res => res.text())
-    .then(html => {
-      document.body.innerHTML = html;
-    })
-    .catch(err => alert('Update failed: ' + err));
+    .then(html => { document.body.innerHTML = html; })
+    .catch(err => alert('Rollback failed: ' + err));
   }
+  function loadUpdateInfo() {
+    fetch('/update_info', { headers: { 'X-API-Key': '{{ config.get("API_KEY", "") }}' }})
+      .then(r => r.json())
+      .then(info => {
+        const el = (id, v) => document.getElementById(id).textContent = v || '-';
+        el('branch', info.branch);
+        el('current', info.current_desc || info.current_commit);
+        el('remote', info.remote_desc || info.remote_commit);
+        el('previous', info.previous_desc || info.previous_commit || 'None');
+        const btn = document.getElementById('update-btn');
+        const note = document.getElementById('update-note');
+        if (info.update_available) {
+          btn.disabled = false;
+          note.textContent = 'Update available';
+        } else {
+          btn.disabled = true;
+          note.textContent = 'Up to date';
+        }
+        const rb = document.getElementById('rollback-btn');
+        rb.disabled = !info.previous_commit;
+      });
+  }
+  document.addEventListener('DOMContentLoaded', loadUpdateInfo);
   </script>
 </head>
 <body>
@@ -31,7 +54,18 @@
     <p><strong>Install Dir:</strong> {{ config.INSTALL_DIR }}</p>
     <p><strong>Service Name:</strong> {{ config.SERVICE_NAME }}</p>
     <p><strong>Update Branch:</strong> {{ config.UPDATE_BRANCH }}</p>
-    <button onclick="triggerUpdate()">Update Now</button>
+    <div style="margin: 1rem 0; padding: 0.75rem; border:1px solid var(--border); border-radius:4px; background: var(--surface-alt);">
+      <h3 style="margin-top:0;">Update Status</h3>
+      <p><strong>Branch:</strong> <span id="branch">-</span></p>
+      <p><strong>Current:</strong> <span id="current">-</span></p>
+      <p><strong>Latest:</strong> <span id="remote">-</span></p>
+      <p><strong>Previous:</strong> <span id="previous">-</span></p>
+      <p id="update-note" style="opacity:0.9;">Checking…</p>
+      <div style="display:flex; gap:0.5rem; flex-wrap:wrap;">
+        <button id="update-btn" onclick="triggerUpdate()" disabled>Update Now</button>
+        <button id="rollback-btn" onclick="triggerRollback()" disabled>Rollback</button>
+      </div>
+    </div>
   </div>
 </body>
 </html>
