@@ -1,4 +1,6 @@
 <!DOCTYPE html>
+<!-- IMPORTANT: Keep single stream page UI-free. Do not add headers or extra UI
+without explicit instruction; content should be edge-to-edge for immersion. -->
 <html lang="en">
 <head>
   <meta charset="UTF-8">
@@ -7,33 +9,15 @@
   <link rel="stylesheet" href="{{ url_for('static', filename='stream.css') }}">
 </head>
 <body>
-<header class="top-bar" style="margin-bottom:6px;">
-  <h1 style="font-size:1.1rem; margin:0;">{{ stream_id|capitalize }}</h1>
-  <nav>
-    <a href="{{ url_for('dashboard') }}">Dashboard</a>
-    <button id="theme-toggle" class="icon-btn" type="button" aria-label="Toggle theme" title="Toggle theme" style="margin-left:.5rem;"></button>
-  </nav>
-</header>
+<!-- NOTE: No header/toolbars here; keep media full-screen friendly. -->
 <div id="container"></div>
 <script src="https://cdn.socket.io/4.0.1/socket.io.min.js"></script>
 <script>
-// Theme toggle with icon
+// Apply saved theme (silently, no UI)
 (function(){
   const root = document.documentElement;
-  const btn = document.getElementById('theme-toggle');
-  function apply(theme){
-    const t = (theme === 'light') ? 'light' : 'dark';
-    root.setAttribute('data-theme', t);
-    if (btn) btn.textContent = t === 'light' ? '☀️' : '🌙';
-  }
-  const saved = localStorage.getItem('theme') || 'dark';
-  apply(saved);
-  if (btn) btn.addEventListener('click', () => {
-    const cur = root.getAttribute('data-theme') === 'light' ? 'light' : 'dark';
-    const next = cur === 'light' ? 'dark' : 'light';
-    apply(next);
-    try { localStorage.setItem('theme', next); } catch(e){}
-  });
+  const saved = localStorage.getItem('theme');
+  root.setAttribute('data-theme', saved === 'light' ? 'light' : 'dark');
 })();
 
 const streamId = "{{ stream_id }}";
