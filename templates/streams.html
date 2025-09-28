@@ -7,7 +7,15 @@
   <link rel="stylesheet" href="{{ url_for('static', filename='streams.css') }}">
 </head>
 <body>
-<div id="mosaic" class="mosaic-grid layout-{{ mosaic_settings.layout }} cols-{{ mosaic_settings.cols }} stream-count-{{ stream_settings|length }}{% if mosaic_settings.layout == 'pip' %} corner-{{ mosaic_settings.pip_corner }}{% endif %}"{% if mosaic_settings.layout == 'pip' %} style="--pip-size: {{ mosaic_settings.pip_size|default(25) }}%;"{% endif %}>
+{% set style_parts = [] %}
+{% if mosaic_settings.layout == 'pip' %}
+  {% set _ = style_parts.append('--pip-size: ' ~ (mosaic_settings.pip_size|default(25)) ~ '%') %}
+{% endif %}
+{% if mosaic_settings.layout == 'grid' %}
+  {% if mosaic_settings.cols %}{% set _ = style_parts.append('grid-template-columns: repeat(' ~ mosaic_settings.cols ~ ', 1fr)') %}{% endif %}
+  {% if mosaic_settings.rows %}{% set _ = style_parts.append('grid-template-rows: repeat(' ~ mosaic_settings.rows ~ ', 1fr)') %}{% endif %}
+{% endif %}
+<div id="mosaic" class="mosaic-grid layout-{{ mosaic_settings.layout }} cols-{{ mosaic_settings.cols }} stream-count-{{ stream_settings|length }}{% if mosaic_settings.layout == 'pip' %} corner-{{ mosaic_settings.pip_corner }}{% endif %}"{% if style_parts %} style="{{ style_parts|join('; ') }}"{% endif %}>
   {% if mosaic_settings.layout == 'pip' %}
     {% if mosaic_settings.pip_main %}
     <div class="mosaic-cell main">
