@@ -16,9 +16,11 @@ interface in real time.
 * **Folder and image selection** – choose a folder on the server where
   images are stored and let the application randomly cycle through
   them, or pick a specific image to display.
-* **Livestream support** – specify a YouTube or Twitch URL to
-  embed a live stream; other streaming services are supported by
-  attempting to extract an HLS link via `yt‑dlp`.
+* **URL / Embed mode** – paste a YouTube or Twitch URL to embed a live
+  player, a direct HLS/DASH link (e.g. .m3u8/.mpd), or even a regular
+  website that allows embedding. Some sites (e.g., reddit.com) block
+  embedding via headers like `X-Frame-Options` or `Content-Security-Policy`;
+  those will not load.
 * **Real‑time updates** – settings changes are propagated instantly to
   all connected clients using Socket.IO, eliminating the need for
   manual refreshes.

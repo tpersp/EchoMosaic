@@ -234,6 +234,21 @@ a {
   margin-top: 4px;
 }
 
+/* Small pill that shows detected URL type */
+.url-type-badge {
+  background: rgba(79,163,255,0.15);
+  border: 1px solid var(--border);
+  color: var(--text);
+  font-size: 0.75rem;
+  padding: 0.1rem 0.4rem;
+  border-radius: 999px;
+  visibility: hidden;
+}
+.url-type-badge[data-type="youtube"] { color: #f1c40f; border-color: #6b5d12; }
+.url-type-badge[data-type="twitch"] { color: #9b59b6; border-color: #4d2e5a; }
+.url-type-badge[data-type="hls"] { color: #2ecc71; border-color: #1d6b45; }
+.url-type-badge[data-type="website"] { color: var(--accent); }
+
 /* Inline controls (e.g., YT CC/Mute/Quality) */
 .inline-controls {
   display: grid;

@@ -85,3 +85,16 @@ html, body {
   display: block;
   background: #000;
 }
+
+/* Small corner badge describing detected source */
+.source-badge {
+  position: absolute;
+  left: 6px;
+  bottom: 6px;
+  background: rgba(0,0,0,0.55);
+  color: #fff;
+  font-size: 12px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  pointer-events: none;
+}
