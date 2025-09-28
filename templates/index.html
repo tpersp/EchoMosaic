@@ -165,10 +165,17 @@
   }
 
   // Adjust grid layout
+  const savedCols = localStorage.getItem('dashboardCols');
+  if (savedCols) {
+    layoutSelect.value = savedCols;
+    grid.classList.remove('cols-1','cols-2','cols-3','cols-4');
+    grid.classList.add('cols-' + savedCols);
+  }
   layoutSelect.addEventListener('change', () => {
     const cols = layoutSelect.value;
     grid.classList.remove('cols-1','cols-2','cols-3','cols-4');
     grid.classList.add('cols-' + cols);
+    localStorage.setItem('dashboardCols', cols);
   });
 
   function sendMosaicSettings() {
@@ -419,6 +426,8 @@
           loadImagesFor(streamId, folder);
         });
       }
+
+      toggleVisibilityForMode(card, modeSelect ? modeSelect.value : '', urlInput ? urlInput.value : '');
     });
   });
 </script>

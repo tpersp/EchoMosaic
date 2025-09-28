@@ -207,6 +207,7 @@ def update_mosaic_settings():
         })
     settings["_mosaic"] = mosaic
     save_settings(settings)
+    socketio.emit("mosaic_refresh", {"mosaic": settings["_mosaic"]})
     return jsonify({"status": "success", "mosaic": settings["_mosaic"]})
 
 @app.route("/stream/image/<path:filename>")
