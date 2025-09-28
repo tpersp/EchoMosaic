@@ -122,6 +122,7 @@
         <div class="ai-generator" data-stream="{{ stream_id }}" {% if conf.mode != 'ai' %} style="display:none;" {% endif %}>
           {% set ai = conf.ai_settings or {} %}
           {% set ai_state = conf.ai_state or {} %}
+          {% set sampler_options = ['k_euler','k_euler_a','k_dpmpp_2m','k_dpmpp_2m_sde','k_dpmpp_sde','k_lms','k_heun','k_dpm_2','k_dpm_2_a','k_dpm_fast','k_dpm_adaptive','ddim','plms'] %}
           <label for="ai-prompt-{{ stream_id }}">Prompt</label>
           <textarea id="ai-prompt-{{ stream_id }}" class="ai-prompt-input" data-stream="{{ stream_id }}" rows="3" placeholder="Describe the image you want">{{ ai.prompt or '' }}</textarea>
           <label for="ai-negative-{{ stream_id }}">Negative Prompt</label>
@@ -139,7 +140,18 @@
             </div>
             <div class="ai-option">
               <label for="ai-sampler-{{ stream_id }}">Sampler</label>
-              <input id="ai-sampler-{{ stream_id }}" type="text" class="ai-sampler-input" data-stream="{{ stream_id }}" value="{{ ai.sampler or '' }}" placeholder="k_euler">
+              {% set current_sampler = ai.sampler or 'k_euler' %}
+              {% set sampler_state = namespace(found=false) %}
+              <select id="ai-sampler-{{ stream_id }}" class="ai-sampler-select" data-stream="{{ stream_id }}">
+                {% for opt in sampler_options %}
+                  {% set selected = (current_sampler|lower == opt|lower) %}
+                  {% if selected %}{% set sampler_state.found = True %}{% endif %}
+                  <option value="{{ opt }}" {% if selected %}selected{% endif %}>{{ opt }}</option>
+                {% endfor %}
+                {% if current_sampler and not sampler_state.found %}
+                  <option value="{{ current_sampler }}" selected>{{ current_sampler }}</option>
+                {% endif %}
+              </select>
             </div>
             <div class="ai-option">
               <label for="ai-width-{{ stream_id }}">Width</label>
@@ -1077,7 +1089,7 @@
     const promptInput = card.querySelector('.ai-prompt-input');
     const negativeInput = card.querySelector('.ai-negative-input');
     const modelSelect = card.querySelector('.ai-model-select');
-    const samplerInput = card.querySelector('.ai-sampler-input');
+    const samplerSelect = card.querySelector('.ai-sampler-select');
     const widthInput = card.querySelector('.ai-width-input');
     const heightInput = card.querySelector('.ai-height-input');
     const stepsInput = card.querySelector('.ai-steps-input');
@@ -1090,7 +1102,7 @@
     payload.prompt = promptInput ? promptInput.value : '';
     payload.negative_prompt = negativeInput ? negativeInput.value : '';
     payload.model = modelSelect ? modelSelect.value : '';
-    payload.sampler = samplerInput ? samplerInput.value : '';
+    payload.sampler = samplerSelect ? samplerSelect.value : '';
     payload.width = widthInput ? parseInt(widthInput.value, 10) : undefined;
     payload.height = heightInput ? parseInt(heightInput.value, 10) : undefined;
     payload.steps = stepsInput ? parseInt(stepsInput.value, 10) : undefined;
@@ -1122,9 +1134,9 @@
         saveSettings(streamId, { ai_settings: { negative_prompt: e.target.value } });
       });
     }
-    const samplerInput = card.querySelector('.ai-sampler-input');
-    if (samplerInput) {
-      samplerInput.addEventListener('blur', e => {
+    const samplerSelect = card.querySelector('.ai-sampler-select');
+    if (samplerSelect) {
+      samplerSelect.addEventListener('change', e => {
         saveSettings(streamId, { ai_settings: { sampler: e.target.value } });
       });
     }

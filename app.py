@@ -715,6 +715,9 @@ def ai_generate(stream_id: str):
         return jsonify({'error': 'Prompt is required'}), 400
     conf[AI_SETTINGS_KEY] = ai_settings
     persist = bool(ai_settings.get('save_output', AI_DEFAULT_PERSIST))
+    previous_state = conf.get(AI_STATE_KEY) or {}
+    previous_images = list(previous_state.get('images') or [])
+    previous_selected = conf.get('selected_image')
     with ai_jobs_lock:
         if stream_id in ai_jobs:
             return jsonify({'error': 'Generation already in progress'}), 409
@@ -727,17 +730,19 @@ def ai_generate(stream_id: str):
     if not persist:
         _cleanup_temp_outputs(stream_id)
     conf['mode'] = AI_MODE
-    conf['selected_image'] = None
+    if previous_selected:
+        conf['selected_image'] = previous_selected
     conf[AI_STATE_KEY] = default_ai_state()
-    conf[AI_STATE_KEY].update({
+    queued_state = conf[AI_STATE_KEY]
+    queued_state.update({
         'status': 'queued',
         'message': 'Awaiting workers',
         'persisted': persist,
-        'images': [],
+        'images': previous_images,
         'error': None,
     })
     save_settings(settings)
-    _emit_ai_update(stream_id, conf[AI_STATE_KEY], job=ai_jobs[stream_id])
+    _emit_ai_update(stream_id, queued_state, job=ai_jobs[stream_id])
     try:
         socketio.emit('refresh', {'stream_id': stream_id, 'config': conf})
     except Exception as exc:  # pragma: no cover
