@@ -27,15 +27,6 @@
   <div class="controls">
     <button id="add-stream">Add Stream</button>
     <button id="open-mosaic">View Streams</button>
-    <label>Group:
-      <select id="group-select">
-        <option value="" selected disabled>Select a group</option>
-        {% for g in groups %}
-        <option value="{{ g }}">{{ g }}</option>
-        {% endfor %}
-      </select>
-    </label>
-    <button id="open-group" {% if not groups or groups|length == 0 %}disabled{% endif %}>Open Group</button>
   </div>
 
   <div id="dashboard-grid" class="dashboard-grid">
@@ -133,8 +124,7 @@
   const notification = document.getElementById('notification');
   const addStreamBtn = document.getElementById('add-stream');
   const openMosaicBtn = document.getElementById('open-mosaic');
-  const openGroupBtn = document.getElementById('open-group');
-  const groupSelect = document.getElementById('group-select');
+  
   // Group Manager elements
   const groupTiles = document.getElementById('group-tiles');
 
@@ -261,17 +251,7 @@
   // initial load
   document.addEventListener('DOMContentLoaded', loadGroupsUI);
 
-  if (openGroupBtn && groupSelect) {
-    openGroupBtn.addEventListener('click', () => {
-      const name = groupSelect.value;
-      if (!name) return;
-      const url = '/stream/group/' + encodeURIComponent(name);
-      window.open(url, '_blank');
-    });
-    groupSelect.addEventListener('change', () => {
-      openGroupBtn.disabled = !groupSelect.value;
-    });
-  }
+  
 
   // Add a new stream by posting to /streams
   addStreamBtn.addEventListener('click', () => {
