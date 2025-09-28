@@ -456,6 +456,7 @@ a {
 
 .toggle-switch {
   position: relative;
+  display: inline-block;
   width: 46px;
   height: 24px;
   flex: 0 0 auto;
