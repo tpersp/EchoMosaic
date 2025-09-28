@@ -46,10 +46,14 @@
       <div class="card-header">
         <div class="title-row">
           <h2><a class="stream-link" href="{{ url_for('render_stream', name=(conf.label if conf.label else stream_id)|slugify) }}" target="_blank">{{ conf.label if conf.label else stream_id|capitalize }}</a></h2>
-          <a class="open-stream" href="{{ url_for('render_stream', name=(conf.label if conf.label else stream_id)|slugify) }}" target="_blank" title="Open stream in new tab">Open</a>
-          <button class="rename-stream" data-stream="{{ stream_id }}" title="Rename stream">Rename</button>
         </div>
-        <button class="remove-stream" data-stream="{{ stream_id }}" aria-label="Remove stream {{ stream_id }}">Remove</button>
+        <div class="card-menu" data-stream="{{ stream_id }}">
+          <button class="menu-button" aria-haspopup="true" aria-expanded="false" title="More">⋮</button>
+          <div class="menu-dropdown" hidden>
+            <button class="menu-rename" data-stream="{{ stream_id }}">Rename</button>
+            <button class="menu-remove" data-stream="{{ stream_id }}">Remove</button>
+          </div>
+        </div>
       </div>
 
       <div class="form-grid">
@@ -116,7 +120,7 @@
         <div class="image-grid"></div>
       </div>
 
-      <p class="selected-image-row">
+      <p class="selected-image-row" {% if conf.mode != 'specific' %} style="display:none;" {% endif %}>
         <strong>Selected Image:</strong>
         <span class="selected-image-display">{{ conf.selected_image if conf.selected_image else "None" }}</span>
       </p>
@@ -760,9 +764,12 @@
       });
   });
 
-  // Remove a stream
+  // Card menu interactions: close on outside click and handle remove
   document.addEventListener('click', (e) => {
-    if (e.target.classList.contains('remove-stream')) {
+    if (!e.target.closest('.card-menu')) {
+      document.querySelectorAll('.card-menu .menu-dropdown').forEach(dd => dd.hidden = true);
+    }
+    if (e.target.classList.contains('menu-remove')) {
       const id = e.target.dataset.stream;
       if (confirm('Delete ' + id + '?')) {
         fetch('/streams/' + encodeURIComponent(id), {method:'DELETE'})
@@ -886,6 +893,18 @@
   document.addEventListener('DOMContentLoaded', () => {
     document.querySelectorAll('.stream-card').forEach(card => {
       const streamId = card.dataset.stream;
+      // Card menu toggle per card
+      const menuBtn = card.querySelector('.menu-button');
+      const menuDd = card.querySelector('.card-menu .menu-dropdown');
+      if (menuBtn && menuDd) {
+        menuBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const isOpen = !menuDd.hidden;
+          document.querySelectorAll('.card-menu .menu-dropdown').forEach(dd => dd.hidden = true);
+          menuDd.hidden = isOpen;
+          menuBtn.setAttribute('aria-expanded', String(!isOpen));
+        });
+      }
       // Folder change
       const folderSelect = card.querySelector('.folder-select');
       if (folderSelect) {
@@ -983,7 +1002,7 @@
       const ccChk = card.querySelector('.yt-cc-chk');
       const muteChk = card.querySelector('.yt-mute-chk');
       const qualityInput = card.querySelector('.yt-quality-input');
-      const renameBtn = card.querySelector('.rename-stream');
+      const renameBtn = card.querySelector('.menu-rename');
       if (ccChk) {
         ccChk.addEventListener('change', e => {
           saveSettings(streamId, { yt_cc: e.target.checked });
@@ -1026,6 +1045,8 @@
             const slug = slugify(next || streamId);
             a.href = '/stream/' + encodeURIComponent(slug);
           }
+          const dd = card.querySelector('.card-menu .menu-dropdown');
+          if (dd) dd.hidden = true;
         });
       }
       // Reload images button
