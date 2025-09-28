@@ -24,7 +24,11 @@ fi
 cd "$INSTALL_DIR"
 
 echo "\nFetching latest changes from origin..."
-git pull --ff-only
+# Reset any local changes and sync with the remote branch
+git fetch origin
+current_branch=$(git rev-parse --abbrev-ref HEAD)
+git reset --hard "origin/${current_branch}"
+git clean -fd
 
 echo "\nUpdating Python dependencies..."
 "$INSTALL_DIR/venv/bin/pip" install --upgrade -r requirements.txt
