@@ -23,11 +23,11 @@ A running list of ideas and future improvements. Add new items anywhere below.
 
 - [ ] add server sided rendering as an option if possible. so it feels more like a proper stream as everyone who opens the site sees the same thing at the same time. - maybe not all streams, but the option to enable server side rendering for a specific group would be nice, if single stream is needed then the user would just make group with only one stream, hence SSR should be controlled on group level.
 
-- [ ] Add system monitoring, to watch cpu usage, memory usage(using/max), gpu usage(if any), storage available for media, other useful info.
+- [ ] Add system monitoring, to watch cpu usage, memory usage(using/max), gpu usage(if any), storage available for media, other useful info. - Add next
 
 - [x] Add stream quality options instead of free text format, options should be 1080p, 720p, 480, 360p, 240p, 144p, Auto. if a non-youtube stream is used, it should automatically select "auto" for compatibility.
 
-- [ ] Add option to shuffle display order of media in folders - should by default shuffle, with the option to turn off shuffle.
+- [ ] Add option to shuffle display order of media in folders - should by default shuffle, with the option to turn off shuffle. - Add next
 
 - [x] Grid strict-mode: when a group has more streams than Rows×Cols, optionally show only the first N (or chosen order) instead of auto-expanding the grid. Provide pagination/scroll or a toggle to auto-fit vs. strict.
 
