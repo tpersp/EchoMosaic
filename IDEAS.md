@@ -53,6 +53,7 @@ A running list of ideas and future improvements. Add new items anywhere below.
 - [x] Add option to shuffle display order of media in folders - should by default shuffle, with the option to turn off shuffle. [Shuffle toggle per stream]
 - [x] [2025-09-08] Add a light/dark theme toggle. [Theme toggle added]
 - [x] [2025-09-21] Expand Stable Horde controls with LoRA stacks, post-processing chains, and worker preference toggles directly in the dashboard.
+- [x] [2025-09-21] Move AI generator controls into a modal window and surface per-stream summaries on the dashboard.
 
 Notes
 - Use checkboxes to track status (unchecked → planned, checked → done).

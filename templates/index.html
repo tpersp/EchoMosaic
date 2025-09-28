@@ -119,7 +119,31 @@
             </div>
           </details>
         </div>
-        <div class="ai-generator" data-stream="{{ stream_id }}" {% if conf.mode != 'ai' %} style="display:none;" {% endif %}>
+        <div class="ai-summary" data-stream="{{ stream_id }}" {% if conf.mode != 'ai' %} style="display:none;" {% endif %}>
+          <div class="ai-summary-grid">
+            <div class="ai-summary-item"><span class="ai-summary-label">Model</span><span class="ai-summary-value ai-summary-model">{{ ai.model or 'Auto' }}</span></div>
+            <div class="ai-summary-item"><span class="ai-summary-label">Sampler</span><span class="ai-summary-value ai-summary-sampler">{{ ai.sampler or 'k_euler' }}</span></div>
+            <div class="ai-summary-item"><span class="ai-summary-label">Size</span><span class="ai-summary-value ai-summary-size">{{ ai.width or 512 }}x{{ ai.height or 512 }}</span></div>
+            <div class="ai-summary-item"><span class="ai-summary-label">Steps</span><span class="ai-summary-value ai-summary-steps">{{ ai.steps or 30 }}</span></div>
+            <div class="ai-summary-item"><span class="ai-summary-label">CFG</span><span class="ai-summary-value ai-summary-cfg">{{ ai.cfg_scale or 7.5 }}</span></div>
+            <div class="ai-summary-item"><span class="ai-summary-label">Images</span><span class="ai-summary-value ai-summary-samples">{{ ai.samples or 1 }}</span></div>
+            <div class="ai-summary-item"><span class="ai-summary-label">LoRAs</span><span class="ai-summary-value ai-summary-loras">{{ (ai.loras or [])|length }}</span></div>
+            <div class="ai-summary-item"><span class="ai-summary-label">Post</span><span class="ai-summary-value ai-summary-post">{{ (ai.post_processing or [])|length }}</span></div>
+            <div class="ai-summary-item"><span class="ai-summary-label">Save</span><span class="ai-summary-value ai-summary-save">{{ 'Yes' if ai.save_output else 'Temp' }}</span></div>
+            <div class="ai-summary-item"><span class="ai-summary-label">Timeout</span><span class="ai-summary-value ai-summary-timeout">{{ ai.timeout if ai.timeout and ai.timeout > 0 else 'No limit' }}</span></div>
+          </div>
+          <div class="ai-summary-actions">
+            <button type="button" class="ai-open-settings" data-stream="{{ stream_id }}">Settings</button>
+            <button type="button" class="ai-generate-btn" data-stream="{{ stream_id }}">Queue Images</button>
+            <span class="ai-status" data-stream="{{ stream_id }}" data-status="{{ ai_state.status or 'idle' }}">{{ ai_state.status|default('idle')|capitalize }}</span>
+          </div>
+        </div>
+        <div class="ai-modal-backdrop" data-stream="{{ stream_id }}" hidden></div>
+        <div class="ai-generator" data-stream="{{ stream_id }}" data-timeout="{{ ai.timeout if ai.timeout else '' }}" tabindex="-1" role="dialog" aria-modal="true" aria-hidden="true">
+          <div class="ai-modal-header">
+            <h3>AI Image Settings</h3>
+            <button type="button" class="ai-close-settings" aria-label="Close">&times;</button>
+          </div>
           {% set ai = conf.ai_settings or {} %}
           {% set ai_state = conf.ai_state or {} %}
           {% set sampler_options = ['k_euler','k_euler_a','k_dpmpp_2m','k_dpmpp_2m_sde','k_dpmpp_sde','k_lms','k_heun','k_dpm_2','k_dpm_2_a','k_dpm_fast','k_dpm_adaptive','ddim','plms'] %}
@@ -249,9 +273,9 @@
             <label><input type="checkbox" class="ai-nsfw" data-stream="{{ stream_id }}" {% if ai.nsfw %}checked{% endif %}> Allow NSFW</label>
             <label><input type="checkbox" class="ai-censor" data-stream="{{ stream_id }}" {% if ai.censor_nsfw %}checked{% endif %}> Censor NSFW</label>
           </div>
-          <div class="ai-actions">
-            <button type="button" class="ai-generate-btn" data-stream="{{ stream_id }}">Generate</button>
-            <span class="ai-status" data-stream="{{ stream_id }}" data-status="{{ ai_state.status or 'idle' }}">{{ ai_state.status|default('idle')|capitalize }}</span>
+          <div class="ai-modal-actions">
+            <button type="button" class="ai-generate-btn" data-stream="{{ stream_id }}">Queue Images</button>
+            <button type="button" class="ai-close-settings-secondary">Close</button>
           </div>
           <div class="ai-results" data-stream="{{ stream_id }}" data-selected="{{ conf.selected_image or '' }}">
             <div class="ai-generated-grid">
@@ -322,6 +346,57 @@
   })();
 
   const socket = io();
+  let openAiCard = null;
+  const aiSummaryUpdaters = new WeakMap();
+
+  function openAiSettings(card) {
+    if (!card) return;
+    const updater = aiSummaryUpdaters.get(card);
+    if (updater) updater();
+    const aiSection = card.querySelector('.ai-generator');
+    if (!aiSection) return;
+    const backdrop = card.querySelector('.ai-modal-backdrop');
+    if (openAiCard && openAiCard !== card) {
+      closeAiSettings(openAiCard);
+    }
+    card.classList.add('ai-settings-open');
+    if (backdrop) backdrop.hidden = false;
+    aiSection.setAttribute('aria-hidden', 'false');
+    if (typeof aiSection.focus === 'function') {
+      try {
+        aiSection.focus({ preventScroll: true });
+      } catch (err) {
+        aiSection.focus();
+      }
+    }
+    openAiCard = card;
+    document.body.classList.add('ai-modal-active');
+  }
+
+  function closeAiSettings(card) {
+    if (!card) return;
+    const aiSection = card.querySelector('.ai-generator');
+    const backdrop = card.querySelector('.ai-modal-backdrop');
+    card.classList.remove('ai-settings-open');
+    if (backdrop) backdrop.hidden = true;
+    if (aiSection) {
+      aiSection.setAttribute('aria-hidden', 'true');
+    }
+    if (openAiCard === card) {
+      openAiCard = null;
+    }
+    if (!openAiCard) {
+      document.body.classList.remove('ai-modal-active');
+    }
+  }
+
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape' && openAiCard) {
+      e.preventDefault();
+      closeAiSettings(openAiCard);
+    }
+  });
+
   const notification = document.getElementById('notification');
   const addStreamBtn = document.getElementById('add-stream');
   const openMosaicBtn = document.getElementById('open-mosaic');
@@ -1129,7 +1204,6 @@
 
   function renderAiStatus(card, state, job) {
     const statusEl = card.querySelector('.ai-status');
-    const button = card.querySelector('.ai-generate-btn');
     if (!statusEl) return;
     const info = state || {};
     const jobInfo = job || {};
@@ -1145,9 +1219,9 @@
     }
     statusEl.dataset.status = status;
     statusEl.textContent = label;
-    if (button) {
-      button.disabled = ['queued', 'accepted', 'running'].includes(status);
-    }
+    card.querySelectorAll('.ai-generate-btn').forEach(btn => {
+      btn.disabled = ['queued', 'accepted', 'running'].includes(status);
+    });
   }
 
   function gatherPostProcessing(card) {
@@ -1268,6 +1342,16 @@
     } else {
       payload.hires_fix_denoising_strength = null;
     }
+    const aiSection = card.querySelector('.ai-generator');
+    if (aiSection && aiSection.dataset && 'timeout' in aiSection.dataset) {
+      const stored = aiSection.dataset.timeout;
+      if (stored) {
+        const parsedTimeout = parseFloat(stored);
+        payload.timeout = Number.isFinite(parsedTimeout) ? parsedTimeout : null;
+      } else {
+        payload.timeout = null;
+      }
+    }
     return payload;
   }
 
@@ -1277,6 +1361,86 @@
       return;
     }
     aiSection.dataset.ready = 'true';
+    aiSection.setAttribute('aria-hidden', 'true');
+    const summaryRoot = card.querySelector('.ai-summary');
+    const modalBackdrop = card.querySelector('.ai-modal-backdrop');
+    const openSettingsBtn = card.querySelector('.ai-open-settings');
+    const closeSettingsButtons = aiSection.querySelectorAll('.ai-close-settings, .ai-close-settings-secondary');
+    if (modalBackdrop) modalBackdrop.hidden = true;
+
+    function updateSummary() {
+      if (!summaryRoot) return;
+      const data = collectAiPayload(card);
+      const aiGen = card.querySelector('.ai-generator');
+      const width = Number(data.width);
+      const height = Number(data.height);
+      const stepsVal = Number(data.steps);
+      const cfgVal = Number(data.cfg_scale);
+      const samplesVal = Number(data.samples);
+      const summaryValues = {
+        model: data.model && data.model.trim() ? data.model : 'Auto',
+        sampler: data.sampler ? data.sampler : 'k_euler',
+        size: `${Number.isFinite(width) ? width : 512}x${Number.isFinite(height) ? height : 512}`,
+        steps: Number.isFinite(stepsVal) ? stepsVal : 30,
+        cfg: Number.isFinite(cfgVal) ? cfgVal : 7.5,
+        samples: Number.isFinite(samplesVal) ? samplesVal : 1,
+        loras: (data.loras || []).length,
+        post: (data.post_processing || []).length,
+        save: data.save_output ? 'Yes' : 'Temp',
+      };
+      let timeoutValue = null;
+      if (data.timeout !== undefined && data.timeout !== null && data.timeout !== '') {
+        const parsed = parseFloat(data.timeout);
+        if (Number.isFinite(parsed)) timeoutValue = parsed;
+      } else if (aiGen && aiGen.dataset.timeout !== undefined) {
+        const stored = aiGen.dataset.timeout;
+        if (stored) {
+          const parsed = parseFloat(stored);
+          if (Number.isFinite(parsed)) timeoutValue = parsed;
+        }
+      }
+      if (aiGen) {
+        if (Number.isFinite(timeoutValue)) {
+          aiGen.dataset.timeout = String(timeoutValue);
+        } else {
+          aiGen.dataset.timeout = '';
+        }
+      }
+      const timeoutLabel = Number.isFinite(timeoutValue) && timeoutValue > 0 ? timeoutValue : 'No limit';
+      const mapping = {
+        '.ai-summary-model': summaryValues.model,
+        '.ai-summary-sampler': summaryValues.sampler,
+        '.ai-summary-size': summaryValues.size,
+        '.ai-summary-steps': summaryValues.steps,
+        '.ai-summary-cfg': summaryValues.cfg,
+        '.ai-summary-samples': summaryValues.samples,
+        '.ai-summary-loras': summaryValues.loras,
+        '.ai-summary-post': summaryValues.post,
+        '.ai-summary-save': summaryValues.save,
+        '.ai-summary-timeout': timeoutLabel,
+      };
+      Object.entries(mapping).forEach(([selector, value]) => {
+        const el = summaryRoot.querySelector(selector);
+        if (el) el.textContent = value;
+      });
+    }
+
+    aiSummaryUpdaters.set(card, updateSummary);
+    updateSummary();
+
+    if (openSettingsBtn) {
+      openSettingsBtn.addEventListener('click', () => {
+        updateSummary();
+        openAiSettings(card);
+      });
+    }
+    if (closeSettingsButtons.length) {
+      closeSettingsButtons.forEach(btn => btn.addEventListener('click', () => closeAiSettings(card)));
+    }
+    if (modalBackdrop) {
+      modalBackdrop.addEventListener('click', () => closeAiSettings(card));
+    }
+
     const modeSelect = card.querySelector('.mode-select');
     const promptInput = card.querySelector('.ai-prompt-input');
     if (promptInput) {
@@ -1294,6 +1458,7 @@
     if (samplerSelect) {
       samplerSelect.addEventListener('change', e => {
         saveSettings(streamId, { ai_settings: { sampler: e.target.value } });
+        updateSummary();
       });
     }
     const seedInput = card.querySelector('.ai-seed-input');
@@ -1321,6 +1486,7 @@
       });
       modelSelect.addEventListener('change', e => {
         saveSettings(streamId, { ai_settings: { model: e.target.value } });
+        updateSummary();
       });
     }
     const loraSection = card.querySelector('.ai-lora-section');
@@ -1339,6 +1505,7 @@
         const val = parseFloat(e.target.value);
         if (!Number.isFinite(val)) return;
         saveSettings(streamId, { ai_settings: { [key]: val } });
+        updateSummary();
       });
     }
 
@@ -1347,6 +1514,7 @@
       if (!input) return;
       input.addEventListener('change', e => {
         saveSettings(streamId, { ai_settings: { [key]: e.target.checked } });
+        updateSummary();
       });
     }
 
@@ -1357,11 +1525,13 @@
         const raw = (e.target.value || '').trim();
         if (!raw) {
           saveSettings(streamId, { ai_settings: { [key]: null } });
+          updateSummary();
           return;
         }
         const parsed = parser(raw);
         if (Number.isNaN(parsed)) return;
         saveSettings(streamId, { ai_settings: { [key]: parsed } });
+        updateSummary();
       });
     }
 
@@ -1487,6 +1657,7 @@
       const loras = gatherLoras(card);
       saveSettings(streamId, { ai_settings: { loras } });
       updateLoraAddState();
+      updateSummary();
     }
 
     function bindLoraRow(row) {
@@ -1532,6 +1703,7 @@
     if (saveOutput) {
       saveOutput.addEventListener('change', e => {
         saveSettings(streamId, { ai_settings: { save_output: e.target.checked } });
+        updateSummary();
       });
     }
     const nsfw = card.querySelector('.ai-nsfw');
@@ -1557,6 +1729,7 @@
       postProcChecks.forEach(chk => {
         chk.addEventListener('change', () => {
           saveSettings(streamId, { ai_settings: { post_processing: gatherPostProcessing(card) } });
+          updateSummary();
         });
       });
     }
@@ -1565,6 +1738,7 @@
       if (addLoraBtn) {
         addLoraBtn.addEventListener('click', () => {
           appendEmptyLoraRow();
+          updateSummary();
         });
       }
       if (loraSearchBtn) {
@@ -1585,16 +1759,20 @@
       }
       updateLoraAddState();
     }
-    const generateBtn = card.querySelector('.ai-generate-btn');
-    if (generateBtn) {
-      generateBtn.addEventListener('click', async () => {
+    const generateButtons = card.querySelectorAll('.ai-generate-btn');
+    const setGenerateDisabled = disabled => {
+      generateButtons.forEach(btn => { btn.disabled = !!disabled; });
+    };
+    if (generateButtons.length) {
+      const handleGenerate = async () => {
         const payload = collectAiPayload(card);
         if (!payload.prompt || !payload.prompt.trim()) {
           showNotification('Prompt is required for AI generation');
           if (promptInput) promptInput.focus();
           return;
         }
-        generateBtn.disabled = true;
+        updateSummary();
+        setGenerateDisabled(true);
         renderAiStatus(card, { status: 'queued' }, { status: 'queued' });
         try {
           const res = await fetch(`/ai/generate/${encodeURIComponent(streamId)}`, {
@@ -1607,7 +1785,7 @@
             const note = data.error || `Request failed (${res.status})`;
             showNotification(note);
             renderAiStatus(card, { status: 'error', message: note }, { status: 'error', message: note });
-            generateBtn.disabled = false;
+            setGenerateDisabled(false);
             return;
           }
           if (data.job) {
@@ -1621,9 +1799,10 @@
           console.error('AI generate failed', err);
           showNotification('AI generation failed to start');
           renderAiStatus(card, { status: 'error', message: 'Request failed' }, { status: 'error', message: 'Request failed' });
-          generateBtn.disabled = false;
+          setGenerateDisabled(false);
         }
-      });
+      };
+      generateButtons.forEach(btn => btn.addEventListener('click', handleGenerate));
     }
 
     const resultsEl = card.querySelector('.ai-results');
@@ -1663,14 +1842,33 @@
       if (data.status === 'success') {
         showNotification(`Updated settings for ${streamId}`);
         const card = document.querySelector(`.stream-card[data-stream="${streamId}"]`);
-        if (card && data.new_config.selected_image !== undefined) {
-          const selectedPath = data.new_config.selected_image || "";
-          const disp = card.querySelector('.selected-image-display');
-          if (disp) disp.textContent = selectedPath || "None";
-          const aiResults = card.querySelector('.ai-results');
-          if (aiResults) {
-            highlightAiSelection(aiResults, selectedPath);
+        if (card) {
+          if (data.new_config && data.new_config.selected_image !== undefined) {
+            const selectedPath = data.new_config.selected_image || "";
+            const disp = card.querySelector('.selected-image-display');
+            if (disp) disp.textContent = selectedPath || "None";
+            const aiResults = card.querySelector('.ai-results');
+            if (aiResults) {
+              highlightAiSelection(aiResults, selectedPath);
+            }
           }
+          const aiSettings = data.new_config && data.new_config.ai_settings;
+          if (aiSettings) {
+            const aiSection = card.querySelector('.ai-generator');
+            if (aiSection) {
+              const timeoutValue = aiSettings.timeout;
+              if (timeoutValue !== undefined && timeoutValue !== null) {
+                const numericTimeout = Number(timeoutValue);
+                if (Number.isFinite(numericTimeout) && numericTimeout > 0) {
+                  aiSection.dataset.timeout = String(numericTimeout);
+                } else {
+                  aiSection.dataset.timeout = '';
+                }
+              }
+            }
+          }
+          const updater = aiSummaryUpdaters.get(card);
+          if (updater) updater();
         }
       } else {
         console.error(data.error || 'Unknown error updating settings.');
@@ -1693,7 +1891,17 @@
     if (urlDiv) urlDiv.style.display = (mode === 'livestream') ? '' : 'none';
     if (imagePicker) imagePicker.style.display = (mode === 'specific') ? '' : 'none';
     const aiSection = card.querySelector('.ai-generator');
-    if (aiSection) aiSection.style.display = (mode === 'ai') ? '' : 'none';
+    const aiSummary = card.querySelector('.ai-summary');
+    if (mode === 'ai') {
+      if (aiSummary) aiSummary.style.display = '';
+      if (aiSection && !card.classList.contains('ai-settings-open')) aiSection.setAttribute('aria-hidden', 'true');
+    } else {
+      if (aiSummary) aiSummary.style.display = 'none';
+      if (aiSection) aiSection.setAttribute('aria-hidden', 'true');
+      closeAiSettings(card);
+    }
+    const summaryUpdater = aiSummaryUpdaters.get(card);
+    if (summaryUpdater) summaryUpdater();
     if (selectedRow) selectedRow.style.display = (mode === 'specific' || mode === 'ai') ? '' : 'none';
     if (folderRow) folderRow.style.display = (mode === 'livestream' || mode === 'ai') ? 'none' : '';
     // Only show YT options if URL looks like YouTube
