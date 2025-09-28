@@ -38,6 +38,7 @@
     </select>
     <label for="mosaic-cols-input" id="mosaic-cols-label" style="display: {% if mosaic_settings.layout == 'grid' %}inline{% else %}none{% endif %};">Cols</label>
     <input id="mosaic-cols-input" type="number" min="1" max="6" value="{{ mosaic_settings.cols }}" style="width: 4.5rem; display: {% if mosaic_settings.layout == 'grid' %}inline-block{% else %}none{% endif %};" />
+    <label class="toggle inline" style="margin-left: .75rem;" title="Hide folders and filenames containing 'nsfw'"><input type="checkbox" id="nsfw-filter-toggle" {% if nsfw_filter_enabled %}checked{% endif %}><span class="toggle-switch"></span><span class="toggle-label">Hide NSFW</span></label>
   </div>
 
   <div id="dashboard-grid" class="dashboard-grid">
@@ -72,9 +73,13 @@
         <!-- Folder Selection -->
         <div class="form-row folder-row" {% if conf.mode == 'livestream' %} style="display:none;" {% endif %}>
           <label for="folder-{{ stream_id }}">Folder</label>
-          <select id="folder-{{ stream_id }}" class="folder-select" data-stream="{{ stream_id }}" title="{{ conf.folder }}">
+          {% set current_folder = conf.folder if conf.folder else 'all' %}
+          <select id="folder-{{ stream_id }}" class="folder-select" data-stream="{{ stream_id }}" data-current-folder="{{ current_folder }}" title="{{ current_folder }}">
+            {% if nsfw_filter_enabled and current_folder and 'nsfw' in current_folder|lower %}
+              <option value="__filtered__" data-filtered="true" title="{{ current_folder }}" selected>Filtered ({{ current_folder }})</option>
+            {% endif %}
             {% for f in subfolders %}
-              <option value="{{ f }}" title="{{ f }}" {% if conf.folder == f %} selected {% endif %}>{{ f }}</option>
+              <option value="{{ f }}" title="{{ f }}" {% if current_folder == f %} selected {% endif %}>{{ f }}</option>
             {% endfor %}
           </select>
         </div>
@@ -413,6 +418,7 @@
   const openMosaicBtn = document.getElementById('open-mosaic');
   const mosaicLayoutSel = document.getElementById('mosaic-layout-select');
   const mosaicColsInput = document.getElementById('mosaic-cols-input');
+  const nsfwToggle = document.getElementById('nsfw-filter-toggle');
   
   // Group Manager elements
   const groupTiles = document.getElementById('group-tiles');
@@ -466,6 +472,111 @@
     mosaicColsInput.addEventListener('change', saveMosaic);
   }
   updateMosaicControlsVisibility();
+
+  function refreshFolderOptions(enabled) {
+    fetch('/folders')
+      .then(r => {
+        if (!r.ok) {
+          throw new Error('Failed to fetch folders');
+        }
+        return r.json();
+      })
+      .then(folders => {
+        if (!Array.isArray(folders)) {
+          return;
+        }
+        const folderSet = new Set(folders);
+        const reloadTargets = [];
+        document.querySelectorAll('.folder-select').forEach(select => {
+          const assigned = select.dataset.currentFolder || 'all';
+          const assignedLower = (assigned || '').toLowerCase();
+          const shouldShowPlaceholder = Boolean(enabled) && assigned && assignedLower.includes('nsfw') && !folderSet.has(assigned);
+          const frag = document.createDocumentFragment();
+          if (shouldShowPlaceholder) {
+            const placeholder = document.createElement('option');
+            placeholder.value = '__filtered__';
+            placeholder.textContent = `Filtered (${assigned})`;
+            placeholder.title = assigned;
+            placeholder.dataset.filtered = 'true';
+            placeholder.selected = true;
+            frag.appendChild(placeholder);
+          }
+          folders.forEach(f => {
+            const opt = document.createElement('option');
+            opt.value = f;
+            opt.title = f;
+            opt.textContent = f;
+            if (!shouldShowPlaceholder && assigned === f) {
+              opt.selected = true;
+            }
+            frag.appendChild(opt);
+          });
+          select.replaceChildren(frag);
+          if (shouldShowPlaceholder) {
+            select.value = '__filtered__';
+            select.title = assigned;
+            select.dataset.currentFolder = assigned;
+          } else if (folderSet.has(assigned)) {
+            select.value = assigned;
+            select.dataset.currentFolder = assigned;
+          } else {
+            const fallback = folders[0] || 'all';
+            select.value = fallback;
+            select.dataset.currentFolder = fallback;
+          }
+          const selectedOption = select.options[select.selectedIndex];
+          if (selectedOption) {
+            select.title = selectedOption.title || selectedOption.textContent || select.value;
+          } else {
+            select.title = select.value || assigned;
+          }
+          const cardEl = select.closest('.stream-card');
+          const streamIdAttr = cardEl ? cardEl.dataset.stream : null;
+          const effectiveFolder = select.value === '__filtered__' ? (select.dataset.currentFolder || 'all') : (select.value || 'all');
+          if (streamIdAttr) {
+            reloadTargets.push([streamIdAttr, effectiveFolder]);
+          }
+        });
+        reloadTargets.forEach(([sid, folder]) => {
+          loadImagesFor(sid, folder);
+        });
+        showNotification(enabled ? 'NSFW content hidden' : 'NSFW content visible');
+      })
+      .catch(err => {
+        console.error('Failed to refresh folders', err);
+        showNotification('Failed to refresh folder list');
+      });
+  }
+
+  if (nsfwToggle) {
+    nsfwToggle.addEventListener('change', () => {
+      const enabled = nsfwToggle.checked;
+      nsfwToggle.disabled = true;
+      fetch('/nsfw-filter', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled })
+      })
+        .then(r => {
+          if (!r.ok) {
+            throw new Error('Failed to update filter');
+          }
+          return r.json();
+        })
+        .then(data => {
+          const serverEnabled = data && Object.prototype.hasOwnProperty.call(data, 'enabled') ? Boolean(data.enabled) : enabled;
+          nsfwToggle.checked = serverEnabled;
+          nsfwToggle.disabled = false;
+          refreshFolderOptions(serverEnabled);
+        })
+        .catch(err => {
+          console.error('Failed to update NSFW filter', err);
+          nsfwToggle.checked = !enabled;
+          nsfwToggle.disabled = false;
+          showNotification('Failed to update NSFW filter');
+        });
+    });
+  }
 
   // Group manager logic
   function makeEl(tag, attrs = {}, children = []) {
@@ -1982,10 +2093,33 @@
       // Folder change
       const folderSelect = card.querySelector('.folder-select');
       if (folderSelect) {
-        // Ensure tooltip shows full folder name on hover
+        const initialOption = folderSelect.options[folderSelect.selectedIndex];
+        const initialAssigned = folderSelect.dataset.currentFolder || (initialOption ? (initialOption.dataset.filtered === 'true' ? (initialOption.title || 'all') : (initialOption.value || 'all')) : 'all');
+        folderSelect.dataset.currentFolder = initialAssigned || 'all';
+        if (initialOption) {
+          folderSelect.title = initialOption.title || initialOption.textContent || folderSelect.value;
+        } else {
+          folderSelect.title = folderSelect.dataset.currentFolder || 'all';
+        }
         folderSelect.addEventListener('change', e => {
-          const folder = e.target.value;
-          e.target.title = folder;
+          const selectEl = e.target;
+          if (selectEl.value === '__filtered__') {
+            const filteredOption = selectEl.options[selectEl.selectedIndex];
+            selectEl.title = filteredOption ? (filteredOption.title || filteredOption.textContent || selectEl.title) : selectEl.title;
+            return;
+          }
+          const folder = selectEl.value || 'all';
+          selectEl.dataset.currentFolder = folder;
+          const filteredOption = selectEl.querySelector('option[data-filtered="true"]');
+          if (filteredOption) {
+            filteredOption.remove();
+          }
+          const selectedOption = selectEl.options[selectEl.selectedIndex];
+          if (selectedOption) {
+            selectEl.title = selectedOption.title || selectedOption.textContent || folder;
+          } else {
+            selectEl.title = folder;
+          }
           saveSettings(streamId, { folder, selected_image: null });
         });
       }
@@ -2154,7 +2288,7 @@
       const reloadBtn = card.querySelector('.reload-images-btn');
       if (reloadBtn) {
         reloadBtn.addEventListener('click', () => {
-          const folder = folderSelect ? folderSelect.value : 'all';
+          const folder = folderSelect ? (folderSelect.value === '__filtered__' ? (folderSelect.dataset.currentFolder || 'all') : folderSelect.value) : 'all';
           loadImagesFor(streamId, folder);
         });
       }

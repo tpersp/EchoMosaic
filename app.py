@@ -90,6 +90,9 @@ except AttributeError:  # Pillow < 9.1
 
 IMAGE_EXTENSIONS = (".png", ".jpg", ".jpeg", ".gif", ".webp")
 
+NSFW_FILTER_KEY = "_nsfw_filter_enabled"
+NSFW_KEYWORD = "nsfw"
+
 # Cache image paths per folder so we can serve repeated requests without rescanning the disk.
 IMAGE_CACHE: Dict[str, Dict[str, Any]] = {}
 IMAGE_CACHE_LOCK = threading.Lock()
@@ -946,19 +949,69 @@ settings.setdefault("_notes", "")
 # Ensure groups key exists
 settings.setdefault("_groups", {})
 
+# Ensure NSFW filter flag exists
+settings.setdefault(NSFW_FILTER_KEY, False)
+
+
+
+
+def _nsfw_filter_enabled() -> bool:
+    return bool(settings.get(NSFW_FILTER_KEY))
+
+
+
+def _path_contains_nsfw(value: Optional[str]) -> bool:
+    return bool(value and NSFW_KEYWORD in value.lower())
+
+
+
+def _filter_nsfw_images(paths: List[str]) -> List[str]:
+    if not _nsfw_filter_enabled():
+        return paths
+    return [p for p in paths if not _path_contains_nsfw(p)]
+
 
 def get_subfolders():
     subfolders = ["all"]
     if os.path.isdir(IMAGE_DIR):
         for root, dirs, _ in os.walk(IMAGE_DIR):
             for d in dirs:
-                subfolders.append(os.path.relpath(os.path.join(root, d), IMAGE_DIR))
+                rel_path = os.path.relpath(os.path.join(root, d), IMAGE_DIR)
+                normalized = rel_path.replace('\\', '/')
+                if _nsfw_filter_enabled() and _path_contains_nsfw(normalized):
+                    continue
+                subfolders.append(rel_path)
             break
     return subfolders
 
+
+@app.route("/folders", methods=["GET"])
+def folders_collection():
+    return jsonify(get_subfolders())
+
+
+
+def _parse_truthy(value: Any) -> bool:
+    if isinstance(value, str):
+        return value.strip().lower() in ("1", "true", "yes", "on")
+    return bool(value)
+
+
+@app.route("/nsfw-filter", methods=["GET", "POST"])
+def nsfw_filter_settings():
+    if request.method == "GET":
+        return jsonify({"enabled": _nsfw_filter_enabled()})
+    data = request.get_json(silent=True) or {}
+    enabled = _parse_truthy(data.get("enabled"))
+    settings[NSFW_FILTER_KEY] = enabled
+    save_settings(settings)
+    return jsonify({"status": "ok", "enabled": enabled})
+
+
 def list_images(folder="all"):
     """Return cached image paths for the folder, refreshing when necessary."""
-    return refresh_image_cache(folder)
+    images = refresh_image_cache(folder)
+    return _filter_nsfw_images(images)
 
 
 def try_get_hls(original_url):
@@ -1002,6 +1055,7 @@ def dashboard():
         clip_skip_range=STABLE_HORDE_CLIP_SKIP_RANGE,
         strength_range=STABLE_HORDE_STRENGTH_RANGE,
         denoise_range=STABLE_HORDE_DENOISE_RANGE,
+        nsfw_filter_enabled=_nsfw_filter_enabled(),
     )
 
 

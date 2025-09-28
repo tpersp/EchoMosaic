@@ -42,7 +42,7 @@ Because that's what the user would use and see, they would never get to the /str
 If url : "http://<IP>:5000/stream/stream5?size=thumb" does not work with the feature, then we need to add a "quality" dropdown they would allow the user to select between the three sizes, and then it should be handled on the backend.
 Test, confirm or modify so the users stream url works with the "thumb, medium, full" feature.
 
-- [ ] Add folder filter and toggle, so user can choose to enable disable folders containing "nsfw/NSFW" in the name. that way, media from folders containing nsfw does not show up in "all" and nsfw folders does not show up in folder list.
+- [x] Add folder filter and toggle, so user can choose to enable disable folders containing "nsfw/NSFW" in the name. that way, media from folders containing nsfw does not show up in "all" and nsfw folders does not show up in folder list.
 
 - [ ] Add ability to cancel stablehorde queue, if possible. (currently it seems to be stuck in queue, and unable to generate new.)
 
