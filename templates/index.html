@@ -58,6 +58,15 @@
       </label>
     </div>
     <button id="open-mosaic">View Streams</button>
+    <label>Group:
+      <select id="group-select">
+        <option value="" selected disabled>Select a group</option>
+        {% for g in groups %}
+        <option value="{{ g }}">{{ g }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <button id="open-group" {% if not groups or groups|length == 0 %}disabled{% endif %}>Open Group</button>
   </div>
 
   <div id="dashboard-grid" class="dashboard-grid">
@@ -65,7 +74,10 @@
     {% for stream_id, conf in stream_settings.items() %}
     <div class="stream-card" data-stream="{{ stream_id }}">
       <div class="card-header">
-        <h2><a href="{{ url_for('render_stream', stream_id=stream_id) }}" target="_blank">{{ stream_id|capitalize }}</a></h2>
+        <div class="title-with-color">
+          <span class="color-dot" style="background: {{ conf.color if conf.color else '#4fa3ff' }}"></span>
+          <h2><a href="{{ url_for('render_stream', stream_id=stream_id) }}" target="_blank">{{ conf.label if conf.label else stream_id|capitalize }}</a></h2>
+        </div>
         <button class="remove-stream" data-stream="{{ stream_id }}" aria-label="Remove stream {{ stream_id }}">Remove</button>
       </div>
 
@@ -88,6 +100,18 @@
             <option value="specific" {% if conf.mode == 'specific' %} selected {% endif %}>Specific</option>
             <option value="livestream" {% if conf.mode == 'livestream' %} selected {% endif %}>Livestream</option>
           </select>
+        </div>
+
+        <!-- Label -->
+        <div class="form-row">
+          <label for="label-{{ stream_id }}">Label</label>
+          <input id="label-{{ stream_id }}" type="text" class="label-input" data-stream="{{ stream_id }}" value="{{ conf.label if conf.label else stream_id|capitalize }}" placeholder="Display name">
+        </div>
+
+        <!-- Color Tag -->
+        <div class="form-row">
+          <label for="color-{{ stream_id }}">Color</label>
+          <input id="color-{{ stream_id }}" type="color" class="color-input" data-stream="{{ stream_id }}" value="{{ conf.color if conf.color else '#4fa3ff' }}">
         </div>
 
         <!-- Include in Global /stream -->
@@ -162,6 +186,8 @@
   const pipCornerSelect = document.getElementById('pip-corner-select');
   const pipSizeInput = document.getElementById('pip-size-input');
   const openMosaicBtn = document.getElementById('open-mosaic');
+  const openGroupBtn = document.getElementById('open-group');
+  const groupSelect = document.getElementById('group-select');
 
   function showNotification(msg) {
     notification.textContent = msg;
@@ -213,6 +239,18 @@
   if (openMosaicBtn) {
     openMosaicBtn.addEventListener('click', () => {
       window.open('/stream', '_blank');
+    });
+  }
+
+  if (openGroupBtn && groupSelect) {
+    openGroupBtn.addEventListener('click', () => {
+      const name = groupSelect.value;
+      if (!name) return;
+      const url = '/stream/group/' + encodeURIComponent(name);
+      window.open(url, '_blank');
+    });
+    groupSelect.addEventListener('change', () => {
+      openGroupBtn.disabled = !groupSelect.value;
     });
   }
 
@@ -409,6 +447,8 @@
       const muteChk = card.querySelector('.yt-mute-chk');
       const qualityInput = card.querySelector('.yt-quality-input');
       const includeChk = card.querySelector('.include-global-chk');
+      const labelInput = card.querySelector('.label-input');
+      const colorInput = card.querySelector('.color-input');
       if (ccChk) {
         ccChk.addEventListener('change', e => {
           saveSettings(streamId, { yt_cc: e.target.checked });
@@ -427,6 +467,21 @@
       if (includeChk) {
         includeChk.addEventListener('change', e => {
           saveSettings(streamId, { include_in_global: e.target.checked });
+        });
+      }
+      if (labelInput) {
+        labelInput.addEventListener('change', e => {
+          saveSettings(streamId, { label: e.target.value });
+          // update header text immediately
+          const h2 = card.querySelector('.card-header h2 a');
+          if (h2) h2.textContent = e.target.value || streamId;
+        });
+      }
+      if (colorInput) {
+        colorInput.addEventListener('change', e => {
+          saveSettings(streamId, { color: e.target.value });
+          const dot = card.querySelector('.color-dot');
+          if (dot) dot.style.background = e.target.value;
         });
       }
       // Reload images button

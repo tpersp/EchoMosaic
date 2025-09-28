@@ -157,6 +157,8 @@ a {
   gap: 0.5rem;
   margin-bottom: 0.5rem;
 }
+.stream-card .title-with-color { display:flex; align-items:center; gap:0.5rem; }
+.stream-card .color-dot { width: 12px; height: 12px; border-radius: 50%; display:inline-block; border: 1px solid var(--border); }
 .stream-card h2 { margin: 0; font-size: 1.05rem; }
 .stream-card h2 a { color: var(--text); text-decoration: none; }
 .remove-stream {
