@@ -45,6 +45,7 @@ def default_stream_config():
         "folder": "all",
         "selected_image": None,
         "duration": 5,
+        "shuffle": True,
         "stream_url": None,
         "yt_cc": False,
         "yt_mute": True,
@@ -87,6 +88,7 @@ else:
 for k, v in list(settings.items()):
     if not k.startswith("_") and isinstance(v, dict):
         v.setdefault("label", k.capitalize())
+        v.setdefault("shuffle", True)
 
 # Ensure notes key exists
 settings.setdefault("_notes", "")
@@ -234,7 +236,7 @@ def update_stream_settings(stream_id):
     conf = settings[stream_id]
 
     # We'll add new keys for YouTube: "yt_cc", "yt_mute", "yt_quality"
-    for key in ["mode", "folder", "selected_image", "duration", "stream_url",
+    for key in ["mode", "folder", "selected_image", "duration", "shuffle", "stream_url",
                 "yt_cc", "yt_mute", "yt_quality", "label"]:
         if key in data:
             val = data[key]
@@ -301,6 +303,57 @@ def notes_api():
     text = data.get("text", "")
     settings["_notes"] = text
     save_settings(settings)
+    return jsonify({"status": "ok"})
+
+
+# --- Settings export/import ---
+@app.route("/settings/export", methods=["GET"])
+def export_settings():
+    from flask import Response
+    payload = json.dumps(settings, indent=2)
+    return Response(
+        payload,
+        mimetype="application/json",
+        headers={
+            "Content-Disposition": "attachment; filename=echomosaic-settings.json"
+        },
+    )
+
+
+@app.route("/settings/import", methods=["POST"])
+def import_settings():
+    global settings
+    data = None
+    # Accept JSON body or uploaded file
+    if request.files and "file" in request.files:
+        try:
+            data = json.load(request.files["file"])  # type: ignore[arg-type]
+        except Exception:
+            return jsonify({"error": "Invalid JSON file"}), 400
+    else:
+        data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return jsonify({"error": "Invalid settings payload"}), 400
+
+    # Basic normalization similar to startup
+    data.setdefault("_mosaic", default_mosaic_config())
+    data.setdefault("_notes", "")
+    data.setdefault("_groups", {})
+    for k, v in list(data.items()):
+        if not isinstance(k, str) or k.startswith("_"):
+            continue
+        if isinstance(v, dict):
+            v.setdefault("label", k.capitalize())
+            v.setdefault("shuffle", True)
+
+    # Replace current settings and persist
+    settings = data
+    save_settings(settings)
+    try:
+        socketio.emit("streams_changed", {"action": "import"})
+        socketio.emit("mosaic_refresh", {"mosaic": settings.get("_mosaic", {})})
+    except Exception:
+        pass
     return jsonify({"status": "ok"})
 
 @app.route("/stream/live")

@@ -7,6 +7,13 @@
   <link rel="stylesheet" href="{{ url_for('static', filename='streams.css') }}">
 </head>
 <body>
+<header class="top-bar" style="margin-bottom:6px;">
+  <h1 style="font-size:1.1rem; margin:0;">Streams</h1>
+  <nav>
+    <a href="{{ url_for('dashboard') }}">Dashboard</a>
+    <button id="theme-toggle" type="button" style="margin-left:.5rem;">Toggle Theme</button>
+  </nav>
+  </header>
 {% set style_parts = [] %}
 {% if mosaic_settings.layout == 'pip' %}
   {% set _ = style_parts.append('--pip-size: ' ~ (mosaic_settings.pip_size|default(25)) ~ '%') %}
@@ -109,6 +116,21 @@
 </div>
 <script src="https://cdn.socket.io/4.0.1/socket.io.min.js"></script>
 <script>
+// Theme toggle
+(function(){
+  const root = document.documentElement;
+  const btn = document.getElementById('theme-toggle');
+  function apply(theme){ root.setAttribute('data-theme', theme === 'light' ? 'light' : 'dark'); }
+  const saved = localStorage.getItem('theme') || 'dark';
+  apply(saved);
+  if (btn) btn.addEventListener('click', () => {
+    const cur = root.getAttribute('data-theme') === 'light' ? 'light' : 'dark';
+    const next = cur === 'light' ? 'dark' : 'light';
+    apply(next);
+    try { localStorage.setItem('theme', next); } catch(e){}
+  });
+})();
+
 const socket = io();
 ['streams_changed', 'mosaic_refresh'].forEach(ev => {
   socket.on(ev, () => { location.reload(); });

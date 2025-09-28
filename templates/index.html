@@ -10,6 +10,7 @@
   <h1>EchoMosaic</h1>
   <nav>
     <a href="{{ url_for('app_settings') }}">Settings</a>
+    <button id="theme-toggle" type="button" style="margin-left:.5rem;">Toggle Theme</button>
   </nav>
 </header>
 <div class="container">
@@ -79,10 +80,13 @@
 
         
 
-        <!-- Duration -->
+        <!-- Duration + Shuffle (for Random mode) -->
         <div class="form-row duration-container" {% if conf.mode != 'random' %} style="display:none;" {% endif %}>
           <label for="duration-{{ stream_id }}">Duration (sec)</label>
-          <input id="duration-{{ stream_id }}" type="number" class="duration-input" data-stream="{{ stream_id }}" value="{{ conf.duration }}" min="1">
+          <div class="inline-controls">
+            <input id="duration-{{ stream_id }}" type="number" class="duration-input" data-stream="{{ stream_id }}" value="{{ conf.duration }}" min="1" style="max-width: 110px;">
+            <label title="Randomize order each time"><input type="checkbox" class="shuffle-chk" data-stream="{{ stream_id }}" {% if conf.shuffle %} checked {% endif %}> Shuffle</label>
+          </div>
         </div>
 
         <!-- Stream URL -->
@@ -149,6 +153,21 @@
 
 <script src="https://cdn.socket.io/4.0.1/socket.io.min.js"></script>
 <script>
+  // Theme toggle
+  (function(){
+    const root = document.documentElement;
+    const btn = document.getElementById('theme-toggle');
+    function apply(theme){ root.setAttribute('data-theme', theme === 'light' ? 'light' : 'dark'); }
+    const saved = localStorage.getItem('theme') || 'dark';
+    apply(saved);
+    if (btn) btn.addEventListener('click', () => {
+      const cur = root.getAttribute('data-theme') === 'light' ? 'light' : 'dark';
+      const next = cur === 'light' ? 'dark' : 'light';
+      apply(next);
+      try { localStorage.setItem('theme', next); } catch(e){}
+    });
+  })();
+
   const socket = io();
   const notification = document.getElementById('notification');
   const addStreamBtn = document.getElementById('add-stream');
@@ -849,12 +868,14 @@
 
   function toggleVisibilityForMode(card, mode, streamUrl) {
     const durationDiv = card.querySelector('.duration-container');
+    const shuffleChk = card.querySelector('.shuffle-chk');
     const urlDiv = card.querySelector('.stream-url-container');
     const imagePicker = card.querySelector('.image-picker');
     const ytSettingsDiv = card.querySelector('.yt-settings');
     const selectedRow = card.querySelector('.selected-image-row');
     const folderRow = card.querySelector('.folder-row');
     if (durationDiv) durationDiv.style.display = (mode === 'random') ? '' : 'none';
+    if (shuffleChk) shuffleChk.closest('label').style.display = (mode === 'random') ? '' : 'none';
     if (urlDiv) urlDiv.style.display = (mode === 'livestream') ? '' : 'none';
     if (imagePicker) imagePicker.style.display = (mode === 'specific') ? '' : 'none';
     if (selectedRow) selectedRow.style.display = (mode === 'specific') ? '' : 'none';
@@ -959,6 +980,13 @@
       if (durInput) {
         durInput.addEventListener('change', e => {
           saveSettings(streamId, { duration: e.target.value });
+        });
+      }
+      // Shuffle toggle
+      const shuffleChk = card.querySelector('.shuffle-chk');
+      if (shuffleChk) {
+        shuffleChk.addEventListener('change', e => {
+          saveSettings(streamId, { shuffle: e.target.checked });
         });
       }
       // URL helpers: type badge + background embed test + save

@@ -10,6 +10,17 @@
   --accent: #4fa3ff;
 }
 
+/* Light theme overrides */
+:root[data-theme="light"] {
+  --bg: #f6f6f6;
+  --surface: #ffffff;
+  --surface-alt: #f1f1f1;
+  --border: #d8d8d8;
+  --border-hover: #2979ff;
+  --text: #111;
+  --accent: #2979ff;
+}
+
 *, *::before, *::after {
   box-sizing: border-box;
 }
