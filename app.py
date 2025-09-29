@@ -1106,11 +1106,6 @@ settings.setdefault("_notes", "")
 # Ensure groups key exists
 settings.setdefault("_groups", {})
 
-if auto_scheduler is None:
-    auto_scheduler = AutoGenerateScheduler()
-    auto_scheduler.reschedule_all()
-    atexit.register(auto_scheduler.stop)
-
 def _path_contains_nsfw(value: Optional[str]) -> bool:
     return bool(value and NSFW_KEYWORD in value.lower())
 
@@ -1670,6 +1665,12 @@ class AutoGenerateScheduler:
         else:
             self._update_state(stream_id, last_auto_error=None)
             self.reschedule(stream_id, base_time=time.time())
+
+
+if auto_scheduler is None:
+    auto_scheduler = AutoGenerateScheduler()
+    auto_scheduler.reschedule_all()
+    atexit.register(auto_scheduler.stop)
 
 
 @app.route('/ai/models')
