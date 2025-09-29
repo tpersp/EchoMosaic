@@ -1,4 +1,4 @@
-from flask import Flask, jsonify, send_file, request, render_template, redirect, url_for
+﻿from flask import Flask, jsonify, send_file, request, render_template, redirect, url_for
 from flask_socketio import SocketIO
 import json
 import logging
@@ -1519,10 +1519,305 @@ def ai_cancel(stream_id: str):
         response['warning'] = warning
     return jsonify(response)
 
+@app.route("/settings")
+def app_settings():
+    cfg = load_config()
+    return render_template(
+        "settings.html",
+        config=cfg,
+        ai_defaults=default_ai_settings(),
+        ai_fallback_defaults=AI_FALLBACK_DEFAULTS,
+        post_processors=STABLE_HORDE_POST_PROCESSORS,
+        max_loras=STABLE_HORDE_MAX_LORAS,
+    )
+
+
+@app.route("/update_app", methods=["POST"])
+def update_app():
+    cfg = load_config()
+    api_key = cfg.get("API_KEY")
+    if api_key and request.headers.get("X-API-Key") != api_key:
+        return "Unauthorized", 401
+    repo_path = cfg.get("INSTALL_DIR") or os.getcwd()
+    branch = cfg.get("UPDATE_BRANCH", "main")
+    service_name = cfg.get("SERVICE_NAME", "echomosaic.service")
+    if not os.path.isdir(repo_path):
+        return render_template(
+            "update_status.html",
+            message=f"Repository path '{repo_path}' not found. Check INSTALL_DIR in config.json",
+        )
+    # capture current commit before update
+    def git_cmd(args, cwd=repo_path):
+        return subprocess.check_output(["git", *args], cwd=cwd, stderr=subprocess.STDOUT).decode().strip()
+    try:
+        current_commit = git_cmd(["rev-parse", "HEAD"]) 
+    except Exception:
+        current_commit = None
+    try:
+        subprocess.check_call(["git", "fetch"], cwd=repo_path)
+        subprocess.check_call(["git", "checkout", branch], cwd=repo_path)
+        subprocess.check_call(["git", "reset", "--hard", f"origin/{branch}"], cwd=repo_path)
+    except FileNotFoundError:
+        return render_template(
+            "update_status.html",
+            message="Git executable not found. Please install Git to update the application.",
+        )
+    except subprocess.CalledProcessError as e:
+        return render_template("update_status.html", message=f"Git update failed: {e}")
+    # record update history
+    try:
+        new_commit = git_cmd(["rev-parse", "HEAD"]) if 'git_cmd' in locals() else None
+        history_path = os.path.join(repo_path, "update_history.json")
+        history = []
+        if os.path.exists(history_path):
+            with open(history_path, "r") as hf:
+                history = json.load(hf)
+        history.append({
+            "timestamp": datetime.utcnow().isoformat() + "Z",
+            "from": current_commit,
+            "to": new_commit,
+            "branch": branch,
+        })
+        with open(history_path, "w") as hf:
+            json.dump(history[-50:], hf, indent=2)
+    except Exception:
+        pass
+    try:
+        subprocess.check_call([
+            os.path.join(repo_path, "venv", "bin", "pip"),
+            "install",
+            "--upgrade",
+            "-r",
+            "requirements.txt",
+        ], cwd=repo_path)
+    except (subprocess.CalledProcessError, OSError):
+        pass
+    try:
+        subprocess.Popen(["sudo", "systemctl", "restart", service_name])
+    except OSError:
+        pass
+    return render_template(
+        "update_status.html", message="Soft update complete. Restarting service..."
+    )
+
+
+def read_update_info():
+    cfg = load_config()
+    repo_path = cfg.get("INSTALL_DIR") or os.getcwd()
+    branch = cfg.get("UPDATE_BRANCH", "main")
+    info = {"branch": branch}
+    def safe(cmd):
+        try:
+            return subprocess.check_output(cmd, cwd=repo_path, stderr=subprocess.STDOUT).decode().strip()
+        except Exception:
+            return None
+    current = safe(["git", "rev-parse", "HEAD"]) or ""
+    current_short = safe(["git", "rev-parse", "--short", "HEAD"]) or ""
+    current_desc = safe(["git", "log", "-1", "--pretty=%h %s (%cr)"]) or current_short
+    # fetch remote to learn about latest without changing local state
+    _ = safe(["git", "fetch", "--quiet"])  # ignore errors silently
+    remote = safe(["git", "rev-parse", f"origin/{branch}"]) or ""
+    remote_short = remote[:7] if remote else ""
+    remote_desc = safe(["git", "log", "-1", f"origin/{branch}", "--pretty=%h %s (%cr)"]) or remote_short
+    info.update({
+        "current_commit": current,
+        "current_desc": current_desc,
+        "remote_commit": remote,
+        "remote_desc": remote_desc,
+        "update_available": (current and remote and current != remote)
+    })
+    # previous commit from history
+    history_path = os.path.join(repo_path, "update_history.json")
+    if os.path.exists(history_path):
+        try:
+            with open(history_path, "r") as hf:
+                history = json.load(hf)
+            if history:
+                last = history[-1]
+                info["previous_commit"] = last.get("from")
+                # resolve desc for previous
+                prev = last.get("from")
+                if prev:
+                    prev_desc = safe(["git", "log", "-1", prev, "--pretty=%h %s (%cr)"]) or (prev[:7])
+                else:
+                    prev_desc = None
+                info["previous_desc"] = prev_desc
+        except Exception:
+            pass
+    return info
+
+
+@app.route("/update_info", methods=["GET"])
+def update_info():
+    cfg = load_config()
+    api_key = cfg.get("API_KEY")
+    if api_key and request.headers.get("X-API-Key") != api_key:
+        return jsonify({"error": "Unauthorized"}), 401
+    return jsonify(read_update_info())
+
+
+@app.route("/update_history", methods=["GET"])
+def update_history():
+    cfg = load_config()
+    api_key = cfg.get("API_KEY")
+    if api_key and request.headers.get("X-API-Key") != api_key:
+        return jsonify({"error": "Unauthorized"}), 401
+    repo_path = cfg.get("INSTALL_DIR") or os.getcwd()
+    history_path = os.path.join(repo_path, "update_history.json")
+    history = []
+    if os.path.exists(history_path):
+        try:
+            with open(history_path, "r") as hf:
+                history = json.load(hf)
+        except Exception:
+            history = []
+    def srun(cmd):
+        try:
+            return subprocess.check_output(cmd, cwd=repo_path, stderr=subprocess.STDOUT).decode().strip()
+        except Exception:
+            return None
+    enriched = []
+    for ent in history:
+        frm = ent.get("from")
+        to = ent.get("to")
+        frm_desc = srun(["git", "log", "-1", frm, "--pretty=%h %s (%cr)"]) if frm else None
+        to_desc = srun(["git", "log", "-1", to, "--pretty=%h %s (%cr)"]) if to else None
+        enriched.append({
+            "timestamp": ent.get("timestamp"),
+            "branch": ent.get("branch"),
+            "from": frm,
+            "to": to,
+            "from_desc": frm_desc or (frm[:7] if frm else None),
+            "to_desc": to_desc or (to[:7] if to else None),
+        })
+    return jsonify({"history": enriched})
+
+
+@app.route("/rollback_app", methods=["POST"])
+def rollback_app():
+    cfg = load_config()
+    api_key = cfg.get("API_KEY")
+    if api_key and request.headers.get("X-API-Key") != api_key:
+        return "Unauthorized", 401
+    repo_path = cfg.get("INSTALL_DIR") or os.getcwd()
+    service_name = cfg.get("SERVICE_NAME", "echomosaic.service")
+    # decide target: previous commit from history
+    history_path = os.path.join(repo_path, "update_history.json")
+    try:
+        with open(history_path, "r") as hf:
+            history = json.load(hf)
+    except Exception:
+        return render_template("update_status.html", message="No previous version to roll back to."), 400
+    if not history:
+        return render_template("update_status.html", message="No previous version to roll back to."), 400
+    target = history[-1].get("from")
+    if not target:
+        return render_template("update_status.html", message="History does not include a valid commit."), 400
+    try:
+        subprocess.check_call(["git", "reset", "--hard", target], cwd=repo_path)
+    except subprocess.CalledProcessError as e:
+        return render_template("update_status.html", message=f"Rollback failed: {e}")
+    try:
+        subprocess.Popen(["sudo", "systemctl", "restart", service_name])
+    except OSError:
+        pass
+    return render_template("update_status.html", message=f"Rolled back to {target[:7]}. Restarting service...")
+
+
+@app.route("/update")
+def update_view():
+    # A simple progress UI that will kick off the update via fetch
+    cfg = load_config()
+    return render_template("update_progress.html", api_key=cfg.get("API_KEY", ""))
+
+
+@app.route("/health")
+def health():
+    return jsonify({"status": "ok"})
+
+
+# --- Stream groups and metadata ---
+@app.route("/streams_meta", methods=["GET"])
+def streams_meta():
+    meta = {}
+    for k, v in settings.items():
+        if k.startswith("_"):
+            continue
+        meta[k] = {
+            "label": v.get("label", k),
+            "include_in_global": v.get("include_in_global", True),
+        }
+    return jsonify(meta)
+
+
+@app.route("/groups", methods=["GET", "POST"])
+def groups_collection():
+    if request.method == "GET":
+        return jsonify(settings.get("_groups", {}))
+    data = request.get_json(silent=True) or {}
+    name = (data.get("name") or "").strip()
+    streams = data.get("streams") or []
+    layout = data.get("layout") or None
+    if not name:
+        return jsonify({"error": "Name required"}), 400
+    # Prevent reserved name and duplicates (case-insensitive)
+    if name.lower() == "default":
+        return jsonify({"error": "'default' is a reserved group name"}), 400
+    settings.setdefault("_groups", {})
+    for existing in list(settings["_groups"].keys()):
+        if existing.lower() == name.lower() and existing != name:
+            return jsonify({"error": "Group name already exists (case-insensitive)"}), 409
+    cleaned = [s for s in streams if s in settings]
+    # Store as object with streams + optional layout
+    if layout and isinstance(layout, dict):
+        settings["_groups"][name] = {"streams": cleaned, "layout": layout}
+    else:
+        settings["_groups"][name] = cleaned
+    save_settings(settings)
+    try:
+        socketio.emit("mosaic_refresh", {"group": name})
+    except Exception:
+        pass
+    return jsonify({"status": "ok", "group": {name: settings["_groups"][name]}})
+
+
+@app.route("/groups/<name>", methods=["DELETE"])
+def groups_delete(name):
+    if "_groups" in settings and name in settings["_groups"]:
+        del settings["_groups"][name]
+        save_settings(settings)
+        return jsonify({"status": "deleted"})
+    return jsonify({"error": "not found"}), 404
 
 
 
 
+@app.route("/stream/group/<name>")
+def stream_group(name):
+    groups = settings.get("_groups", {})
+    group_def = groups.get(name)
+    if not group_def and name.lower() == "default":
+        # Dynamic default group = all configured streams
+        group_def = [k for k in settings.keys() if not k.startswith("_")]
+    if not group_def:
+        return f"No group '{name}'", 404
+    # Support both legacy list and new object
+    if isinstance(group_def, dict):
+        members = group_def.get("streams", [])
+        g_layout = group_def.get("layout") or {}
+    else:
+        members = list(group_def)
+        g_layout = {}
+    streams = {k: settings[k] for k in members if k in settings}
+    # Build mosaic from group layout if provided, else default
+    mosaic = default_mosaic_config()
+    if g_layout:
+        # safe merge
+        for k in ["layout", "cols", "rows", "pip_main", "pip_pip", "pip_corner", "pip_size", "focus_mode", "focus_pos"]:
+            if k in g_layout:
+                mosaic[k] = g_layout[k]
+    return render_template("streams.html", stream_settings=streams, mosaic_settings=mosaic)
 
-
+if __name__ == "__main__":
+    socketio.run(app, host="0.0.0.0", port=5000, debug=True)
 
