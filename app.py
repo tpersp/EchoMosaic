@@ -1792,6 +1792,56 @@ def groups_delete(name):
 
 
 
+@app.route("/stream/live")
+def stream_live():
+    stream_id = request.args.get("stream_id", "").strip()
+    if stream_id not in settings:
+        return jsonify({"error": f"No stream '{stream_id}' found"}), 404
+
+    stream_url = settings[stream_id].get("stream_url", "")
+    if not stream_url:
+        return jsonify({"error": "No live stream URL configured"}), 404
+
+    if "youtube.com" in stream_url or "youtu.be" in stream_url:
+        embed_id = None
+        if "watch?v=" in stream_url:
+            parts = stream_url.split("watch?v=")[1].split("&")[0].split("#")[0]
+            embed_id = parts
+        elif "youtu.be/" in stream_url:
+            embed_id = stream_url.split("youtu.be/")[1].split("?")[0].split("&")[0]
+        return jsonify({
+            "embed_type": "youtube",
+            "embed_id": embed_id,
+            "hls_url": None,
+            "original_url": stream_url
+        })
+
+    if "twitch.tv" in stream_url:
+        embed_id = stream_url.split("twitch.tv/")[1].split("/")[0]
+        return jsonify({
+            "embed_type": "twitch",
+            "embed_id": embed_id,
+            "hls_url": None,
+            "original_url": stream_url
+        })
+
+    hls_link = try_get_hls(stream_url)
+    if hls_link:
+        return jsonify({
+            "embed_type": "hls",
+            "embed_id": None,
+            "hls_url": hls_link,
+            "original_url": stream_url
+        })
+
+    return jsonify({
+        "embed_type": "iframe",
+        "embed_id": None,
+        "hls_url": None,
+        "original_url": stream_url
+    })
+
+
 @app.route("/stream/group/<name>")
 def stream_group(name):
     groups = settings.get("_groups", {})
