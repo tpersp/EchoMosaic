@@ -1964,6 +1964,23 @@ def notes():
     return jsonify({"status": "saved"})
 
 
+def _send_image_response(path: Union[str, Path]):
+    """Return an image response with consistent caching headers."""
+    abs_path = os.fspath(path)
+    stat = os.stat(abs_path)
+    etag_source = f"{stat.st_mtime_ns}-{stat.st_size}".encode("utf-8")
+    etag_value = generate_etag(etag_source)
+    response = send_file(
+        abs_path,
+        conditional=True,
+        max_age=IMAGE_CACHE_TIMEOUT,
+        etag=etag_value,
+    )
+    # Long-lived cache headers let browsers reuse thumbnails/originals without redownloading.
+    # max_age mirrors Flask's cache_timeout value for forward compatibility.
+    response.headers["Cache-Control"] = f"public, max-age={IMAGE_CACHE_CONTROL_MAX_AGE}"
+    return response
+
 @app.route("/stream/image/<path:image_path>")
 def serve_image(image_path):
     full_path = Path(IMAGE_DIR_PATH) / image_path
@@ -2000,4 +2017,5 @@ def stream_group(name):
 
 if __name__ == "__main__":
     socketio.run(app, host="0.0.0.0", port=5000, debug=True)
+
 
