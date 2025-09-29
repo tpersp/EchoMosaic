@@ -24,7 +24,7 @@ try:
 except Exception:
     requests = None
 
-from stablehorde import StableHorde, StableHordeError
+from stablehorde import StableHorde, StableHordeError, StableHordeCancelled
 
 app = Flask(__name__, static_folder="static", static_url_path="/static")
 socketio = SocketIO(app)
@@ -644,6 +644,7 @@ except Exception as exc:  # pragma: no cover - defensive during optional setup
 
 ai_jobs_lock = threading.Lock()
 ai_jobs: Dict[str, Dict[str, Any]] = {}
+ai_job_controls: Dict[str, Dict[str, Any]] = {}
 ai_model_cache: Dict[str, Any] = {"timestamp": 0.0, "data": []}
 
 
@@ -713,6 +714,9 @@ def _record_job_progress(stream_id: str, stage: str, payload: Dict[str, Any]) ->
         elif stage == 'timeout':
             job['status'] = 'timeout'
             job['message'] = 'Timed out waiting for Stable Horde'
+        elif stage == 'cancelled':
+            job['status'] = 'cancelled'
+            job['message'] = str(payload.get('message') or 'Cancelled by user')
         elif stage == 'completed':
             job['status'] = 'completed'
         ai_jobs[stream_id] = job
@@ -720,7 +724,7 @@ def _record_job_progress(stream_id: str, stage: str, payload: Dict[str, Any]) ->
     _emit_ai_update(stream_id, current_state, job=job)
 
 
-def _run_ai_generation(stream_id: str, options: Dict[str, Any]) -> None:
+def _run_ai_generation(stream_id: str, options: Dict[str, Any], cancel_event: Optional[threading.Event] = None) -> None:
     prompt = str(options.get('prompt') or '').strip()
     if not prompt:
         _update_ai_state(stream_id, {
@@ -730,9 +734,35 @@ def _run_ai_generation(stream_id: str, options: Dict[str, Any]) -> None:
         }, persist=True)
         with ai_jobs_lock:
             ai_jobs.pop(stream_id, None)
+            ai_job_controls.pop(stream_id, None)
         return
 
     persist = bool(options.get('save_output', AI_DEFAULT_PERSIST))
+    if cancel_event and cancel_event.is_set():
+        message = 'Cancelled by user'
+        job_snapshot = None
+        with ai_jobs_lock:
+            current_job = ai_jobs.get(stream_id)
+            if current_job:
+                job_snapshot = dict(current_job)
+                job_snapshot['status'] = 'cancelled'
+                job_snapshot['message'] = message
+                ai_jobs[stream_id] = job_snapshot
+            ai_job_controls.pop(stream_id, None)
+        state = _update_ai_state(
+            stream_id,
+            {
+                'status': 'cancelled',
+                'message': message,
+                'error': None,
+                'persisted': persist,
+            },
+            persist=True,
+        )
+        _emit_ai_update(stream_id, state, job_snapshot)
+        with ai_jobs_lock:
+            ai_jobs.pop(stream_id, None)
+        return
     target_root = _ensure_dir((AI_OUTPUT_ROOT if persist else AI_TEMP_ROOT) / stream_id)
 
     def _status_callback(stage: str, payload: Dict[str, Any]) -> None:
@@ -833,6 +863,34 @@ def _run_ai_generation(stream_id: str, options: Dict[str, Any]) -> None:
             output_dir=target_root if persist else None,
             status_callback=_status_callback,
         )
+    except StableHordeCancelled as exc:
+        logger.info('Stable Horde job for %s cancelled: %s', stream_id, exc)
+        message = 'Cancelled by user'
+        job_snapshot = None
+        with ai_jobs_lock:
+            current_job = ai_jobs.get(stream_id)
+            if current_job:
+                job_snapshot = dict(current_job)
+                job_snapshot['status'] = 'cancelled'
+                job_snapshot['message'] = message
+                ai_jobs[stream_id] = job_snapshot
+            ai_job_controls.pop(stream_id, None)
+        state = _update_ai_state(
+            stream_id,
+            {
+                'status': 'cancelled',
+                'message': message,
+                'error': None,
+                'persisted': persist,
+            },
+            persist=True,
+        )
+        _emit_ai_update(stream_id, state, job_snapshot)
+        if not persist:
+            _cleanup_temp_outputs(stream_id)
+        with ai_jobs_lock:
+            ai_jobs.pop(stream_id, None)
+        return
     except StableHordeError as exc:
         logger.warning('Stable Horde job for %s failed: %s', stream_id, exc)
         _record_job_progress(stream_id, 'fault', {'message': str(exc)})
@@ -848,6 +906,7 @@ def _run_ai_generation(stream_id: str, options: Dict[str, Any]) -> None:
         )
         with ai_jobs_lock:
             ai_jobs.pop(stream_id, None)
+            ai_job_controls.pop(stream_id, None)
         return
     except Exception as exc:  # pragma: no cover - defensive logging
         logger.exception('Unexpected Stable Horde failure for %s: %s', stream_id, exc)
@@ -864,6 +923,7 @@ def _run_ai_generation(stream_id: str, options: Dict[str, Any]) -> None:
         )
         with ai_jobs_lock:
             ai_jobs.pop(stream_id, None)
+            ai_job_controls.pop(stream_id, None)
         return
 
     images: List[Dict[str, Any]] = []
@@ -924,6 +984,7 @@ def _run_ai_generation(stream_id: str, options: Dict[str, Any]) -> None:
     _record_job_progress(stream_id, 'completed', {'job_id': result.job_id})
     with ai_jobs_lock:
         ai_jobs.pop(stream_id, None)
+        ai_job_controls.pop(stream_id, None)
 
 
 settings = load_settings()
@@ -1131,6 +1192,7 @@ def delete_stream(stream_id):
     if stream_id in settings:
         with ai_jobs_lock:
             ai_jobs.pop(stream_id, None)
+            ai_job_controls.pop(stream_id, None)
         _cleanup_temp_outputs(stream_id)
         settings.pop(stream_id)
         save_settings(settings)
@@ -1366,6 +1428,7 @@ def ai_generate(stream_id: str):
     previous_state = conf.get(AI_STATE_KEY) or {}
     previous_images = list(previous_state.get('images') or [])
     previous_selected = conf.get('selected_image')
+    cancel_event = threading.Event()
     with ai_jobs_lock:
         if stream_id in ai_jobs:
             return jsonify({'error': 'Generation already in progress'}), 409
@@ -1374,7 +1437,9 @@ def ai_generate(stream_id: str):
             'job_id': None,
             'started': time.time(),
             'persisted': persist,
+            'cancel_requested': False,
         }
+        ai_job_controls[stream_id] = {'cancel_event': cancel_event}
     if not persist:
         _cleanup_temp_outputs(stream_id)
     conf['mode'] = AI_MODE
@@ -1397,660 +1462,67 @@ def ai_generate(stream_id: str):
         logger.debug('Socket refresh emit failed: %s', exc)
     job_options = dict(ai_settings)
     job_options['prompt'] = prompt
-    worker = threading.Thread(target=_run_ai_generation, args=(stream_id, job_options), daemon=True)
+    worker = threading.Thread(target=_run_ai_generation, args=(stream_id, job_options, cancel_event), daemon=True)
+    with ai_jobs_lock:
+        controls = ai_job_controls.get(stream_id)
+        if controls is not None:
+            controls['thread'] = worker
+            controls['cancel_event'] = cancel_event
     worker.start()
     return jsonify({'status': 'queued', 'state': conf[AI_STATE_KEY], 'job': ai_jobs[stream_id]})
 
-
-@app.route("/mosaic-settings", methods=["POST"])
-def update_mosaic_settings():
-    data = request.json or {}
-    layout = data.get("layout", "grid")
-    cols = int(data.get("cols", settings.get("_mosaic", {}).get("cols", 2)))
-    rows_val = data.get("rows", settings.get("_mosaic", {}).get("rows"))
-    try:
-        rows = int(rows_val) if rows_val is not None else None
-    except (TypeError, ValueError):
-        rows = None
-    mosaic = {"layout": layout, "cols": cols, "rows": rows}
-    if layout == "pip":
-        mosaic.update({
-            "pip_main": data.get("pip_main"),
-            "pip_pip": data.get("pip_pip"),
-            "pip_corner": data.get("pip_corner", "bottom-right"),
-            "pip_size": int(data.get("pip_size", 25)),
-        })
-    settings["_mosaic"] = mosaic
-    save_settings(settings)
-    socketio.emit("mosaic_refresh", {"mosaic": settings["_mosaic"]})
-    return jsonify({"status": "success", "mosaic": settings["_mosaic"]})
-
-def _send_image_response(path: Union[str, Path]):
-    """Return an image response with consistent caching headers."""
-    abs_path = os.fspath(path)
-    stat = os.stat(abs_path)
-    etag_source = f"{stat.st_mtime_ns}-{stat.st_size}".encode("utf-8")
-    etag_value = generate_etag(etag_source)
-    response = send_file(
-        abs_path,
-        conditional=True,
-        max_age=IMAGE_CACHE_TIMEOUT,
-        etag=etag_value,
-    )
-    # Long-lived cache headers let browsers reuse thumbnails/originals without redownloading.
-    # max_age mirrors Flask's cache_timeout value for forward compatibility.
-    response.headers["Cache-Control"] = f"public, max-age={IMAGE_CACHE_CONTROL_MAX_AGE}"
-    return response
-
-
-def _generate_thumbnail(source_path: str, destination: Path, max_width: Optional[int], max_height: Optional[int]) -> None:
-    """Create a thumbnail bounded by the requested dimensions and store it on disk."""
-    with Image.open(source_path) as img:
-        if getattr(img, "is_animated", False):
-            raise ValueError("Animated images are not resized to preserve animation frames")
-        img_format = img.format
-        working = img.copy()
-        bound_width = max_width or img.width
-        bound_height = max_height or img.height
-        working.thumbnail((bound_width, bound_height), resample=IMAGE_THUMBNAIL_FILTER)
-        save_kwargs = {}
-        if img_format:
-            save_kwargs["format"] = img_format
-        working.save(destination, **save_kwargs)
-
-
-@app.route("/stream/image/<path:filename>")
-def serve_stream_image(filename):
-    full_path = os.path.join(IMAGE_DIR, filename)
-    if not os.path.exists(full_path):
-        return jsonify({"error": f"File {filename} not found"}), 404
-
-    # Optional sizing parameters let clients request cached thumbnails instead of full-resolution images.
-    size_param = (request.args.get("size") or "").strip().lower()
-    requested_width = request.args.get("width", type=int)
-    requested_height = request.args.get("height", type=int)
-
-    for dim_name, value in (("width", requested_width), ("height", requested_height)):
-        if value is not None and value <= 0:
-            return jsonify({"error": f"{dim_name} must be a positive integer"}), 400
-
-    target_width: Optional[int] = None
-    target_height: Optional[int] = None
-    thumbnail_key: Optional[str] = None
-
-    if requested_width or requested_height:
-        target_width = requested_width
-        target_height = requested_height
-        thumbnail_key = f"{target_width or 'auto'}x{target_height or 'auto'}"
-    elif size_param:
-        if size_param not in THUMBNAIL_SIZE_PRESETS:
-            return jsonify({"error": f"Unsupported size '{size_param}'"}), 400
-        preset = THUMBNAIL_SIZE_PRESETS[size_param]
-        # size=full maps to None so we fall back to the original image.
-        if preset is not None:
-            target_width, target_height = preset
-            thumbnail_key = size_param
-
-    if thumbnail_key:
-        thumbnail_root = THUMBNAIL_CACHE_DIR / thumbnail_key
-        thumbnail_path = thumbnail_root / filename
-        if not thumbnail_path.exists():
-            os.makedirs(thumbnail_path.parent, exist_ok=True)
-            try:
-                _generate_thumbnail(full_path, thumbnail_path, target_width, target_height)
-            except Exception:
-                logger.exception("Failed to generate thumbnail for %s", filename)
-                if thumbnail_path.exists():
-                    try:
-                        thumbnail_path.unlink()
-                    except OSError:
-                        pass
-                return _send_image_response(full_path)
-        return _send_image_response(thumbnail_path)
-
-    return _send_image_response(full_path)
-
-
-@app.route("/notes", methods=["GET", "POST"])
-def notes_api():
-    """Simple API to store and retrieve dashboard notes server-side."""
-    if request.method == "GET":
-        return jsonify({"text": settings.get("_notes", "")})
-    data = request.get_json(silent=True) or {}
-    text = data.get("text", "")
-    settings["_notes"] = text
-    save_settings(settings)
-    return jsonify({"status": "ok"})
-
-
-# --- Settings export/import ---
-@app.route("/settings/export", methods=["GET"])
-def export_settings():
-    from flask import Response
-    payload = json.dumps(settings, indent=2)
-    return Response(
-        payload,
-        mimetype="application/json",
-        headers={
-            "Content-Disposition": "attachment; filename=echomosaic-settings.json"
+@app.route('/ai/cancel/<stream_id>', methods=['POST'])
+def ai_cancel(stream_id: str):
+    if stable_horde_client is None:
+        return jsonify({'error': 'Stable Horde client is not configured'}), 503
+    conf = settings.get(stream_id)
+    if not conf:
+        return jsonify({'error': f"No stream '{stream_id}' found"}), 404
+    ensure_ai_defaults(conf)
+    with ai_jobs_lock:
+        job = ai_jobs.get(stream_id)
+        controls = ai_job_controls.get(stream_id)
+        if not job:
+            return jsonify({'error': 'No active AI generation to cancel'}), 404
+        status = (job.get('status') or '').lower()
+        if status in {'completed', 'error', 'timeout', 'cancelled'}:
+            return jsonify({'error': 'Job already finished'}), 409
+        job = dict(job)
+        job['cancel_requested'] = True
+        job['status'] = 'cancelling'
+        job['message'] = 'Cancellation requested'
+        ai_jobs[stream_id] = job
+        cancel_event = controls.get('cancel_event') if controls else None
+    if cancel_event:
+        cancel_event.set()
+    state = _update_ai_state(
+        stream_id,
+        {
+            'status': 'cancelling',
+            'message': 'Cancellation requested',
+            'error': None,
+            'persisted': bool(job.get('persisted')),
         },
+        persist=True,
     )
-
-
-@app.route("/settings/import", methods=["POST"])
-def import_settings():
-    global settings
-    data = None
-    # Accept JSON body or uploaded file
-    if request.files and "file" in request.files:
+    _emit_ai_update(stream_id, state, job)
+    warning = None
+    job_id = job.get('job_id')
+    if job_id:
         try:
-            data = json.load(request.files["file"])  # type: ignore[arg-type]
-        except Exception:
-            return jsonify({"error": "Invalid JSON file"}), 400
-    else:
-        data = request.get_json(silent=True)
-    if not isinstance(data, dict):
-        return jsonify({"error": "Invalid settings payload"}), 400
-
-    # Basic normalization similar to startup
-    data.setdefault("_mosaic", default_mosaic_config())
-    data.setdefault("_notes", "")
-    data.setdefault("_groups", {})
-    for k, v in list(data.items()):
-        if not isinstance(k, str) or k.startswith("_"):
-            continue
-        if isinstance(v, dict):
-            v.setdefault("label", k.capitalize())
-            v.setdefault("shuffle", True)
-
-    # Replace current settings and persist
-    settings = data
-    save_settings(settings)
-    try:
-        socketio.emit("streams_changed", {"action": "import"})
-        socketio.emit("mosaic_refresh", {"mosaic": settings.get("_mosaic", {})})
-    except Exception:
-        pass
-    return jsonify({"status": "ok"})
-
-@app.route("/stream/live")
-def stream_live():
-    stream_id = request.args.get("stream_id", "").strip()
-    if stream_id not in settings:
-        return jsonify({"error": f"No stream '{stream_id}' found"}), 404
-
-    stream_url = settings[stream_id].get("stream_url", "")
-    if not stream_url:
-        return jsonify({"error": "No live stream URL configured"}), 404
-
-    # 1) Check YouTube
-    if "youtube.com" in stream_url or "youtu.be" in stream_url:
-        embed_id = None
-        if "watch?v=" in stream_url:
-            parts = stream_url.split("watch?v=")[1].split("&")[0].split("#")[0]
-            embed_id = parts
-        elif "youtu.be/" in stream_url:
-            embed_id = stream_url.split("youtu.be/")[1].split("?")[0].split("&")[0]
-
-        return jsonify({
-            "embed_type": "youtube",
-            "embed_id": embed_id,
-            "hls_url": None,
-            "original_url": stream_url
-        })
-
-    # 2) Check Twitch
-    if "twitch.tv" in stream_url:
-        embed_id = stream_url.split("twitch.tv/")[1].split("/")[0]
-        return jsonify({
-            "embed_type": "twitch",
-            "embed_id": embed_id,
-            "hls_url": None,
-            "original_url": stream_url
-        })
-
-    # 3) Attempt HLS
-    hls_link = try_get_hls(stream_url)
-    if hls_link:
-        return jsonify({
-            "embed_type": "hls",
-            "embed_id": None,
-            "hls_url": hls_link,
-            "original_url": stream_url
-        })
-
-    # 4) fallback
-    return jsonify({
-        "embed_type": "iframe",
-        "embed_id": None,
-        "hls_url": None,
-        "original_url": stream_url
-    })
-
-
-def _classify_embed_target(url: str):
-    """Return (kind, test_url) for a given input URL matching how we embed.
-    kind: 'youtube' | 'twitch' | 'hls' | 'website'
-    test_url: the URL we should probe for embeddability.
-    """
-    u = (url or "").strip()
-    lu = u.lower()
-    # YouTube: use the embed endpoint which is iframe-friendly
-    if "youtube.com" in lu or "youtu.be/" in lu:
-        vid = None
-        if "watch?v=" in u:
-            try:
-                vid = u.split("watch?v=")[1].split("&")[0].split("#")[0]
-            except Exception:
-                vid = None
-        elif "youtu.be/" in u:
-            try:
-                vid = u.split("youtu.be/")[1].split("?")[0].split("&")[0]
-            except Exception:
-                vid = None
-        if vid:
-            return "youtube", f"https://www.youtube.com/embed/{vid}"
-        # Fallback: treat generic YouTube URL as embeddable via player
-        return "youtube", "https://www.youtube.com/embed/"
-    # Twitch: use the player endpoint
-    if "twitch.tv" in lu:
-        try:
-            channel = u.split("twitch.tv/")[1].split("/")[0]
-        except Exception:
-            channel = ""
-        return "twitch", f"https://player.twitch.tv/?channel={channel}"
-    # HLS/DASH
-    if lu.endswith(".m3u8") or lu.endswith(".mpd"):
-        return "hls", u
-    return "website", u
-
-
-@app.route("/test_embed", methods=["POST"])
-def test_embed():
-    data = request.get_json(silent=True) or {}
-    url = (data.get("url") or "").strip()
-    # Validate URL shape
-    try:
-        parsed = urlparse(url)
-    except Exception:
-        return jsonify({"status": "not_valid", "note": "Not valid"})
-    if not parsed.scheme or not parsed.netloc or parsed.scheme not in ("http", "https"):
-        return jsonify({"status": "not_valid", "note": "Not valid"})
-
-    kind, target = _classify_embed_target(url)
-
-    # For YouTube/Twitch, assume OK because we embed via their player endpoints
-    if kind in ("youtube", "twitch"):
-        return jsonify({"status": "ok", "note": "OK", "final_url": target, "kind": kind})
-
-    if requests is None:
-        return jsonify({"status": "ok", "note": "OK", "final_url": target})
-
-    def check_headers(headers):
-        xf = (headers.get("x-frame-options") or headers.get("X-Frame-Options") or "").lower()
-        if xf in ("deny", "sameorigin"):
-            return False, "X-Frame-Options"
-        csp = headers.get("content-security-policy") or headers.get("Content-Security-Policy")
-        if csp:
-            csp_l = csp.lower()
-            if "frame-ancestors" in csp_l:
-                # conservatively mark not showable unless wildcard present
-                fa = csp_l.split("frame-ancestors", 1)[1]
-                # Stop at semicolon
-                fa = fa.split(";", 1)[0]
-                if "'none'" in fa or ("*" not in fa and "http" not in fa and "https" not in fa and "'self'" not in fa):
-                    return False, "CSP frame-ancestors"
-        return True, None
-
-    try:
-        # Try HEAD first, then fall back to GET for servers that don't support it
-        resp = requests.head(target, allow_redirects=True, timeout=6)
-        if resp.status_code >= 400 or resp.status_code in (405, 501):
-            resp = requests.get(target, allow_redirects=True, timeout=8, stream=True)
-        ok_headers, reason = check_headers(resp.headers or {})
-        if resp.status_code >= 400:
-            return jsonify({"status": "unreachable", "http_status": resp.status_code, "note": "Unreachable"})
-        if not ok_headers:
-            return jsonify({"status": "not_showable", "http_status": resp.status_code, "note": "Not showable"})
-        return jsonify({"status": "ok", "http_status": resp.status_code, "note": "OK", "final_url": str(resp.url)})
-    except requests.exceptions.RequestException:
-        return jsonify({"status": "unreachable", "note": "Unreachable"})
-
-@app.route("/images", methods=["GET"])
-def get_images():
-    """Return cached images, optionally slicing via offset/limit query params."""
-    folder = request.args.get("folder", "all")
-    limit_arg = request.args.get("limit")
-    offset_arg = request.args.get("offset")
-
-    try:
-        offset = int(offset_arg) if offset_arg is not None else 0
-        limit = int(limit_arg) if limit_arg is not None else None
-    except (TypeError, ValueError):
-        return jsonify({"error": "limit and offset must be integers"}), 400
-
-    if offset < 0 or (limit is not None and limit < 0):
-        return jsonify({"error": "limit and offset must be non-negative"}), 400
-
-    hide_nsfw = _parse_truthy(request.args.get("hide_nsfw"))
-    images = list_images(folder, hide_nsfw=hide_nsfw)
-    if limit_arg is not None or offset_arg is not None:
-        # Only slice when pagination is explicitly requested to preserve legacy behaviour.
-        end = offset + limit if limit is not None else None
-        images = images[offset:end]
-
-    return jsonify(images)
-
-
-@app.route("/images/random", methods=["GET"])
-def get_random_image():
-    """Return a random image path from the cached folder listing."""
-    folder = request.args.get("folder", "all")
-    hide_nsfw = _parse_truthy(request.args.get("hide_nsfw"))
-    images = list_images(folder, hide_nsfw=hide_nsfw)
-    if not images:
-        return jsonify({"error": "No images found"}), 404
-    return jsonify({"path": random.choice(images)})
-
-
-@app.route("/settings")
-def app_settings():
-    cfg = load_config()
-    return render_template(
-        "settings.html",
-        config=cfg,
-        ai_defaults=default_ai_settings(),
-        ai_fallback_defaults=AI_FALLBACK_DEFAULTS,
-        post_processors=STABLE_HORDE_POST_PROCESSORS,
-        max_loras=STABLE_HORDE_MAX_LORAS,
-    )
-
-
-@app.route("/update_app", methods=["POST"])
-def update_app():
-    cfg = load_config()
-    api_key = cfg.get("API_KEY")
-    if api_key and request.headers.get("X-API-Key") != api_key:
-        return "Unauthorized", 401
-    repo_path = cfg.get("INSTALL_DIR") or os.getcwd()
-    branch = cfg.get("UPDATE_BRANCH", "main")
-    service_name = cfg.get("SERVICE_NAME", "echomosaic.service")
-    if not os.path.isdir(repo_path):
-        return render_template(
-            "update_status.html",
-            message=f"Repository path '{repo_path}' not found. Check INSTALL_DIR in config.json",
-        )
-    # capture current commit before update
-    def git_cmd(args, cwd=repo_path):
-        return subprocess.check_output(["git", *args], cwd=cwd, stderr=subprocess.STDOUT).decode().strip()
-    try:
-        current_commit = git_cmd(["rev-parse", "HEAD"]) 
-    except Exception:
-        current_commit = None
-    try:
-        subprocess.check_call(["git", "fetch"], cwd=repo_path)
-        subprocess.check_call(["git", "checkout", branch], cwd=repo_path)
-        subprocess.check_call(["git", "reset", "--hard", f"origin/{branch}"], cwd=repo_path)
-    except FileNotFoundError:
-        return render_template(
-            "update_status.html",
-            message="Git executable not found. Please install Git to update the application.",
-        )
-    except subprocess.CalledProcessError as e:
-        return render_template("update_status.html", message=f"Git update failed: {e}")
-    # record update history
-    try:
-        new_commit = git_cmd(["rev-parse", "HEAD"]) if 'git_cmd' in locals() else None
-        history_path = os.path.join(repo_path, "update_history.json")
-        history = []
-        if os.path.exists(history_path):
-            with open(history_path, "r") as hf:
-                history = json.load(hf)
-        history.append({
-            "timestamp": datetime.utcnow().isoformat() + "Z",
-            "from": current_commit,
-            "to": new_commit,
-            "branch": branch,
-        })
-        with open(history_path, "w") as hf:
-            json.dump(history[-50:], hf, indent=2)
-    except Exception:
-        pass
-    try:
-        subprocess.check_call([
-            os.path.join(repo_path, "venv", "bin", "pip"),
-            "install",
-            "--upgrade",
-            "-r",
-            "requirements.txt",
-        ], cwd=repo_path)
-    except (subprocess.CalledProcessError, OSError):
-        pass
-    try:
-        subprocess.Popen(["sudo", "systemctl", "restart", service_name])
-    except OSError:
-        pass
-    return render_template(
-        "update_status.html", message="Soft update complete. Restarting service..."
-    )
-
-
-def read_update_info():
-    cfg = load_config()
-    repo_path = cfg.get("INSTALL_DIR") or os.getcwd()
-    branch = cfg.get("UPDATE_BRANCH", "main")
-    info = {"branch": branch}
-    def safe(cmd):
-        try:
-            return subprocess.check_output(cmd, cwd=repo_path, stderr=subprocess.STDOUT).decode().strip()
-        except Exception:
-            return None
-    current = safe(["git", "rev-parse", "HEAD"]) or ""
-    current_short = safe(["git", "rev-parse", "--short", "HEAD"]) or ""
-    current_desc = safe(["git", "log", "-1", "--pretty=%h %s (%cr)"]) or current_short
-    # fetch remote to learn about latest without changing local state
-    _ = safe(["git", "fetch", "--quiet"])  # ignore errors silently
-    remote = safe(["git", "rev-parse", f"origin/{branch}"]) or ""
-    remote_short = remote[:7] if remote else ""
-    remote_desc = safe(["git", "log", "-1", f"origin/{branch}", "--pretty=%h %s (%cr)"]) or remote_short
-    info.update({
-        "current_commit": current,
-        "current_desc": current_desc,
-        "remote_commit": remote,
-        "remote_desc": remote_desc,
-        "update_available": (current and remote and current != remote)
-    })
-    # previous commit from history
-    history_path = os.path.join(repo_path, "update_history.json")
-    if os.path.exists(history_path):
-        try:
-            with open(history_path, "r") as hf:
-                history = json.load(hf)
-            if history:
-                last = history[-1]
-                info["previous_commit"] = last.get("from")
-                # resolve desc for previous
-                prev = last.get("from")
-                if prev:
-                    prev_desc = safe(["git", "log", "-1", prev, "--pretty=%h %s (%cr)"]) or (prev[:7])
-                else:
-                    prev_desc = None
-                info["previous_desc"] = prev_desc
-        except Exception:
-            pass
-    return info
-
-
-@app.route("/update_info", methods=["GET"])
-def update_info():
-    cfg = load_config()
-    api_key = cfg.get("API_KEY")
-    if api_key and request.headers.get("X-API-Key") != api_key:
-        return jsonify({"error": "Unauthorized"}), 401
-    return jsonify(read_update_info())
-
-
-@app.route("/update_history", methods=["GET"])
-def update_history():
-    cfg = load_config()
-    api_key = cfg.get("API_KEY")
-    if api_key and request.headers.get("X-API-Key") != api_key:
-        return jsonify({"error": "Unauthorized"}), 401
-    repo_path = cfg.get("INSTALL_DIR") or os.getcwd()
-    history_path = os.path.join(repo_path, "update_history.json")
-    history = []
-    if os.path.exists(history_path):
-        try:
-            with open(history_path, "r") as hf:
-                history = json.load(hf)
-        except Exception:
-            history = []
-    def srun(cmd):
-        try:
-            return subprocess.check_output(cmd, cwd=repo_path, stderr=subprocess.STDOUT).decode().strip()
-        except Exception:
-            return None
-    enriched = []
-    for ent in history:
-        frm = ent.get("from")
-        to = ent.get("to")
-        frm_desc = srun(["git", "log", "-1", frm, "--pretty=%h %s (%cr)"]) if frm else None
-        to_desc = srun(["git", "log", "-1", to, "--pretty=%h %s (%cr)"]) if to else None
-        enriched.append({
-            "timestamp": ent.get("timestamp"),
-            "branch": ent.get("branch"),
-            "from": frm,
-            "to": to,
-            "from_desc": frm_desc or (frm[:7] if frm else None),
-            "to_desc": to_desc or (to[:7] if to else None),
-        })
-    return jsonify({"history": enriched})
-
-
-@app.route("/rollback_app", methods=["POST"])
-def rollback_app():
-    cfg = load_config()
-    api_key = cfg.get("API_KEY")
-    if api_key and request.headers.get("X-API-Key") != api_key:
-        return "Unauthorized", 401
-    repo_path = cfg.get("INSTALL_DIR") or os.getcwd()
-    service_name = cfg.get("SERVICE_NAME", "echomosaic.service")
-    # decide target: previous commit from history
-    history_path = os.path.join(repo_path, "update_history.json")
-    try:
-        with open(history_path, "r") as hf:
-            history = json.load(hf)
-    except Exception:
-        return render_template("update_status.html", message="No previous version to roll back to."), 400
-    if not history:
-        return render_template("update_status.html", message="No previous version to roll back to."), 400
-    target = history[-1].get("from")
-    if not target:
-        return render_template("update_status.html", message="History does not include a valid commit."), 400
-    try:
-        subprocess.check_call(["git", "reset", "--hard", target], cwd=repo_path)
-    except subprocess.CalledProcessError as e:
-        return render_template("update_status.html", message=f"Rollback failed: {e}")
-    try:
-        subprocess.Popen(["sudo", "systemctl", "restart", service_name])
-    except OSError:
-        pass
-    return render_template("update_status.html", message=f"Rolled back to {target[:7]}. Restarting service...")
-
-
-@app.route("/update")
-def update_view():
-    # A simple progress UI that will kick off the update via fetch
-    cfg = load_config()
-    return render_template("update_progress.html", api_key=cfg.get("API_KEY", ""))
-
-
-@app.route("/health")
-def health():
-    return jsonify({"status": "ok"})
-
-
-# --- Stream groups and metadata ---
-@app.route("/streams_meta", methods=["GET"])
-def streams_meta():
-    meta = {}
-    for k, v in settings.items():
-        if k.startswith("_"):
-            continue
-        meta[k] = {
-            "label": v.get("label", k),
-            "include_in_global": v.get("include_in_global", True),
-        }
-    return jsonify(meta)
-
-
-@app.route("/groups", methods=["GET", "POST"])
-def groups_collection():
-    if request.method == "GET":
-        return jsonify(settings.get("_groups", {}))
-    data = request.get_json(silent=True) or {}
-    name = (data.get("name") or "").strip()
-    streams = data.get("streams") or []
-    layout = data.get("layout") or None
-    if not name:
-        return jsonify({"error": "Name required"}), 400
-    # Prevent reserved name and duplicates (case-insensitive)
-    if name.lower() == "default":
-        return jsonify({"error": "'default' is a reserved group name"}), 400
-    settings.setdefault("_groups", {})
-    for existing in list(settings["_groups"].keys()):
-        if existing.lower() == name.lower() and existing != name:
-            return jsonify({"error": "Group name already exists (case-insensitive)"}), 409
-    cleaned = [s for s in streams if s in settings]
-    # Store as object with streams + optional layout
-    if layout and isinstance(layout, dict):
-        settings["_groups"][name] = {"streams": cleaned, "layout": layout}
-    else:
-        settings["_groups"][name] = cleaned
-    save_settings(settings)
-    try:
-        socketio.emit("mosaic_refresh", {"group": name})
-    except Exception:
-        pass
-    return jsonify({"status": "ok", "group": {name: settings["_groups"][name]}})
-
-
-@app.route("/groups/<name>", methods=["DELETE"])
-def groups_delete(name):
-    if "_groups" in settings and name in settings["_groups"]:
-        del settings["_groups"][name]
-        save_settings(settings)
-        return jsonify({"status": "deleted"})
-    return jsonify({"error": "not found"}), 404
+            stable_horde_client.cancel_job(job_id)
+        except StableHordeError as exc:
+            logger.warning('Stable Horde cancel for %s failed: %s', stream_id, exc)
+            warning = str(exc)
+    response = {'status': 'cancelling'}
+    if warning:
+        response['warning'] = warning
+    return jsonify(response)
 
 
 
 
-@app.route("/stream/group/<name>")
-def stream_group(name):
-    groups = settings.get("_groups", {})
-    group_def = groups.get(name)
-    if not group_def and name.lower() == "default":
-        # Dynamic default group = all configured streams
-        group_def = [k for k in settings.keys() if not k.startswith("_")]
-    if not group_def:
-        return f"No group '{name}'", 404
-    # Support both legacy list and new object
-    if isinstance(group_def, dict):
-        members = group_def.get("streams", [])
-        g_layout = group_def.get("layout") or {}
-    else:
-        members = list(group_def)
-        g_layout = {}
-    streams = {k: settings[k] for k in members if k in settings}
-    # Build mosaic from group layout if provided, else default
-    mosaic = default_mosaic_config()
-    if g_layout:
-        # safe merge
-        for k in ["layout", "cols", "rows", "pip_main", "pip_pip", "pip_corner", "pip_size", "focus_mode", "focus_pos"]:
-            if k in g_layout:
-                mosaic[k] = g_layout[k]
-    return render_template("streams.html", stream_settings=streams, mosaic_settings=mosaic)
 
-if __name__ == "__main__":
-    socketio.run(app, host="0.0.0.0", port=5000, debug=True)
+
+
+

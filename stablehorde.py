@@ -22,6 +22,7 @@ except ImportError as exc:  # pragma: no cover - requests is a hard dependency
 __all__ = [
     "StableHorde",
     "StableHordeError",
+    "StableHordeCancelled",
     "StableHordeResult",
     "StableHordeGeneration",
 ]
@@ -38,6 +39,10 @@ DIMENSION_STEP = 64
 
 class StableHordeError(RuntimeError):
     """Raised when a Stable Horde request fails or returns an error response."""
+
+
+class StableHordeCancelled(StableHordeError):
+    """Raised when a Stable Horde job is cancelled by the caller."""
 
 
 @dataclass
@@ -242,6 +247,7 @@ class StableHorde:
         persist: Optional[bool] = None,
         output_dir: Optional[Union[str, Path]] = None,
         status_callback: Optional[Callable[[str, Dict[str, Any]], None]] = None,
+        cancel_callback: Optional[Callable[[], bool]] = None,
     ) -> StableHordeResult:
         """Generate one or more images from the provided prompt."""
 
@@ -290,6 +296,14 @@ class StableHorde:
 
         _fire_callback(status_callback, "accepted", {"job_id": job_id})
 
+        if cancel_callback and cancel_callback():
+            try:
+                self.cancel_job(job_id)
+            except StableHordeError:
+                pass
+            _fire_callback(status_callback, "cancelled", {"job_id": job_id, "message": "Cancelled before start"})
+            raise StableHordeCancelled(f"Stable Horde job {job_id} cancelled before polling")
+
         persist_flag = self.persist_images if persist is None else bool(persist)
         destination, temp_dir = self._resolve_output_dir(persist_flag, output_dir)
 
@@ -300,6 +314,7 @@ class StableHorde:
             poll_value,
             timeout_value,
             status_callback=status_callback,
+            cancel_callback=cancel_callback,
         )
 
         generations: List[StableHordeGeneration] = []
@@ -421,13 +436,30 @@ class StableHorde:
         poll_interval: float,
         timeout: Optional[float],
         status_callback: Optional[Callable[[str, Dict[str, Any]], None]] = None,
+        cancel_callback: Optional[Callable[[], bool]] = None,
     ) -> Dict[str, Any]:
         poll_value = float(poll_interval) if isinstance(poll_interval, (int, float)) and poll_interval > 0 else self.default_poll_interval
         effective_timeout = self.default_timeout if timeout is None else float(timeout)
         deadline = None
         if effective_timeout and effective_timeout > 0:
             deadline = time.time() + effective_timeout
+
+        cancel_notified = False
+
+        def _check_cancelled() -> None:
+            nonlocal cancel_notified
+            if cancel_callback and cancel_callback():
+                if not cancel_notified:
+                    try:
+                        self.cancel_job(job_id)
+                    except StableHordeError:
+                        pass
+                    _fire_callback(status_callback, "cancelled", {"job_id": job_id, "message": "Cancelled by user"})
+                    cancel_notified = True
+                raise StableHordeCancelled(f"Stable Horde job {job_id} cancelled by caller")
+
         while True:
+            _check_cancelled()
             status = self._request("GET", f"/generate/status/{job_id}")
             _fire_callback(status_callback, "status", {"job_id": job_id, "status": status})
             if status.get("faulted"):

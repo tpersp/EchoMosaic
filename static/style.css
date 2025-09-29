@@ -413,7 +413,23 @@ a {
   border-radius: 4px;
   background: var(--surface-alt);
 }
-.selected-image-row { margin-top: 0.4rem; }
+.selected-image-row {
+  margin-top: 0.4rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  align-items: center;
+}
+
+.selected-image-row strong {
+  flex: 0 0 auto;
+}
+
+.selected-image-display {
+  flex: 1 1 160px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
 
 /* Notepad floating window */
 .notepad {
@@ -602,11 +618,13 @@ a {
   flex-direction: column;
   gap: 0.6rem;
   margin-bottom: 0.75rem;
+  width: 100%;
+  min-width: 0;
 }
 
 .ai-summary-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
   gap: 0.35rem 0.75rem;
   font-size: 0.78rem;
 }
@@ -615,6 +633,7 @@ a {
   display: flex;
   flex-direction: column;
   gap: 0.15rem;
+  min-width: 0;
 }
 
 .ai-summary-label {
@@ -626,6 +645,7 @@ a {
 
 .ai-summary-value {
   font-weight: 600;
+  overflow-wrap: anywhere;
 }
 
 .ai-summary-actions {
@@ -637,6 +657,27 @@ a {
 
 .ai-summary-actions .ai-status {
   margin-left: auto;
+  flex: 1 1 140px;
+  text-align: right;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.ai-cancel-btn {
+  background: var(--danger-color, #d9534f);
+  border-color: var(--danger-color, #d9534f);
+  color: #fff;
+}
+
+.ai-cancel-btn:hover:not(:disabled),
+.ai-cancel-btn:focus-visible:not(:disabled) {
+  background: #c1443b;
+  border-color: #c1443b;
+}
+
+.ai-cancel-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 
 .ai-modal-actions {

@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8"/>
@@ -180,6 +180,7 @@
           <div class="ai-summary-actions">
             <button type="button" class="ai-open-settings" data-stream="{{ stream_id }}">Settings</button>
             <button type="button" class="ai-generate-btn" data-stream="{{ stream_id }}">Queue Images</button>
+            <button type="button" class="ai-cancel-btn" data-stream="{{ stream_id }}" hidden>Cancel</button>
             <span class="ai-status" data-stream="{{ stream_id }}" data-status="{{ ai_state.status or 'idle' }}">{{ ai_state.status|default('idle')|capitalize }}</span>
           </div>
         </div>
@@ -318,6 +319,7 @@
           </div>
           <div class="ai-modal-actions">
             <button type="button" class="ai-generate-btn" data-stream="{{ stream_id }}">Queue Images</button>
+            <button type="button" class="ai-cancel-btn" data-stream="{{ stream_id }}" hidden>Cancel</button>
             <button type="button" class="ai-close-settings-secondary">Close</button>
           </div>
           <div class="ai-results" data-stream="{{ stream_id }}" data-selected="{{ conf.selected_image or '' }}">
@@ -1175,7 +1177,7 @@
     if (data.job) {
       aiActiveJobs.set(streamId, data.job);
       const status = (data.job.status || '').toLowerCase();
-      if (['completed', 'error', 'timeout'].includes(status)) {
+      if (['completed', 'error', 'timeout', 'cancelled'].includes(status)) {
         aiActiveJobs.delete(streamId);
       }
     }
@@ -1336,17 +1338,30 @@
     const status = (jobInfo.status || info.status || 'idle').toLowerCase();
     let label = status.charAt(0).toUpperCase() + status.slice(1);
     const queuePos = jobInfo.queue_position ?? info.queue_position;
-    if (queuePos !== undefined && queuePos !== null) {
+    if (queuePos !== undefined && queuePos !== null && queuePos !== '') {
       label += ` (queue ${queuePos})`;
     }
     const note = jobInfo.message || info.message;
-    if (note && status === 'error') {
+    if (note && ['error', 'timeout', 'cancelled'].includes(status)) {
       label += ` - ${note}`;
+    } else if (status === 'cancelling') {
+      label += note ? ` - ${note}` : '...';
     }
     statusEl.dataset.status = status;
     statusEl.textContent = label;
+    const activeStatuses = ['queued', 'accepted', 'running', 'cancelling'];
     card.querySelectorAll('.ai-generate-btn').forEach(btn => {
-      btn.disabled = ['queued', 'accepted', 'running'].includes(status);
+      btn.disabled = activeStatuses.includes(status);
+    });
+    const cancelButtons = card.querySelectorAll('.ai-cancel-btn');
+    const showCancel = activeStatuses.includes(status);
+    cancelButtons.forEach(btn => {
+      btn.hidden = !showCancel;
+      if (showCancel) {
+        btn.disabled = status === 'cancelling';
+      } else {
+        btn.disabled = false;
+      }
     });
   }
 
@@ -1931,6 +1946,49 @@
       generateButtons.forEach(btn => btn.addEventListener('click', handleGenerate));
     }
 
+    const cancelButtons = card.querySelectorAll('.ai-cancel-btn');
+    const setCancelDisabled = disabled => {
+      cancelButtons.forEach(btn => { btn.disabled = !!disabled; });
+    };
+    if (cancelButtons.length) {
+      const handleCancel = async event => {
+        event.preventDefault();
+        const currentJob = aiActiveJobs.get(streamId) || null;
+        const currentStatus = (currentJob && currentJob.status) || (card.querySelector('.ai-status')?.dataset.status || 'idle');
+        setCancelDisabled(true);
+        try {
+          const res = await fetch(`/ai/cancel/${encodeURIComponent(streamId)}`, { method: 'POST' });
+          let data = null;
+          try {
+            data = await res.json();
+          } catch (parseErr) {
+            data = null;
+          }
+          if (!res.ok || (data && data.error)) {
+            const note = data && (data.error || data.detail) || `Request failed (${res.status})`;
+            showNotification(note);
+            throw new Error(note);
+          }
+          const updatedJob = Object.assign({}, currentJob || {}, { status: 'cancelling', message: 'Cancellation requested', cancel_requested: true });
+          aiActiveJobs.set(streamId, updatedJob);
+          renderAiStatus(card, { status: 'cancelling', message: 'Cancellation requested' }, updatedJob);
+          const label = data && data.status ? `AI ${data.status}` : 'Cancellation requested';
+          showNotification(label);
+          if (data && data.warning) {
+            showNotification(data.warning);
+          }
+        } catch (err) {
+          console.error('AI cancel failed', err);
+          const message = err && err.message ? err.message : 'Failed to cancel job';
+          showNotification(message);
+          setCancelDisabled(false);
+          const revertJob = currentJob ? Object.assign({}, currentJob) : null;
+          renderAiStatus(card, { status: currentStatus, message: revertJob && revertJob.message ? revertJob.message : undefined }, revertJob);
+        }
+      };
+      cancelButtons.forEach(btn => btn.addEventListener('click', handleCancel));
+    }
+
     const resultsEl = card.querySelector('.ai-results');
     if (resultsEl) {
       resultsEl.addEventListener('click', e => {
@@ -2391,4 +2449,7 @@
 </script>
 </body>
 </html>
+
+
+
 
