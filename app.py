@@ -1,6 +1,7 @@
 ﻿from flask import Flask, jsonify, send_file, request, render_template, redirect, url_for
 from flask_socketio import SocketIO
 import json
+import atexit
 import logging
 import os
 import re
@@ -11,7 +12,7 @@ import time
 import secrets
 import random
 from copy import deepcopy
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
 from urllib.parse import urlparse
@@ -64,6 +65,27 @@ AI_TEMP_SUBDIR = "_ai_temp"
 AI_DEFAULT_PERSIST = True
 AI_POLL_INTERVAL = 5.0
 AI_TIMEOUT = 0.0
+
+AUTO_GENERATE_MODES = {"off", "timer", "clock"}
+AUTO_GENERATE_INTERVAL_UNITS = {"minutes": 60.0, "hours": 3600.0}
+AUTO_GENERATE_MIN_INTERVAL_SECONDS = 60.0
+AUTO_GENERATE_DEFAULT_INTERVAL_VALUE = 10.0
+
+class AutoGenerationError(RuntimeError):
+    """Raised when an AI generation queue request cannot be fulfilled."""
+
+
+class AutoGenerationUnavailable(AutoGenerationError):
+    """Raised when Stable Horde is unavailable for generation."""
+
+
+class AutoGenerationPromptMissing(AutoGenerationError):
+    """Raised when a required prompt is missing."""
+
+
+class AutoGenerationBusy(AutoGenerationError):
+    """Raised when a generation job is already active for a stream."""
+
 
 STABLE_HORDE_POST_PROCESSORS = [
     "GFPGAN",
@@ -257,6 +279,10 @@ AI_FALLBACK_DEFAULTS: Dict[str, Any] = {
     "disable_batching": False,
     "allow_downgrade": False,
     "timeout": AI_TIMEOUT,
+    "auto_generate_mode": "off",
+    "auto_generate_interval_value": AUTO_GENERATE_DEFAULT_INTERVAL_VALUE,
+    "auto_generate_interval_unit": "minutes",
+    "auto_generate_clock_time": None,
 }
 
 
@@ -287,6 +313,10 @@ def default_ai_state() -> Dict[str, Any]:
         "persisted": AI_DEFAULT_PERSIST,
         "last_updated": None,
         "error": None,
+        "last_auto_trigger": None,
+        "next_auto_trigger": None,
+        "last_trigger_source": None,
+        "last_auto_error": None,
     }
 
 
@@ -328,6 +358,19 @@ def _ensure_dir(path: Path) -> Path:
     except OSError as exc:
         logger.warning("Unable to ensure directory %s: %s", path, exc)
     return path
+
+
+CLOCK_TIME_PATTERN = re.compile(r"^(?:[01]\d|2[0-3]):[0-5]\d$")
+
+
+def _normalize_clock_time(value: Any) -> Optional[str]:
+    if isinstance(value, str):
+        trimmed = value.strip()
+        if not trimmed:
+            return None
+        if CLOCK_TIME_PATTERN.match(trimmed):
+            return trimmed
+    return None
 
 
 def _sanitize_ai_settings(
@@ -384,6 +427,44 @@ def _sanitize_ai_settings(
             if maybe is None:
                 continue
             current[key] = max(0.0, maybe)
+        elif key == "auto_generate_mode":
+            normalized = value.strip().lower() if isinstance(value, str) else ""
+            if normalized not in AUTO_GENERATE_MODES:
+                fallback = defaults.get(key, "off")
+                if isinstance(fallback, str):
+                    fallback = fallback.strip().lower()
+                else:
+                    fallback = "off"
+                if fallback not in AUTO_GENERATE_MODES:
+                    fallback = "off"
+                normalized = fallback
+            current[key] = normalized
+        elif key == "auto_generate_interval_unit":
+            unit_value = value.strip().lower() if isinstance(value, str) else ""
+            if unit_value not in AUTO_GENERATE_INTERVAL_UNITS:
+                fallback = defaults.get(key, "minutes")
+                if isinstance(fallback, str):
+                    fallback = fallback.strip().lower()
+                else:
+                    fallback = "minutes"
+                if fallback not in AUTO_GENERATE_INTERVAL_UNITS:
+                    fallback = "minutes"
+                unit_value = fallback
+            current[key] = unit_value
+        elif key == "auto_generate_interval_value":
+            maybe = _maybe_float(value)
+            if maybe is None or maybe <= 0:
+                fallback = defaults.get(key, AUTO_GENERATE_DEFAULT_INTERVAL_VALUE)
+                try:
+                    maybe = float(fallback)
+                except (TypeError, ValueError):
+                    maybe = AUTO_GENERATE_DEFAULT_INTERVAL_VALUE
+            current[key] = maybe
+        elif key == "auto_generate_clock_time":
+            normalized = _normalize_clock_time(value)
+            if normalized is None:
+                normalized = _normalize_clock_time(defaults.get(key))
+            current[key] = normalized
         elif key in bool_keys:
             current[key] = _coerce_bool(value, defaults[key])
         elif key == "seed":
@@ -646,6 +727,7 @@ ai_jobs_lock = threading.Lock()
 ai_jobs: Dict[str, Dict[str, Any]] = {}
 ai_job_controls: Dict[str, Dict[str, Any]] = {}
 ai_model_cache: Dict[str, Any] = {"timestamp": 0.0, "data": []}
+auto_scheduler: Optional['AutoGenerateScheduler'] = None
 
 
 def _relative_image_path(path: Union[Path, str]) -> str:
@@ -1024,6 +1106,11 @@ settings.setdefault("_notes", "")
 # Ensure groups key exists
 settings.setdefault("_groups", {})
 
+if auto_scheduler is None:
+    auto_scheduler = AutoGenerateScheduler()
+    auto_scheduler.reschedule_all()
+    atexit.register(auto_scheduler.stop)
+
 def _path_contains_nsfw(value: Optional[str]) -> bool:
     return bool(value and NSFW_KEYWORD in value.lower())
 
@@ -1182,6 +1269,8 @@ def add_stream():
             settings[new_id] = default_stream_config()
             settings[new_id]["label"] = new_id.capitalize()
             save_settings(settings)
+            if auto_scheduler is not None:
+                auto_scheduler.reschedule(new_id)
             socketio.emit("streams_changed", {"action": "added", "stream_id": new_id})
             return jsonify({"stream_id": new_id})
         idx += 1
@@ -1196,6 +1285,8 @@ def delete_stream(stream_id):
         _cleanup_temp_outputs(stream_id)
         settings.pop(stream_id)
         save_settings(settings)
+        if auto_scheduler is not None:
+            auto_scheduler.remove(stream_id)
         socketio.emit("streams_changed", {"action": "deleted", "stream_id": stream_id})
         return jsonify({"status": "deleted"})
     return jsonify({"error": "not found"}), 404
@@ -1271,6 +1362,8 @@ def update_stream_settings(stream_id):
 
     ensure_background_defaults(conf)
     save_settings(settings)
+    if auto_scheduler is not None:
+        auto_scheduler.reschedule(stream_id)
     socketio.emit("refresh", {"stream_id": stream_id, "config": conf})
     return jsonify({"status": "success", "new_config": conf})
 
@@ -1365,6 +1458,220 @@ def ai_loras():
         'browseUrl': 'https://civitai.com/models?types=LORA&sort=Highest%20Rated',
     })
 
+def _queue_ai_generation(stream_id: str, ai_settings: Dict[str, Any], *, trigger_source: str = "manual") -> Dict[str, Any]:
+    if stable_horde_client is None:
+        raise AutoGenerationUnavailable('Stable Horde client is not configured')
+
+    conf = settings.get(stream_id)
+    if not conf:
+        raise AutoGenerationError(f"No stream '{stream_id}' found")
+
+    ensure_ai_defaults(conf)
+    sanitized = _sanitize_ai_settings(ai_settings, conf[AI_SETTINGS_KEY])
+    prompt = str(sanitized.get('prompt') or '').strip()
+    if not prompt:
+        raise AutoGenerationPromptMissing('Prompt is required')
+
+    conf[AI_SETTINGS_KEY] = sanitized
+    conf['_ai_customized'] = not _ai_settings_match_defaults(conf[AI_SETTINGS_KEY])
+    persist = bool(sanitized.get('save_output', AI_DEFAULT_PERSIST))
+
+    previous_state = conf.get(AI_STATE_KEY) or {}
+    previous_images = list(previous_state.get('images') or [])
+    previous_selected = conf.get('selected_image')
+
+    cancel_event = threading.Event()
+    with ai_jobs_lock:
+        if stream_id in ai_jobs:
+            raise AutoGenerationBusy('Generation already in progress')
+        ai_jobs[stream_id] = {
+            'status': 'queued',
+            'job_id': None,
+            'started': time.time(),
+            'persisted': persist,
+            'cancel_requested': False,
+            'trigger': trigger_source,
+        }
+        ai_job_controls[stream_id] = {'cancel_event': cancel_event}
+    if not persist:
+        _cleanup_temp_outputs(stream_id)
+
+    conf['mode'] = AI_MODE
+    if previous_selected:
+        conf['selected_image'] = previous_selected
+
+    conf[AI_STATE_KEY] = default_ai_state()
+    queued_state = conf[AI_STATE_KEY]
+    queued_state.update({
+        'status': 'queued',
+        'message': 'Awaiting workers',
+        'persisted': persist,
+        'images': previous_images,
+        'error': None,
+        'last_trigger_source': trigger_source,
+    })
+    if trigger_source != 'manual':
+        queued_state['last_auto_trigger'] = datetime.utcnow().isoformat() + 'Z'
+    queued_state['last_auto_error'] = None
+
+    save_settings(settings)
+    _emit_ai_update(stream_id, queued_state, job=ai_jobs[stream_id])
+    try:
+        socketio.emit('refresh', {'stream_id': stream_id, 'config': conf})
+    except Exception as exc:  # pragma: no cover
+        logger.debug('Socket refresh emit failed: %s', exc)
+
+    job_options = dict(sanitized)
+    job_options['prompt'] = prompt
+    worker = threading.Thread(target=_run_ai_generation, args=(stream_id, job_options, cancel_event), daemon=True)
+    with ai_jobs_lock:
+        controls = ai_job_controls.get(stream_id)
+        if controls is not None:
+            controls['thread'] = worker
+            controls['cancel_event'] = cancel_event
+    worker.start()
+    return {'status': 'queued', 'state': conf[AI_STATE_KEY], 'job': ai_jobs[stream_id]}
+
+
+class AutoGenerateScheduler:
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._next_run: Dict[str, float] = {}
+        self._stop = threading.Event()
+        self._thread = threading.Thread(target=self._loop, name='AutoGenerateScheduler', daemon=True)
+        self._thread.start()
+
+    def stop(self) -> None:
+        self._stop.set()
+        if self._thread.is_alive():
+            self._thread.join(timeout=2.0)
+
+    def reschedule_all(self) -> None:
+        for stream_id in list(settings.keys()):
+            if stream_id.startswith('_'):
+                continue
+            self.reschedule(stream_id)
+
+    def remove(self, stream_id: str) -> None:
+        with self._lock:
+            self._next_run.pop(stream_id, None)
+        self._update_state(stream_id, next_auto_trigger=None, last_auto_error=None)
+
+    def reschedule(self, stream_id: str, *, base_time: Optional[float] = None) -> None:
+        conf = settings.get(stream_id)
+        if not isinstance(conf, dict):
+            self.remove(stream_id)
+            return
+        ensure_ai_defaults(conf)
+        ai_settings = conf[AI_SETTINGS_KEY]
+        mode_raw = ai_settings.get('auto_generate_mode')
+        mode_value = mode_raw.strip().lower() if isinstance(mode_raw, str) else 'off'
+        if conf.get('mode') != AI_MODE or mode_value not in AUTO_GENERATE_MODES or mode_value == 'off':
+            with self._lock:
+                self._next_run.pop(stream_id, None)
+            self._update_state(stream_id, next_auto_trigger=None, last_auto_error=None)
+            return
+        next_dt = self._compute_next_datetime(conf, mode_value, base_time=base_time)
+        if next_dt is None:
+            with self._lock:
+                self._next_run.pop(stream_id, None)
+            self._update_state(stream_id, next_auto_trigger=None, last_auto_error=None)
+            return
+        with self._lock:
+            self._next_run[stream_id] = next_dt.timestamp()
+        self._update_state(stream_id, next_auto_trigger=next_dt.isoformat())
+
+    def _compute_next_datetime(self, conf: Dict[str, Any], mode_value: str, *, base_time: Optional[float]) -> Optional[datetime]:
+        ai_settings = conf[AI_SETTINGS_KEY]
+        reference_ts = base_time if base_time is not None else time.time()
+        if mode_value == 'timer':
+            interval_value = ai_settings.get('auto_generate_interval_value')
+            try:
+                numeric = float(interval_value)
+            except (TypeError, ValueError):
+                numeric = AUTO_GENERATE_DEFAULT_INTERVAL_VALUE
+            if numeric <= 0:
+                numeric = AUTO_GENERATE_DEFAULT_INTERVAL_VALUE
+            unit_raw = ai_settings.get('auto_generate_interval_unit')
+            unit_value = unit_raw.strip().lower() if isinstance(unit_raw, str) else 'minutes'
+            multiplier = AUTO_GENERATE_INTERVAL_UNITS.get(unit_value, 60.0)
+            interval_seconds = max(AUTO_GENERATE_MIN_INTERVAL_SECONDS, numeric * multiplier)
+            target_ts = reference_ts + interval_seconds
+            return datetime.fromtimestamp(target_ts)
+        if mode_value == 'clock':
+            clock_value = _normalize_clock_time(ai_settings.get('auto_generate_clock_time'))
+            if not clock_value:
+                return None
+            hour, minute = map(int, clock_value.split(':'))
+            base_dt = datetime.fromtimestamp(reference_ts)
+            target = base_dt.replace(hour=hour, minute=minute, second=0, microsecond=0)
+            if target <= base_dt:
+                target += timedelta(days=1)
+            return target
+        return None
+
+    def _update_state(self, stream_id: str, **updates: Any) -> None:
+        conf = settings.get(stream_id)
+        if not isinstance(conf, dict):
+            return
+        ensure_ai_defaults(conf)
+        state = conf[AI_STATE_KEY]
+        changed = False
+        for key, value in updates.items():
+            if state.get(key) != value:
+                state[key] = value
+                changed = True
+        if changed:
+            _emit_ai_update(stream_id, state)
+
+    def _loop(self) -> None:
+        while not self._stop.is_set():
+            now = time.time()
+            due: List[str] = []
+            with self._lock:
+                for stream_id, next_ts in list(self._next_run.items()):
+                    if next_ts <= now:
+                        due.append(stream_id)
+            for stream_id in due:
+                self._trigger_stream(stream_id)
+            self._stop.wait(5.0)
+
+    def _trigger_stream(self, stream_id: str) -> None:
+        conf = settings.get(stream_id)
+        if not isinstance(conf, dict):
+            self.remove(stream_id)
+            return
+        ensure_ai_defaults(conf)
+        ai_settings = conf[AI_SETTINGS_KEY]
+        mode_raw = ai_settings.get('auto_generate_mode')
+        mode_value = mode_raw.strip().lower() if isinstance(mode_raw, str) else 'off'
+        if conf.get('mode') != AI_MODE or mode_value not in AUTO_GENERATE_MODES or mode_value == 'off':
+            self.reschedule(stream_id)
+            return
+        prompt = str(ai_settings.get('prompt') or '').strip()
+        if not prompt:
+            self._update_state(stream_id, last_auto_error='Prompt is required for auto-generation')
+            self.reschedule(stream_id)
+            return
+        try:
+            _queue_ai_generation(stream_id, ai_settings, trigger_source='auto')
+        except AutoGenerationBusy:
+            self._update_state(stream_id, last_auto_error=None)
+            self.reschedule(stream_id, base_time=time.time())
+        except AutoGenerationPromptMissing as exc:
+            self._update_state(stream_id, last_auto_error=str(exc))
+            self.reschedule(stream_id)
+        except AutoGenerationUnavailable as exc:
+            self._update_state(stream_id, last_auto_error=str(exc))
+            self.reschedule(stream_id)
+        except AutoGenerationError as exc:
+            self._update_state(stream_id, last_auto_error=str(exc))
+            self.reschedule(stream_id)
+        else:
+            self._update_state(stream_id, last_auto_error=None)
+            self.reschedule(stream_id, base_time=time.time())
+
+
 @app.route('/ai/models')
 def list_ai_models():
     if stable_horde_client is None:
@@ -1409,8 +1716,6 @@ def ai_status(stream_id: str):
 
 @app.route('/ai/generate/<stream_id>', methods=['POST'])
 def ai_generate(stream_id: str):
-    if stable_horde_client is None:
-        return jsonify({'error': 'Stable Horde client is not configured'}), 503
     conf = settings.get(stream_id)
     if not conf:
         return jsonify({'error': f"No stream '{stream_id}' found"}), 404
@@ -1418,58 +1723,20 @@ def ai_generate(stream_id: str):
     payload = request.get_json(silent=True) or {}
     if not isinstance(payload, dict):
         payload = {}
-    ai_settings = _sanitize_ai_settings(payload, conf[AI_SETTINGS_KEY])
-    prompt = str(ai_settings.get('prompt') or '').strip()
-    if not prompt:
-        return jsonify({'error': 'Prompt is required'}), 400
-    conf[AI_SETTINGS_KEY] = ai_settings
-    conf["_ai_customized"] = not _ai_settings_match_defaults(conf[AI_SETTINGS_KEY])
-    persist = bool(ai_settings.get('save_output', AI_DEFAULT_PERSIST))
-    previous_state = conf.get(AI_STATE_KEY) or {}
-    previous_images = list(previous_state.get('images') or [])
-    previous_selected = conf.get('selected_image')
-    cancel_event = threading.Event()
-    with ai_jobs_lock:
-        if stream_id in ai_jobs:
-            return jsonify({'error': 'Generation already in progress'}), 409
-        ai_jobs[stream_id] = {
-            'status': 'queued',
-            'job_id': None,
-            'started': time.time(),
-            'persisted': persist,
-            'cancel_requested': False,
-        }
-        ai_job_controls[stream_id] = {'cancel_event': cancel_event}
-    if not persist:
-        _cleanup_temp_outputs(stream_id)
-    conf['mode'] = AI_MODE
-    if previous_selected:
-        conf['selected_image'] = previous_selected
-    conf[AI_STATE_KEY] = default_ai_state()
-    queued_state = conf[AI_STATE_KEY]
-    queued_state.update({
-        'status': 'queued',
-        'message': 'Awaiting workers',
-        'persisted': persist,
-        'images': previous_images,
-        'error': None,
-    })
-    save_settings(settings)
-    _emit_ai_update(stream_id, queued_state, job=ai_jobs[stream_id])
     try:
-        socketio.emit('refresh', {'stream_id': stream_id, 'config': conf})
-    except Exception as exc:  # pragma: no cover
-        logger.debug('Socket refresh emit failed: %s', exc)
-    job_options = dict(ai_settings)
-    job_options['prompt'] = prompt
-    worker = threading.Thread(target=_run_ai_generation, args=(stream_id, job_options, cancel_event), daemon=True)
-    with ai_jobs_lock:
-        controls = ai_job_controls.get(stream_id)
-        if controls is not None:
-            controls['thread'] = worker
-            controls['cancel_event'] = cancel_event
-    worker.start()
-    return jsonify({'status': 'queued', 'state': conf[AI_STATE_KEY], 'job': ai_jobs[stream_id]})
+        result = _queue_ai_generation(stream_id, payload, trigger_source='manual')
+    except AutoGenerationPromptMissing as exc:
+        return jsonify({'error': str(exc)}), 400
+    except AutoGenerationBusy as exc:
+        return jsonify({'error': str(exc)}), 409
+    except AutoGenerationUnavailable as exc:
+        return jsonify({'error': str(exc)}), 503
+    except AutoGenerationError as exc:
+        return jsonify({'error': str(exc)}), 400
+    if auto_scheduler is not None:
+        auto_scheduler.reschedule(stream_id, base_time=time.time())
+    return jsonify(result)
+
 
 @app.route('/ai/cancel/<stream_id>', methods=['POST'])
 def ai_cancel(stream_id: str):

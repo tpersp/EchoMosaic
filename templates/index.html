@@ -164,6 +164,19 @@
         </div>
         {% set ai = conf.ai_settings or {} %}
         {% set ai_state = conf.ai_state or {} %}
+        {% set auto_mode = (ai.auto_generate_mode or 'off')|lower %}
+        {% set auto_interval_value = ai.auto_generate_interval_value|default(10) %}
+        {% set auto_interval_str = '{:g}'.format((auto_interval_value|float)) %}
+        {% set auto_interval_unit = (ai.auto_generate_interval_unit or 'minutes')|lower %}
+        {% set auto_clock_time = ai.auto_generate_clock_time or '' %}
+        {% if auto_mode == 'timer' %}
+          {% set auto_unit_label = 'min' if auto_interval_unit == 'minutes' else 'hr' %}
+          {% set auto_label = 'Timer (' ~ auto_interval_str ~ ' ' ~ auto_unit_label ~ ')' %}
+        {% elif auto_mode == 'clock' %}
+          {% set auto_label = 'Clock (' ~ (auto_clock_time if auto_clock_time else '--:--') ~ ')' %}
+        {% else %}
+          {% set auto_label = 'Off' %}
+        {% endif %}
         <div class="ai-summary" data-stream="{{ stream_id }}" {% if conf.mode != 'ai' %} style="display:none;" {% endif %}>
           <div class="ai-summary-grid">
             <div class="ai-summary-item"><span class="ai-summary-label">Model</span><span class="ai-summary-value ai-summary-model">{{ ai.model or 'Auto' }}</span></div>
@@ -176,6 +189,8 @@
             <div class="ai-summary-item"><span class="ai-summary-label">Post</span><span class="ai-summary-value ai-summary-post">{{ (ai.post_processing or [])|length }}</span></div>
             <div class="ai-summary-item"><span class="ai-summary-label">Save</span><span class="ai-summary-value ai-summary-save">{{ 'Yes' if ai.save_output else 'Temp' }}</span></div>
             <div class="ai-summary-item"><span class="ai-summary-label">Timeout</span><span class="ai-summary-value ai-summary-timeout">{{ ai.timeout if ai.timeout and ai.timeout > 0 else 'No limit' }}</span></div>
+            <div class="ai-summary-item"><span class="ai-summary-label">Auto</span><span class="ai-summary-value ai-summary-auto">{{ auto_label }}</span></div>
+            <div class="ai-summary-item"><span class="ai-summary-label">Next</span><span class="ai-summary-value ai-summary-next">{{ ai_state.next_auto_trigger or '&mdash;' }}</span></div>
           </div>
           <div class="ai-summary-actions">
             <button type="button" class="ai-open-settings" data-stream="{{ stream_id }}">Settings</button>
@@ -312,6 +327,36 @@
               <p class="hint">Up to {{ max_loras }} entries. Strength 1.0 is neutral.</p>
             </div>
           </details>
+          <div class="ai-auto-settings" data-stream="{{ stream_id }}">
+            <div class="section-title">Auto Generate</div>
+            <div class="ai-auto-row">
+              <label for="ai-auto-mode-{{ stream_id }}">Mode</label>
+              <select id="ai-auto-mode-{{ stream_id }}" class="ai-auto-mode" data-stream="{{ stream_id }}">
+                <option value="off" {% if auto_mode == 'off' %}selected{% endif %}>Off</option>
+                <option value="timer" {% if auto_mode == 'timer' %}selected{% endif %}>Timer</option>
+                <option value="clock" {% if auto_mode == 'clock' %}selected{% endif %}>Clock</option>
+              </select>
+            </div>
+            <div class="ai-auto-row ai-auto-timer-row" {% if auto_mode != 'timer' %}hidden{% endif %}>
+              <label for="ai-auto-interval-{{ stream_id }}">Every</label>
+              <div class="ai-auto-interval-controls">
+                <input id="ai-auto-interval-{{ stream_id }}" type="number" class="ai-auto-interval" data-stream="{{ stream_id }}" min="0.1" step="0.1" value="{{ auto_interval_str }}">
+                <select class="ai-auto-interval-unit" data-stream="{{ stream_id }}">
+                  <option value="minutes" {% if auto_interval_unit == 'minutes' %}selected{% endif %}>Minutes</option>
+                  <option value="hours" {% if auto_interval_unit == 'hours' %}selected{% endif %}>Hours</option>
+                </select>
+              </div>
+            </div>
+            <div class="ai-auto-row ai-auto-clock-row" {% if auto_mode != 'clock' %}hidden{% endif %}>
+              <label for="ai-auto-clock-{{ stream_id }}">At</label>
+              <input id="ai-auto-clock-{{ stream_id }}" type="time" class="ai-auto-clock" data-stream="{{ stream_id }}" value="{{ auto_clock_time }}">
+            </div>
+            <div class="ai-auto-status">
+              <span class="ai-auto-status-label">Next run:</span>
+              <span class="ai-auto-next">{{ ai_state.next_auto_trigger or '&mdash;' }}</span>
+              <span class="ai-auto-error" {% if not ai_state.last_auto_error %}hidden{% endif %}>{{ ai_state.last_auto_error or '' }}</span>
+            </div>
+          </div>
           <div class="ai-flags">
             <label class="toggle inline"><input type="checkbox" class="ai-save-output" data-stream="{{ stream_id }}" {% if ai.save_output %}checked{% endif %}><span class="toggle-switch"></span><span class="toggle-label">Save to library</span></label>
             <label class="toggle inline"><input type="checkbox" class="ai-nsfw" data-stream="{{ stream_id }}" {% if ai.nsfw %}checked{% endif %}><span class="toggle-switch"></span><span class="toggle-label">Allow NSFW</span></label>
@@ -1330,6 +1375,43 @@
     highlightAiSelection(resultsEl, resultsEl.dataset.selected || '');
   }
 
+  function formatAutoTime(value) {
+    const fallback = '\u2014';
+    if (!value) return fallback;
+    const parsed = new Date(value);
+    if (!Number.isNaN(parsed.getTime())) {
+      const datePart = parsed.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+      const timePart = parsed.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+      return `${datePart} ${timePart}`;
+    }
+    return value || fallback;
+  }
+
+  function updateAutoIndicators(card, state) {
+    if (!card) return;
+    const info = state || {};
+    if (Object.prototype.hasOwnProperty.call(info, 'next_auto_trigger')) {
+      const summaryNext = card.querySelector('.ai-summary-next');
+      const modalNext = card.querySelector('.ai-auto-next');
+      const formatted = formatAutoTime(info.next_auto_trigger);
+      if (summaryNext) summaryNext.textContent = formatted;
+      if (modalNext) modalNext.textContent = formatted;
+    }
+    if (Object.prototype.hasOwnProperty.call(info, 'last_auto_error')) {
+      const errorEl = card.querySelector('.ai-auto-error');
+      if (errorEl) {
+        const message = info.last_auto_error;
+        if (message) {
+          errorEl.textContent = message;
+          errorEl.hidden = false;
+        } else {
+          errorEl.textContent = '';
+          errorEl.hidden = true;
+        }
+      }
+    }
+  }
+
   function renderAiStatus(card, state, job) {
     const statusEl = card.querySelector('.ai-status');
     if (!statusEl) return;
@@ -1363,6 +1445,7 @@
         btn.disabled = false;
       }
     });
+    updateAutoIndicators(card, info);
   }
 
   function gatherPostProcessing(card) {
@@ -1493,6 +1576,25 @@
         payload.timeout = null;
       }
     }
+    const autoModeSelect = card.querySelector('.ai-auto-mode');
+    if (autoModeSelect) {
+      payload.auto_generate_mode = autoModeSelect.value;
+    }
+    const autoIntervalInput = card.querySelector('.ai-auto-interval');
+    if (autoIntervalInput) {
+      const parsedInterval = parseFloat(autoIntervalInput.value);
+      if (!Number.isNaN(parsedInterval)) {
+        payload.auto_generate_interval_value = parsedInterval;
+      }
+    }
+    const autoUnitSelect = card.querySelector('.ai-auto-interval-unit');
+    if (autoUnitSelect) {
+      payload.auto_generate_interval_unit = autoUnitSelect.value;
+    }
+    const autoClockInput = card.querySelector('.ai-auto-clock');
+    if (autoClockInput) {
+      payload.auto_generate_clock_time = autoClockInput.value;
+    }
     return payload;
   }
 
@@ -1507,6 +1609,21 @@
     const modalBackdrop = card.querySelector('.ai-modal-backdrop');
     const openSettingsBtn = card.querySelector('.ai-open-settings');
     const closeSettingsButtons = aiSection.querySelectorAll('.ai-close-settings, .ai-close-settings-secondary');
+    const autoModeSelect = card.querySelector('.ai-auto-mode');
+    const autoTimerRow = card.querySelector('.ai-auto-timer-row');
+    const autoClockRow = card.querySelector('.ai-auto-clock-row');
+    const autoIntervalInput = card.querySelector('.ai-auto-interval');
+    const autoUnitSelect = card.querySelector('.ai-auto-interval-unit');
+    const autoClockInput = card.querySelector('.ai-auto-clock');
+    const updateAutoVisibility = () => {
+      const modeValue = autoModeSelect ? autoModeSelect.value : 'off';
+      if (autoTimerRow) autoTimerRow.hidden = modeValue !== 'timer';
+      if (autoClockRow) autoClockRow.hidden = modeValue !== 'clock';
+      if (autoIntervalInput) autoIntervalInput.disabled = modeValue !== 'timer';
+      if (autoUnitSelect) autoUnitSelect.disabled = modeValue !== 'timer';
+      if (autoClockInput) autoClockInput.disabled = modeValue !== 'clock';
+    };
+    updateAutoVisibility();
     if (modalBackdrop) modalBackdrop.hidden = true;
 
     function updateSummary() {
@@ -1564,8 +1681,63 @@
         const el = summaryRoot.querySelector(selector);
         if (el) el.textContent = value;
       });
+      const autoModeSelect = card.querySelector('.ai-auto-mode');
+      let autoLabel = 'Off';
+      if (autoModeSelect) {
+        const modeValue = autoModeSelect.value;
+        if (modeValue === 'timer') {
+          const intervalInput = card.querySelector('.ai-auto-interval');
+          const unitSelect = card.querySelector('.ai-auto-interval-unit');
+          const unitLabel = unitSelect && unitSelect.value === 'hours' ? 'hr' : 'min';
+          const intervalValue = intervalInput ? parseFloat(intervalInput.value) : NaN;
+          if (!Number.isNaN(intervalValue) && intervalValue > 0) {
+            const rounded = Number(intervalValue.toFixed(2));
+            const display = Number.isInteger(rounded) ? rounded.toString() : rounded.toString();
+            autoLabel = `Timer (${display} ${unitLabel})`;
+          } else {
+            autoLabel = 'Timer';
+          }
+        } else if (modeValue === 'clock') {
+          const clockInput = card.querySelector('.ai-auto-clock');
+          const timeValue = clockInput && clockInput.value ? clockInput.value : '--:--';
+          autoLabel = `Clock (${timeValue})`;
+        }
+      }
+      const autoSummary = summaryRoot.querySelector('.ai-summary-auto');
+      if (autoSummary) autoSummary.textContent = autoLabel;
     }
 
+    if (autoModeSelect) {
+      autoModeSelect.addEventListener('change', e => {
+        updateAutoVisibility();
+        saveSettings(streamId, { ai_settings: { auto_generate_mode: e.target.value } });
+        updateSummary();
+      });
+    }
+    if (autoIntervalInput) {
+      const handleIntervalChange = () => {
+        const value = parseFloat(autoIntervalInput.value);
+        if (Number.isNaN(value) || value <= 0) return;
+        saveSettings(streamId, { ai_settings: { auto_generate_interval_value: value } });
+        updateSummary();
+      };
+      autoIntervalInput.addEventListener('change', handleIntervalChange);
+      autoIntervalInput.addEventListener('blur', handleIntervalChange);
+    }
+    if (autoUnitSelect) {
+      autoUnitSelect.addEventListener('change', e => {
+        saveSettings(streamId, { ai_settings: { auto_generate_interval_unit: e.target.value } });
+        updateSummary();
+      });
+    }
+    if (autoClockInput) {
+      const handleClockChange = () => {
+        saveSettings(streamId, { ai_settings: { auto_generate_clock_time: autoClockInput.value } });
+        updateSummary();
+      };
+      autoClockInput.addEventListener('change', handleClockChange);
+      autoClockInput.addEventListener('blur', handleClockChange);
+    }
     aiSummaryUpdaters.set(card, updateSummary);
     updateSummary();
 
@@ -2079,6 +2251,38 @@
                 }
               }
             }
+            const autoWrapper = card.querySelector('.ai-auto-settings');
+            if (autoWrapper) {
+              const modeSelect = autoWrapper.querySelector('.ai-auto-mode');
+              const intervalInput = autoWrapper.querySelector('.ai-auto-interval');
+              const unitSelect = autoWrapper.querySelector('.ai-auto-interval-unit');
+              const clockInput = autoWrapper.querySelector('.ai-auto-clock');
+              const timerRow = autoWrapper.querySelector('.ai-auto-timer-row');
+              const clockRow = autoWrapper.querySelector('.ai-auto-clock-row');
+              const normalizedMode = typeof aiSettings.auto_generate_mode === 'string' ? aiSettings.auto_generate_mode.toLowerCase() : 'off';
+              if (modeSelect) modeSelect.value = normalizedMode;
+              if (intervalInput && aiSettings.auto_generate_interval_value !== undefined) {
+                const intervalVal = Number(aiSettings.auto_generate_interval_value);
+                if (Number.isFinite(intervalVal)) {
+                  intervalInput.value = Number(intervalVal.toFixed(2)).toString();
+                }
+              }
+              if (unitSelect && typeof aiSettings.auto_generate_interval_unit === 'string') {
+                unitSelect.value = aiSettings.auto_generate_interval_unit.toLowerCase();
+              }
+              if (clockInput && aiSettings.auto_generate_clock_time !== undefined) {
+                clockInput.value = aiSettings.auto_generate_clock_time || '';
+              }
+              const effectiveMode = normalizedMode;
+              if (timerRow) timerRow.hidden = effectiveMode !== 'timer';
+              if (clockRow) clockRow.hidden = effectiveMode !== 'clock';
+              if (intervalInput) intervalInput.disabled = effectiveMode !== 'timer';
+              if (unitSelect) unitSelect.disabled = effectiveMode !== 'timer';
+              if (clockInput) clockInput.disabled = effectiveMode !== 'clock';
+            }
+          }
+          if (data.new_config && data.new_config.ai_state) {
+            updateAutoIndicators(card, data.new_config.ai_state);
           }
           const updater = aiSummaryUpdaters.get(card);
           if (updater) updater();
