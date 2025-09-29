@@ -1848,6 +1848,130 @@ def legacy_stream_live():
     return stream_live()
 
 
+def _classify_embed_target(url: str):
+    """Return (kind, test_url) for a given input URL matching how we embed."""
+    u = (url or "").strip()
+    lu = u.lower()
+    if "youtube.com" in lu or "youtu.be/" in lu:
+        vid = None
+        if "watch?v=" in u:
+            try:
+                vid = u.split("watch?v=")[1].split("&")[0].split("#")[0]
+            except Exception:
+                vid = None
+        elif "youtu.be/" in u:
+            try:
+                vid = u.split("youtu.be/")[1].split("?")[0].split("&")[0]
+            except Exception:
+                vid = None
+        if vid:
+            return "youtube", f"https://www.youtube.com/embed/{vid}"
+        return "youtube", "https://www.youtube.com/embed/"
+    if "twitch.tv" in lu:
+        try:
+            channel = u.split("twitch.tv/")[1].split("/")[0]
+        except Exception:
+            channel = ""
+        return "twitch", f"https://player.twitch.tv/?channel={channel}"
+    if lu.endswith(".m3u8") or lu.endswith(".mpd"):
+        return "hls", u
+    return "website", u
+
+
+@app.route("/test_embed", methods=["POST"])
+def test_embed():
+    data = request.get_json(silent=True) or {}
+    url = (data.get("url") or "").strip()
+    try:
+        parsed = urlparse(url)
+    except Exception:
+        return jsonify({"status": "not_valid", "note": "Not valid"})
+    if not parsed.scheme or not parsed.netloc or parsed.scheme not in ("http", "https"):
+        return jsonify({"status": "not_valid", "note": "Not valid"})
+
+    kind, target = _classify_embed_target(url)
+    if kind in ("youtube", "twitch"):
+        return jsonify({"status": "ok", "note": "OK", "final_url": target, "kind": kind})
+
+    if requests is None:
+        return jsonify({"status": "ok", "note": "OK", "final_url": target})
+
+    def check_headers(headers):
+        xf = (headers.get("x-frame-options") or headers.get("X-Frame-Options") or "").lower()
+        if xf in ("deny", "sameorigin"):
+            return False, "X-Frame-Options"
+        csp = headers.get("content-security-policy") or headers.get("Content-Security-Policy")
+        if csp:
+            csp_l = csp.lower()
+            if "frame-ancestors" in csp_l:
+                fa = csp_l.split("frame-ancestors", 1)[1]
+                fa = fa.split(";", 1)[0]
+                if "'none'" in fa or ("*" not in fa and "http" not in fa and "https" not in fa and "'self'" not in fa):
+                    return False, "CSP frame-ancestors"
+        return True, None
+
+    try:
+        resp = requests.head(target, allow_redirects=True, timeout=6)
+        if resp.status_code >= 400 or resp.status_code in (405, 501):
+            resp = requests.get(target, allow_redirects=True, timeout=8, stream=True)
+        ok_headers, _ = check_headers(resp.headers or {})
+        if resp.status_code >= 400:
+            return jsonify({"status": "unreachable", "http_status": resp.status_code, "note": "Unreachable"})
+        if not ok_headers:
+            return jsonify({"status": "not_showable", "http_status": resp.status_code, "note": "Not showable"})
+        return jsonify({"status": "ok", "http_status": resp.status_code, "note": "OK", "final_url": str(resp.url)})
+    except requests.exceptions.RequestException:
+        return jsonify({"status": "unreachable", "note": "Unreachable"})
+
+
+@app.route("/images", methods=["GET"])
+def get_images():
+    folder = request.args.get("folder", "all")
+    limit_arg = request.args.get("limit")
+    offset_arg = request.args.get("offset")
+    try:
+        offset = int(offset_arg) if offset_arg is not None else 0
+        limit = int(limit_arg) if limit_arg is not None else None
+    except (TypeError, ValueError):
+        return jsonify({"error": "limit and offset must be integers"}), 400
+    if offset < 0 or (limit is not None and limit < 0):
+        return jsonify({"error": "limit and offset must be non-negative"}), 400
+    hide_nsfw = _parse_truthy(request.args.get("hide_nsfw"))
+    images = list_images(folder, hide_nsfw=hide_nsfw)
+    if limit_arg is not None or offset_arg is not None:
+        end = offset + limit if limit is not None else None
+        images = images[offset:end]
+    return jsonify(images)
+
+
+@app.route("/images/random", methods=["GET"])
+def get_random_image():
+    folder = request.args.get("folder", "all")
+    hide_nsfw = _parse_truthy(request.args.get("hide_nsfw"))
+    images = list_images(folder, hide_nsfw=hide_nsfw)
+    if not images:
+        return jsonify({"error": "No images found"}), 404
+    return jsonify({"path": random.choice(images)})
+
+
+@app.route("/notes", methods=["GET", "POST"])
+def notes():
+    if request.method == "GET":
+        return jsonify({"notes": settings.get("_notes", "")})
+    data = request.get_json(silent=True) or {}
+    settings["_notes"] = data.get("notes", "")
+    save_settings(settings)
+    return jsonify({"status": "saved"})
+
+
+@app.route("/stream/image/<path:image_path>")
+def serve_image(image_path):
+    full_path = Path(IMAGE_DIR_PATH) / image_path
+    if not full_path.exists():
+        return "Not found", 404
+    return _send_image_response(full_path)
+
+
 @app.route("/stream/group/<name>")
 def stream_group(name):
     groups = settings.get("_groups", {})
