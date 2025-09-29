@@ -1842,6 +1842,12 @@ def stream_live():
     })
 
 
+@app.route("/live")
+def legacy_stream_live():
+    """Backward compatible alias for /stream/live"""
+    return stream_live()
+
+
 @app.route("/stream/group/<name>")
 def stream_group(name):
     groups = settings.get("_groups", {})
