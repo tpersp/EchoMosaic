@@ -43,6 +43,8 @@ A running list of ideas and future improvements. Add new items anywhere below.
 
 - [ ] Add ability to show movie files, like mp4, mpv, and other common movie media file types.
 
+- [ ] Add ability to save AI image gen presets, so user don't need to remember different settings for each type of image.
+
 
 ---
 
