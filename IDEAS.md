@@ -41,6 +41,7 @@ A running list of ideas and future improvements. Add new items anywhere below.
 
 - [x] Add ability to cancel stablehorde queue, if possible. (currently it seems to be stuck in queue, and unable to generate new.)
 
+- [ ] Add ability to show movie files, like mp4, mpv, and other common movie media file types.
 
 
 ---
