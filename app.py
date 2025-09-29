@@ -1920,6 +1920,8 @@ def test_embed():
         if not ok_headers:
             return jsonify({"status": "not_showable", "http_status": resp.status_code, "note": "Not showable"})
         return jsonify({"status": "ok", "http_status": resp.status_code, "note": "OK", "final_url": str(resp.url)})
+    except requests.exceptions.SSLError as exc:
+        return jsonify({"status": "ok", "note": "SSL warning", "final_url": target, "warning": str(exc)})
     except requests.exceptions.RequestException:
         return jsonify({"status": "unreachable", "note": "Unreachable"})
 
