@@ -187,7 +187,7 @@
           <label for="stream-url-{{ stream_id }}">URL</label>
           <div>
             <div style="display:flex; align-items:center; gap:8px; flex-wrap: wrap;">
-              <input id="stream-url-{{ stream_id }}" type="text" class="stream-url-input" data-stream="{{ stream_id }}" value="{{ conf.stream_url if conf.stream_url else '' }}" placeholder="https://...">
+              <input id="stream-url-{{ stream_id }}" type="text" class="stream-url-input" data-stream="{{ stream_id }}" value="{{ conf.stream_url if conf.stream_url else '' }}" placeholder="https://example.com/">
               <span class="url-type-badge" aria-live="polite"></span>
               <span class="embed-status-badge" aria-live="polite"></span>
             </div>
@@ -363,7 +363,7 @@
               <div class="ai-lora-search">
                 <input type="text" class="ai-lora-search-input" placeholder="Search LoRAs on CivitAI (e.g. 'anime style')">
                 <button type="button" class="ai-lora-search-btn" data-stream="{{ stream_id }}">Search</button>
-                <a href="https://civitai.com/models...types=LORA&sort=Highest%20Rated" class="ai-lora-browse" target="_blank" rel="noopener">Browse</a>
+                <a href="https://civitai.com/models?types=LORA&sort=Highest%20Rated" class="ai-lora-browse" target="_blank" rel="noopener">Browse</a>
               </div>
               <div class="ai-lora-results" hidden>
                 <div class="ai-lora-results-header"></div>
@@ -1107,7 +1107,7 @@
       return Promise.resolve();
     }
     const streamId = card.dataset.stream;
-    const url = hideNsfw ? '/folders...hide_nsfw=1' : '/folders';
+    const url = hideNsfw ? '/folders?hide_nsfw=1' : '/folders';
     return fetch(url)
       .then(r => {
         if (!r.ok) {
@@ -1268,10 +1268,10 @@
   }
   function createGroupTile(streamsMeta, groups, name) {
     const gdata = name ? (groups[name]||[]) : [];
-    const initial = Array.isArray(gdata) ? gdata.slice() : ((gdata....streams || []).slice());
+    const initial = Array.isArray(gdata) ? gdata.slice() : ((gdata?.streams || []).slice());
     const order = Array.isArray(initial) ? initial.slice() : [];
     const members = new Set(order);
-    const gLayout = Array.isArray(gdata) ? {} : (gdata....layout || {});
+    const gLayout = Array.isArray(gdata) ? {} : (gdata?.layout || {});
     const isNew = !name;
     const tile = makeEl('div', {class:'group-tile'}, []);
     const header = makeEl('div', {class:'tile-header'}, []);
@@ -1461,7 +1461,7 @@
     const chips = makeEl('div', {class:'member-chips'}, []);
     body.appendChild(chips);
     // helpers to refresh UI
-    function labelOf(id) { return (streamsMeta[id]....label || id) + ''; }
+    function labelOf(id) { return (streamsMeta[id]?.label || id) + ''; }
     function candidates(query) {
       const q = (query||'').toLowerCase();
       return Object.keys(streamsMeta)
@@ -1471,7 +1471,7 @@
     }
     function refreshTitleCount() {
       const count = members.size;
-      title.textContent = (tile.querySelector('.tile-name')....value....trim() || name || 'New Group') + ` (${count})`;
+      title.textContent = (tile.querySelector('.tile-name')?.value?.trim() || name || 'New Group') + ` (${count})`;
     }
     function refreshPipSelects() {
       const mem = order.slice();
@@ -1676,7 +1676,7 @@
     });
     if (del) {
       del.addEventListener('click', async () => {
-        if (!confirm(`Delete group ${name}...`)) return;
+        if (!confirm(`Delete group ${name}?`)) return;
         await fetch(`/groups/${encodeURIComponent(name)}`, {method:'DELETE'});
         markOpen(name, false);
         tile.classList.remove('expanded');
@@ -1751,7 +1751,7 @@
     }
     if (e.target.classList.contains('menu-remove')) {
       const id = e.target.dataset.stream;
-      if (confirm('Delete ' + id + '...')) {
+      if (confirm('Delete ' + id + '?')) {
         fetch('/streams/' + encodeURIComponent(id), {method:'DELETE'})
           .then(res => res.json())
           .then(data => {
@@ -1933,7 +1933,7 @@
       deleteBtn.className = 'ai-preset-delete';
       deleteBtn.textContent = 'Delete';
       deleteBtn.addEventListener('click', async () => {
-        if (!confirm(`Delete preset "${preset.name}"...`)) return;
+        if (!confirm(`Delete preset "${preset.name}"?`)) return;
         try {
           await deletePresetRequest(preset.name);
           const updated = await fetchAiPresets(true);
@@ -2579,7 +2579,7 @@
           await savePresetRequest(trimmed, payload);
         } catch (err) {
           if (err && err.code === 'exists') {
-            const overwrite = confirm(`Preset "${trimmed}" already exists. Overwrite...`);
+            const overwrite = confirm(`Preset "${trimmed}" already exists. Overwrite?`);
             if (!overwrite) return;
             try {
               await savePresetRequest(trimmed, payload, true);
@@ -2823,7 +2823,7 @@
       if (loraResultsHeader) loraResultsHeader.textContent = 'Searching...';
       if (loraResultsList) loraResultsList.innerHTML = '';
       try {
-        const res = await fetch(`/ai/loras...q=${encodeURIComponent(term)}`);
+        const res = await fetch(`/ai/loras?q=${encodeURIComponent(term)}`);
         const data = await res.json().catch(() => ({}));
         if (!res.ok || data.error) {
           throw new Error(data.error || `Request failed (${res.status})`);
@@ -3180,7 +3180,7 @@
       const handleCancel = async event => {
         event.preventDefault();
         const currentJob = aiActiveJobs.get(streamId) || null;
-        const currentStatus = (currentJob && currentJob.status) || (card.querySelector('.ai-status')....dataset.status || 'idle');
+        const currentStatus = (currentJob && currentJob.status) || (card.querySelector('.ai-status')?.dataset.status || 'idle');
         setCancelDisabled(true);
         try {
           const res = await fetch(`/ai/cancel/${encodeURIComponent(streamId)}`, { method: 'POST' });
@@ -3237,7 +3237,7 @@
         }
       });
     }
-    renderAiStatus(card, { status: card.querySelector('.ai-status')....dataset.status || 'idle' }, aiActiveJobs.get(streamId) || null);
+    renderAiStatus(card, { status: card.querySelector('.ai-status')?.dataset.status || 'idle' }, aiActiveJobs.get(streamId) || null);
     highlightAiSelection(resultsEl, resultsEl ? resultsEl.dataset.selected || '' : '');
   }
 
@@ -3419,13 +3419,13 @@
       params.set('hide_nsfw', '1');
     }
     imageGrid.innerHTML = 'Loading...';
-    fetch(`/images...${params.toString()}`)
+    fetch(`/images?${params.toString()}`)
       .then(res => res.json())
       .then(imgs => {
         imageGrid.innerHTML = '';
         imgs.forEach(path => {
           const imgEl = document.createElement('img');
-          imgEl.src = `/stream/image/${path}...size=thumb`;
+          imgEl.src = `/stream/image/${path}?size=thumb`;
           imgEl.title = path;
           imgEl.classList.add('picker-thumbnail');
           if (currentSelected === path) {
