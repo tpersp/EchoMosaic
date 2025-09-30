@@ -15,6 +15,12 @@
 </header>
 <div class="container">
 
+  <datalist id="global-tag-options">
+    {% for tag in global_tags %}
+    <option value="{{ tag }}"></option>
+    {% endfor %}
+  </datalist>
+
   <!-- Group Manager Card -->
   <div class="stream-card" id="group-manager">
     <div class="card-header">
@@ -40,10 +46,42 @@
     <input id="mosaic-cols-input" type="number" min="1" max="6" value="{{ mosaic_settings.cols }}" style="width: 4.5rem; display: {% if mosaic_settings.layout == 'grid' %}inline-block{% else %}none{% endif %};" />
   </div>
 
+  <div class="filter-bar" id="filter-bar">
+    <div class="filter-group">
+      <label for="tag-filter-input">Filter Tags</label>
+      <div class="tag-filter-input">
+        <div class="tag-chip-list" id="tag-filter-chips">
+          <input type="text" id="tag-filter-input" placeholder="Add tag filter" list="global-tag-options" autocomplete="off" />
+        </div>
+      </div>
+    </div>
+    <div class="filter-group">
+      <label for="sort-select">Sort</label>
+      <select id="sort-select">
+        <option value="default" selected>Default</option>
+        <option value="group">Group by Tag</option>
+      </select>
+    </div>
+  </div>
+
+  <div class="stream-card" id="tag-manager">
+    <div class="card-header">
+      <h2>Tags</h2>
+    </div>
+    <div class="tag-manager-body">
+      <div id="tag-manager-list" class="tag-manager-list"></div>
+      <div class="tag-manager-actions">
+        <input type="text" id="new-tag-input" placeholder="Create tag" list="global-tag-options" autocomplete="off" />
+        <button type="button" id="create-tag-btn">Add</button>
+      </div>
+      <p class="tag-manager-hint">Tags are shared across all streams. Remove tags here when no cards use them.</p>
+    </div>
+  </div>
+
   <div id="dashboard-grid" class="dashboard-grid">
     {# Generate a card for each stream dynamically #}
     {% for stream_id, conf in stream_settings.items() %}
-    <div class="stream-card" data-stream="{{ stream_id }}" data-hide-nsfw="{{ "true" if conf.hide_nsfw|default(False) else "false" }}">
+    <div class="stream-card" data-stream="{{ stream_id }}" data-hide-nsfw="{{ "true" if conf.hide_nsfw|default(False) else "false" }}" data-tags='{{ (conf.tags|default([]))|tojson }}'>
       <div class="card-header">
         <div class="title-row">
           <h2><a class="stream-link" href="{{ url_for('render_stream', name=(conf.label if conf.label else stream_id)|slugify) }}" target="_blank">{{ conf.label if conf.label else stream_id|capitalize }}</a></h2>
@@ -91,6 +129,17 @@
             <input id="hide-nsfw-{{ stream_id }}" type="checkbox" class="hide-nsfw-toggle" data-stream="{{ stream_id }}" {% if hide_nsfw %}checked{% endif %}>
             <span class="toggle-switch" aria-hidden="true"></span>
           </label>
+        </div>
+        <div class="form-row tag-row">
+          <label for="tags-{{ stream_id }}">Tags</label>
+          <div class="tag-editor" data-stream="{{ stream_id }}">
+            <div class="tag-chip-list">
+              {% for tag in conf.tags|default([]) %}
+              <span class="tag-chip" data-tag="{{ tag }}"><span class="tag-label">{{ tag }}</span><button type="button" class="tag-remove" aria-label="Remove {{ tag }}">&times;</button></span>
+              {% endfor %}
+              <input type="text" id="tags-{{ stream_id }}" class="tag-entry" placeholder="Add tag" list="global-tag-options" autocomplete="off" />
+            </div>
+          </div>
         </div>
         <!-- Image Quality Selection -->
         <div class="form-row image-quality-row" {% if conf.mode == 'livestream' %} style="display:none;" {% endif %}>
@@ -496,11 +545,34 @@
   // Group Manager elements
   const groupTiles = document.getElementById('group-tiles');
 
+  const dashboardGrid = document.getElementById('dashboard-grid');
+  const tagFilterChips = document.getElementById('tag-filter-chips');
+  const tagFilterInput = document.getElementById('tag-filter-input');
+  const sortSelect = document.getElementById('sort-select');
+  const tagManagerList = document.getElementById('tag-manager-list');
+  const newTagInput = document.getElementById('new-tag-input');
+  const createTagBtn = document.getElementById('create-tag-btn');
+  const tagDatalist = document.getElementById('global-tag-options');
+
   // Build a set of taken stream name slugs for client-side validation
   const takenSlugs = {};
   {% for sid, conf in stream_settings.items() %}
   takenSlugs['{{ (conf.label if conf.label else sid)|slugify }}'] = '{{ sid }}';
   {% endfor %}
+
+  const initialGlobalTags = {{ global_tags|tojson }};
+  const globalTagState = {
+    list: Array.isArray(initialGlobalTags) ? initialGlobalTags.slice() : [],
+    map: new Map()
+  };
+  globalTagState.list.forEach(tag => {
+    if (typeof tag === 'string') {
+      globalTagState.map.set(tag.toLowerCase(), tag);
+    }
+  });
+  const cardTagsMap = new Map();
+  const activeTagFilters = [];
+  let currentSortMode = 'default';
 
   function showNotification(msg) {
     notification.textContent = msg;
@@ -545,6 +617,462 @@
     mosaicColsInput.addEventListener('change', saveMosaic);
   }
   updateMosaicControlsVisibility();
+
+  function normalizeTagInput(value) {
+    if (typeof value !== 'string') {
+      return '';
+    }
+    const cleaned = value.replace(/\s+/g, ' ').trim();
+    if (!cleaned) {
+      return '';
+    }
+    return cleaned.length > 48 ? cleaned.slice(0, 48).trim() : cleaned;
+  }
+
+  function tagsEqual(a, b) {
+    if (!Array.isArray(a) || !Array.isArray(b)) {
+      return false;
+    }
+    if (a.length !== b.length) {
+      return false;
+    }
+    return a.every((tag, idx) => (tag || '').toLowerCase() === (b[idx] || '').toLowerCase());
+  }
+
+  function getCardTags(card) {
+    if (!card) {
+      return [];
+    }
+    const raw = card.dataset.tags;
+    if (!raw) {
+      return [];
+    }
+    try {
+      const parsed = JSON.parse(raw);
+      return Array.isArray(parsed) ? parsed.filter(t => typeof t === 'string') : [];
+    } catch (err) {
+      return [];
+    }
+  }
+
+  function setCardTags(card, tags) {
+    if (!card) {
+      return [];
+    }
+    const cleaned = Array.isArray(tags) ? tags.filter(t => typeof t === 'string') : [];
+    card.dataset.tags = JSON.stringify(cleaned);
+    cardTagsMap.set(card, cleaned.slice());
+    const chipList = card.querySelector('.tag-chip-list');
+    if (chipList) {
+      const input = chipList.querySelector('.tag-entry');
+      chipList.querySelectorAll('.tag-chip').forEach(chip => chip.remove());
+      const frag = document.createDocumentFragment();
+      cleaned.forEach(tag => {
+        const canonical = globalTagState.map.get(tag.toLowerCase()) || tag;
+        const chip = document.createElement('span');
+        chip.className = 'tag-chip';
+        chip.dataset.tag = canonical;
+        const label = document.createElement('span');
+        label.className = 'tag-label';
+        label.textContent = canonical;
+        const removeBtn = document.createElement('button');
+        removeBtn.type = 'button';
+        removeBtn.className = 'tag-remove';
+        removeBtn.setAttribute('aria-label', `Remove ${canonical}`);
+        removeBtn.innerHTML = '&times;';
+        removeBtn.addEventListener('click', () => {
+          const current = getCardTags(card);
+          const next = current.filter(existing => existing.toLowerCase() !== canonical.toLowerCase());
+          if (!tagsEqual(current, next)) {
+            requestTagUpdate(card, next);
+          }
+        });
+        chip.appendChild(label);
+        chip.appendChild(removeBtn);
+        frag.appendChild(chip);
+      });
+      if (input) {
+        chipList.insertBefore(frag, input);
+      } else {
+        chipList.appendChild(frag);
+      }
+    }
+    return cleaned;
+  }
+
+  function requestTagUpdate(card, nextTags) {
+    if (!card) {
+      return;
+    }
+    const streamId = card.dataset.stream;
+    if (!streamId) {
+      return;
+    }
+    const sanitized = Array.isArray(nextTags) ? nextTags.map(normalizeTagInput).filter(Boolean) : [];
+    const current = getCardTags(card);
+    if (tagsEqual(current, sanitized)) {
+      return;
+    }
+    const editor = card.querySelector('.tag-editor');
+    const input = editor ? editor.querySelector('.tag-entry') : null;
+    const buttons = editor ? Array.from(editor.querySelectorAll('.tag-remove')) : [];
+    if (input) {
+      input.disabled = true;
+    }
+    buttons.forEach(btn => { btn.disabled = true; });
+    saveSettings(streamId, { tags: sanitized }, {
+      onError: () => { setCardTags(card, current); },
+      onFinally: () => {
+        if (input) {
+          input.disabled = false;
+        }
+        buttons.forEach(btn => { btn.disabled = false; });
+      }
+    });
+  }
+
+  function attachTagEditor(card) {
+    if (!card || !card.dataset.stream) {
+      return;
+    }
+    const editor = card.querySelector('.tag-editor');
+    if (!editor) {
+      return;
+    }
+    const input = editor.querySelector('.tag-entry');
+    const initial = getCardTags(card);
+    setCardTags(card, initial);
+    if (input) {
+      const commit = () => {
+        const normalized = normalizeTagInput(input.value);
+        input.value = '';
+        if (!normalized) {
+          return;
+        }
+        const current = getCardTags(card);
+        if (current.some(tag => tag.toLowerCase() === normalized.toLowerCase())) {
+          return;
+        }
+        requestTagUpdate(card, current.concat([normalized]));
+      };
+      input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' || e.key === ',') {
+          e.preventDefault();
+          commit();
+        }
+      });
+      input.addEventListener('blur', () => {
+        commit();
+      });
+    }
+  }
+
+  function updateTagDatalist() {
+    if (!tagDatalist) {
+      return;
+    }
+    tagDatalist.innerHTML = '';
+    globalTagState.list.forEach(tag => {
+      if (typeof tag !== 'string') {
+        return;
+      }
+      const opt = document.createElement('option');
+      opt.value = tag;
+      tagDatalist.appendChild(opt);
+    });
+  }
+
+  function renderTagManager() {
+    if (!tagManagerList) {
+      return;
+    }
+    tagManagerList.innerHTML = '';
+    if (!globalTagState.list.length) {
+      const empty = document.createElement('p');
+      empty.className = 'tag-manager-empty';
+      empty.textContent = 'No tags defined yet.';
+      tagManagerList.appendChild(empty);
+      return;
+    }
+    const usage = new Map();
+    cardTagsMap.forEach(tags => {
+      tags.forEach(tag => {
+        const key = tag.toLowerCase();
+        usage.set(key, (usage.get(key) || 0) + 1);
+      });
+    });
+    globalTagState.list.forEach(tag => {
+      const key = tag.toLowerCase();
+      const count = usage.get(key) || 0;
+      const row = document.createElement('div');
+      row.className = 'tag-manager-item';
+      const chip = document.createElement('span');
+      chip.className = 'tag-chip';
+      const label = document.createElement('span');
+      label.className = 'tag-label';
+      label.textContent = tag;
+      chip.appendChild(label);
+      const countEl = document.createElement('span');
+      countEl.className = 'tag-usage';
+      countEl.textContent = `${count} stream${count === 1 ? '' : 's'}`;
+      const removeBtn = document.createElement('button');
+      removeBtn.type = 'button';
+      removeBtn.className = 'tag-remove-btn';
+      removeBtn.textContent = 'Remove';
+      if (count > 0) {
+        removeBtn.disabled = true;
+        removeBtn.title = 'Tag is in use';
+      } else {
+        removeBtn.addEventListener('click', () => removeGlobalTag(tag));
+      }
+      row.appendChild(chip);
+      row.appendChild(countEl);
+      row.appendChild(removeBtn);
+      tagManagerList.appendChild(row);
+    });
+  }
+
+  function removeGlobalTag(tag) {
+    const encoded = encodeURIComponent(tag);
+    fetch(`/tags/${encoded}`, { method: 'DELETE' })
+      .then(res => res.json().then(data => ({ ok: res.ok, data })))
+      .then(result => {
+        if (result.ok) {
+          const tags = Array.isArray(result.data.tags) ? result.data.tags : [];
+          syncGlobalTags(tags);
+          showNotification('Tag removed');
+        } else {
+          showNotification(result.data.error || 'Unable to remove tag');
+        }
+      })
+      .catch(() => showNotification('Unable to remove tag'));
+  }
+
+  function syncGlobalTags(tags) {
+    if (!Array.isArray(tags)) {
+      return;
+    }
+    globalTagState.list = tags.slice();
+    globalTagState.map.clear();
+    globalTagState.list.forEach(tag => {
+      if (typeof tag === 'string') {
+        globalTagState.map.set(tag.toLowerCase(), tag);
+      }
+    });
+    updateTagDatalist();
+    reconcileFilterTags();
+    renderTagManager();
+  }
+
+  function reconcileFilterTags() {
+    if (!activeTagFilters.length) {
+      return;
+    }
+    const next = [];
+    activeTagFilters.forEach(tag => {
+      const canonical = globalTagState.map.get(tag.toLowerCase());
+      if (canonical) {
+        if (!next.some(existing => existing.toLowerCase() === canonical.toLowerCase())) {
+          next.push(canonical);
+        }
+      }
+    });
+    const changed = next.length !== activeTagFilters.length || next.some((tag, idx) => tag !== activeTagFilters[idx]);
+    if (changed) {
+      activeTagFilters.length = 0;
+      next.forEach(tag => activeTagFilters.push(tag));
+      renderFilterChips();
+      applyFiltersAndSorting();
+    }
+  }
+
+  function renderFilterChips() {
+    if (!tagFilterChips) {
+      return;
+    }
+    const input = tagFilterInput || null;
+    tagFilterChips.querySelectorAll('.filter-tag-chip').forEach(chip => chip.remove());
+    activeTagFilters.forEach(tag => {
+      const chip = document.createElement('span');
+      chip.className = 'tag-chip filter-tag-chip';
+      chip.dataset.tag = tag;
+      const label = document.createElement('span');
+      label.className = 'tag-label';
+      label.textContent = tag;
+      const removeBtn = document.createElement('button');
+      removeBtn.type = 'button';
+      removeBtn.className = 'tag-remove';
+      removeBtn.setAttribute('aria-label', `Remove ${tag}`);
+      removeBtn.innerHTML = '&times;';
+      removeBtn.addEventListener('click', () => removeFilterTag(tag));
+      chip.appendChild(label);
+      chip.appendChild(removeBtn);
+      if (input) {
+        tagFilterChips.insertBefore(chip, input);
+      } else {
+        tagFilterChips.appendChild(chip);
+      }
+    });
+  }
+
+  function addFilterTag(tag) {
+    const normalized = normalizeTagInput(tag);
+    if (!normalized) {
+      return;
+    }
+    const lower = normalized.toLowerCase();
+    if (activeTagFilters.some(existing => existing.toLowerCase() === lower)) {
+      return;
+    }
+    const canonical = globalTagState.map.get(lower) || normalized;
+    activeTagFilters.push(canonical);
+    renderFilterChips();
+    applyFiltersAndSorting();
+  }
+
+  function removeFilterTag(tag) {
+    const lower = tag.toLowerCase();
+    const filtered = activeTagFilters.filter(existing => existing.toLowerCase() !== lower);
+    if (filtered.length === activeTagFilters.length) {
+      return;
+    }
+    activeTagFilters.length = 0;
+    filtered.forEach(item => activeTagFilters.push(item));
+    renderFilterChips();
+    applyFiltersAndSorting();
+  }
+
+  let originalCardOrder = [];
+
+  function applyFiltersAndSorting() {
+    if (!dashboardGrid) {
+      return;
+    }
+    const filterSet = new Set(activeTagFilters.map(tag => tag.toLowerCase()));
+    cardTagsMap.forEach((tags, card) => {
+      const matches = filterSet.size === 0 || tags.some(tag => filterSet.has(tag.toLowerCase()));
+      card.dataset.matchesFilter = matches ? 'true' : 'false';
+      card.style.display = matches ? '' : 'none';
+    });
+    while (dashboardGrid.firstChild) {
+      dashboardGrid.removeChild(dashboardGrid.firstChild);
+    }
+    if (currentSortMode === 'group') {
+      renderGroupedCards();
+    } else {
+      originalCardOrder.forEach(card => {
+        dashboardGrid.appendChild(card);
+      });
+    }
+  }
+
+  function renderGroupedCards() {
+    if (!dashboardGrid) {
+      return;
+    }
+    const tagBuckets = new Map();
+    const untagged = [];
+    originalCardOrder.forEach(card => {
+      const tags = cardTagsMap.get(card) || [];
+      if (tags.length) {
+        const primary = tags[0];
+        const canonical = globalTagState.map.get(primary.toLowerCase()) || primary;
+        if (!tagBuckets.has(canonical)) {
+          tagBuckets.set(canonical, []);
+        }
+        tagBuckets.get(canonical).push(card);
+      } else {
+        untagged.push(card);
+      }
+    });
+    const orderedKeys = [];
+    globalTagState.list.forEach(tag => {
+      if (tagBuckets.has(tag)) {
+        orderedKeys.push(tag);
+      }
+    });
+    tagBuckets.forEach((_, key) => {
+      if (!orderedKeys.includes(key)) {
+        orderedKeys.push(key);
+      }
+    });
+    orderedKeys.forEach(key => {
+      const header = document.createElement('div');
+      header.className = 'tag-group-header';
+      header.textContent = key;
+      const cards = tagBuckets.get(key) || [];
+      const anyVisible = cards.some(card => card.dataset.matchesFilter === 'true');
+      header.hidden = !anyVisible;
+      dashboardGrid.appendChild(header);
+      cards.forEach(card => {
+        dashboardGrid.appendChild(card);
+      });
+    });
+    if (untagged.length) {
+      const header = document.createElement('div');
+      header.className = 'tag-group-header';
+      header.textContent = 'Untagged';
+      const anyVisible = untagged.some(card => card.dataset.matchesFilter === 'true');
+      header.hidden = !anyVisible;
+      dashboardGrid.appendChild(header);
+      untagged.forEach(card => {
+        dashboardGrid.appendChild(card);
+      });
+    }
+  }
+
+  function createGlobalTag() {
+    if (!newTagInput) {
+      return;
+    }
+    const value = normalizeTagInput(newTagInput.value);
+    if (!value) {
+      newTagInput.value = '';
+      return;
+    }
+    if (createTagBtn) {
+      createTagBtn.disabled = true;
+    }
+    fetch('/tags', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: value })
+    })
+      .then(res => res.json().then(data => ({ ok: res.ok, data })))
+      .then(result => {
+        if (result.ok) {
+          const tags = Array.isArray(result.data.tags) ? result.data.tags : [];
+          syncGlobalTags(tags);
+          if (newTagInput) {
+            newTagInput.value = '';
+          }
+          const created = typeof result.data.tag === 'string' ? result.data.tag : value;
+          showNotification(`Tag '${created}' saved`);
+        } else {
+          showNotification(result.data.error || 'Unable to create tag');
+        }
+      })
+      .catch(() => showNotification('Unable to create tag'))
+      .finally(() => {
+        if (createTagBtn) {
+          createTagBtn.disabled = false;
+        }
+      });
+  }
+
+  function commitFilterInput() {
+    if (!tagFilterInput) {
+      return;
+    }
+    const normalized = normalizeTagInput(tagFilterInput.value);
+    tagFilterInput.value = '';
+    if (!normalized) {
+      return;
+    }
+    addFilterTag(normalized);
+  }
+
+  updateTagDatalist();
 
   function refreshFoldersForCard(card, hideNsfw) {
     const folderSelect = card.querySelector('.folder-select');
@@ -1242,6 +1770,14 @@
     if (!streamId || !conf) return;
     const card = document.querySelector(`.stream-card[data-stream="${streamId}"]`);
     if (!card) return;
+    if (Array.isArray(conf.tags)) {
+      setCardTags(card, conf.tags);
+      applyFiltersAndSorting();
+      renderTagManager();
+    }
+    if (Array.isArray(data.tags)) {
+      syncGlobalTags(data.tags);
+    }
     if (conf.selected_image !== undefined) {
       const display = card.querySelector('.selected-image-display');
       if (display) display.textContent = conf.selected_image || 'None';
@@ -2237,6 +2773,15 @@
             if (slider) slider.value = String(amount);
             if (valEl) valEl.textContent = `${amount}%`;
           }
+          if (data.new_config && data.new_config.tags !== undefined) {
+            const tagList = Array.isArray(data.new_config.tags) ? data.new_config.tags : [];
+            setCardTags(card, tagList);
+            applyFiltersAndSorting();
+            renderTagManager();
+          }
+          if (Array.isArray(data.tags)) {
+            syncGlobalTags(data.tags);
+          }
           const aiSettings = data.new_config && data.new_config.ai_settings;
           if (aiSettings) {
             const aiSection = card.querySelector('.ai-generator');
@@ -2386,6 +2931,9 @@
   document.addEventListener('DOMContentLoaded', () => {
     document.querySelectorAll('.stream-card').forEach(card => {
       const streamId = card.dataset.stream;
+      if (streamId) {
+        attachTagEditor(card);
+      }
       setupAiControls(card, streamId);
       // Card menu toggle per card
       const menuBtn = card.querySelector('.menu-button');
@@ -2649,11 +3197,40 @@
 
       toggleVisibilityForMode(card, modeSelect ? modeSelect.value : '', urlInput ? urlInput.value : '');
     });
+    originalCardOrder = Array.from(cardTagsMap.keys());
+    renderTagManager();
+    renderFilterChips();
+    currentSortMode = (sortSelect && sortSelect.value === 'group') ? 'group' : 'default';
+    applyFiltersAndSorting();
+    if (tagFilterInput) {
+      tagFilterInput.addEventListener('keydown', e => {
+        if (e.key === 'Enter' || e.key === ',') {
+          e.preventDefault();
+          commitFilterInput();
+        }
+      });
+      tagFilterInput.addEventListener('blur', () => {
+        commitFilterInput();
+      });
+    }
+    if (sortSelect) {
+      sortSelect.addEventListener('change', e => {
+        currentSortMode = e.target.value === 'group' ? 'group' : 'default';
+        applyFiltersAndSorting();
+      });
+    }
+    if (createTagBtn) {
+      createTagBtn.addEventListener('click', createGlobalTag);
+    }
+    if (newTagInput) {
+      newTagInput.addEventListener('keydown', e => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          createGlobalTag();
+        }
+      });
+    }
   });
 </script>
 </body>
 </html>
-
-
-
-

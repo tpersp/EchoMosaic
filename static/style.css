@@ -190,6 +190,135 @@ a {
   box-shadow: 0 0 6px rgba(0,0,0,0.4);
 }
 
+.tag-editor,
+.tag-filter-input {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem;
+  background: var(--surface-alt);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0.25rem 0.4rem;
+}
+
+.tag-chip-list {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem;
+  flex: 1 1 auto;
+}
+
+.tag-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 0.15rem 0.5rem;
+  font-size: 0.85rem;
+}
+
+.tag-chip .tag-remove {
+  border: none;
+  background: transparent;
+  color: inherit;
+  padding: 0;
+  cursor: pointer;
+  font-size: 0.9rem;
+}
+
+.tag-chip .tag-remove:hover {
+  color: var(--accent);
+}
+
+.tag-entry {
+  border: none;
+  background: transparent;
+  min-width: 140px;
+  flex: 1 1 120px;
+  padding: 0.2rem 0.35rem;
+}
+
+.filter-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 1rem;
+  margin: 1rem 0;
+  padding: 0.75rem 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.filter-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  min-width: 220px;
+}
+
+.filter-tag-chip {
+  background: var(--surface);
+}
+
+.tag-group-header {
+  grid-column: 1 / -1;
+  font-weight: 600;
+  background: var(--surface-alt);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0.4rem 0.6rem;
+}
+
+#tag-manager {
+  margin-top: 1rem;
+}
+
+.tag-manager-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.tag-manager-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.tag-manager-item {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  justify-content: space-between;
+  padding: 0.4rem 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--surface-alt);
+}
+
+.tag-manager-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.tag-remove-btn {
+  padding: 0.25rem 0.6rem;
+}
+
+.tag-usage {
+  font-size: 0.85rem;
+  opacity: 0.8;
+}
+
+.tag-manager-empty {
+  margin: 0;
+  font-size: 0.9rem;
+  opacity: 0.7;
+}
+
 .stream-card .background-controls {
   display: flex;
   flex-direction: column;

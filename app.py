@@ -52,6 +52,10 @@ AI_MODE = "ai"
 AI_SETTINGS_KEY = "ai_settings"
 AI_STATE_KEY = "ai_state"
 
+TAG_KEY = "tags"
+GLOBAL_TAGS_KEY = "_tags"
+TAG_MAX_LENGTH = 48
+
 AI_DEFAULT_MODEL = "stable_diffusion"
 AI_DEFAULT_SAMPLER = "k_euler"
 AI_DEFAULT_WIDTH = 512
@@ -352,6 +356,108 @@ def ensure_background_defaults(conf: Dict[str, Any]) -> None:
     conf["background_blur_amount"] = max(0, min(100, amount_val))
 
 
+def _normalize_tag_name(value: Any) -> Optional[str]:
+    if not isinstance(value, str):
+        return None
+    cleaned = re.sub(r"\s+", " ", value.strip())
+    if not cleaned:
+        return None
+    if len(cleaned) > TAG_MAX_LENGTH:
+        cleaned = cleaned[:TAG_MAX_LENGTH].rstrip()
+    return cleaned
+
+
+def _sanitize_stream_tags(value: Any) -> List[str]:
+    if not value:
+        return []
+    if isinstance(value, str):
+        candidates: List[Any] = [value]
+    elif isinstance(value, (list, tuple, set)):
+        candidates = list(value)
+    else:
+        return []
+    result: List[str] = []
+    seen = set()
+    for item in candidates:
+        normalized = _normalize_tag_name(item)
+        if not normalized:
+            continue
+        key = normalized.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        result.append(normalized)
+    return result
+
+
+def _normalize_tag_collection(values: Any) -> List[str]:
+    if not isinstance(values, (list, tuple, set)):
+        iterable: List[Any] = []
+    else:
+        iterable = list(values)
+    cleaned = _sanitize_stream_tags(iterable)
+    cleaned.sort(key=str.lower)
+    return cleaned
+
+
+def get_global_tags() -> List[str]:
+    tags = settings.get(GLOBAL_TAGS_KEY)
+    if not isinstance(tags, list):
+        tags = []
+        settings[GLOBAL_TAGS_KEY] = tags
+    return tags
+
+
+def register_global_tags(new_tags: List[str]) -> bool:
+    if not new_tags:
+        return False
+    tags = get_global_tags()
+    existing = {tag.casefold(): tag for tag in tags}
+    changed = False
+    for tag in new_tags:
+        key = tag.casefold()
+        if key not in existing:
+            tags.append(tag)
+            existing[key] = tag
+            changed = True
+    if changed:
+        tags.sort(key=str.lower)
+    return changed
+
+
+def ensure_tag_defaults(conf: Dict[str, Any]) -> bool:
+    if not isinstance(conf, dict):
+        return False
+    current = conf.get(TAG_KEY)
+    normalized = _sanitize_stream_tags(current)
+    if normalized != current:
+        conf[TAG_KEY] = normalized
+        changed = True
+    else:
+        conf.setdefault(TAG_KEY, [])
+        changed = False
+    if register_global_tags(conf.get(TAG_KEY, [])):
+        changed = True
+    return changed
+
+
+def ensure_settings_integrity(data: Dict[str, Any]) -> bool:
+    changed = False
+    tags = data.get(GLOBAL_TAGS_KEY)
+    normalized_tags = _normalize_tag_collection(tags)
+    if tags != normalized_tags:
+        data[GLOBAL_TAGS_KEY] = normalized_tags
+        changed = True
+    for key, conf in list(data.items()):
+        if key.startswith("_"):
+            continue
+        if not isinstance(conf, dict):
+            continue
+        if ensure_tag_defaults(conf):
+            changed = True
+    return changed
+
+
 def _ensure_dir(path: Path) -> Path:
     try:
         path.mkdir(parents=True, exist_ok=True)
@@ -548,6 +654,7 @@ def default_stream_config():
         "yt_quality": "auto",
         "image_quality": "auto",
         "label": "",
+        TAG_KEY: [],
         "background_blur_enabled": False,
         "background_blur_amount": 50,
         AI_SETTINGS_KEY: default_ai_settings(),
@@ -1070,6 +1177,8 @@ def _run_ai_generation(stream_id: str, options: Dict[str, Any], cancel_event: Op
 
 
 settings = load_settings()
+if ensure_settings_integrity(settings):
+    save_settings(settings)
 if "_mosaic" not in settings:
     settings["_mosaic"] = default_mosaic_config()
 else:
@@ -1099,6 +1208,7 @@ for k, v in list(settings.items()):
             v["image_quality"] = "auto"
         ensure_ai_defaults(v)
         ensure_background_defaults(v)
+        ensure_tag_defaults(v)
 
 # Ensure notes key exists
 settings.setdefault("_notes", "")
@@ -1177,6 +1287,7 @@ def dashboard():
             else:
                 conf["image_quality"] = quality.strip().lower()
             ensure_background_defaults(conf)
+            ensure_tag_defaults(conf)
     mosaic = settings.get("_mosaic", default_mosaic_config())
     groups = sorted(list(settings.get("_groups", {}).keys()))
     return render_template(
@@ -1185,6 +1296,7 @@ def dashboard():
         stream_settings=streams,
         mosaic_settings=mosaic,
         groups=groups,
+        global_tags=get_global_tags(),
         post_processors=STABLE_HORDE_POST_PROCESSORS,
         max_loras=STABLE_HORDE_MAX_LORAS,
         clip_skip_range=STABLE_HORDE_CLIP_SKIP_RANGE,
@@ -1200,6 +1312,7 @@ def mosaic_streams():
     for conf in streams.values():
         if isinstance(conf, dict):
             ensure_background_defaults(conf)
+            ensure_tag_defaults(conf)
     mosaic = settings.get("_mosaic", default_mosaic_config())
     return render_template("streams.html", stream_settings=streams, mosaic_settings=mosaic)
 
@@ -1240,6 +1353,7 @@ def render_stream(name):
         config_quality = "auto"
     conf["image_quality"] = config_quality
     ensure_background_defaults(conf)
+    ensure_tag_defaults(conf)
     images = list_images(conf.get("folder", "all"), hide_nsfw=conf.get("hide_nsfw", False))
     requested_quality = (request.args.get("size") or "").strip().lower()
     if requested_quality and requested_quality not in IMAGE_QUALITY_CHOICES:
@@ -1293,6 +1407,7 @@ def get_stream_settings(stream_id):
     conf = settings[stream_id]
     ensure_ai_defaults(conf)
     ensure_background_defaults(conf)
+    ensure_tag_defaults(conf)
     return jsonify(conf)
 
 @app.route("/settings/<stream_id>", methods=["POST"])
@@ -1308,7 +1423,7 @@ def update_stream_settings(stream_id):
     # We'll add new keys for YouTube: "yt_cc", "yt_mute", "yt_quality"
     for key in ["mode", "folder", "selected_image", "duration", "shuffle", "stream_url",
                 "image_quality", "yt_cc", "yt_mute", "yt_quality", "label", "hide_nsfw",
-                "background_blur_enabled", "background_blur_amount"]:
+                "background_blur_enabled", "background_blur_amount", TAG_KEY]:
         if key in data:
             val = data[key]
             if key == "stream_url":
@@ -1326,6 +1441,10 @@ def update_stream_settings(stream_id):
                         if _slugify(other_label) == new_slug:
                             return jsonify({"error": "Another stream already uses this name"}), 400
                 conf[key] = new_label
+            elif key == TAG_KEY:
+                tags_payload = _sanitize_stream_tags(val)
+                conf[TAG_KEY] = tags_payload
+                register_global_tags(tags_payload)
             elif key == "hide_nsfw":
                 conf[key] = bool(val)
             elif key == "background_blur_enabled":
@@ -1356,11 +1475,12 @@ def update_stream_settings(stream_id):
         conf["_ai_customized"] = not _ai_settings_match_defaults(conf[AI_SETTINGS_KEY])
 
     ensure_background_defaults(conf)
+    ensure_tag_defaults(conf)
     save_settings(settings)
     if auto_scheduler is not None:
         auto_scheduler.reschedule(stream_id)
-    socketio.emit("refresh", {"stream_id": stream_id, "config": conf})
-    return jsonify({"status": "success", "new_config": conf})
+    socketio.emit("refresh", {"stream_id": stream_id, "config": conf, "tags": get_global_tags()})
+    return jsonify({"status": "success", "new_config": conf, "tags": get_global_tags()})
 
 
 @app.route("/settings/ai-defaults", methods=["GET"])
@@ -1453,6 +1573,55 @@ def ai_loras():
         'browseUrl': 'https://civitai.com/models?types=LORA&sort=Highest%20Rated',
     })
 
+@app.route("/tags", methods=["GET"])
+def list_tags():
+    return jsonify({"tags": get_global_tags()})
+
+
+@app.route("/tags", methods=["POST"])
+def create_tag():
+    payload = request.get_json(silent=True) or {}
+    raw_name = payload.get("name") or payload.get("tag")
+    normalized = _normalize_tag_name(raw_name)
+    if not normalized:
+        return jsonify({"error": "Invalid tag name"}), 400
+    tags = get_global_tags()
+    lookup = {t.casefold(): t for t in tags}
+    existing = lookup.get(normalized.casefold())
+    if existing is None:
+        tags.append(normalized)
+        tags.sort(key=str.lower)
+        save_settings(settings)
+        canonical = normalized
+    else:
+        canonical = existing
+    return jsonify({"tag": canonical, "tags": tags})
+
+
+@app.route("/tags/<path:tag_name>", methods=["DELETE"])
+def delete_tag(tag_name: str):
+    normalized = _normalize_tag_name(tag_name)
+    if not normalized:
+        return jsonify({"error": "Invalid tag name"}), 400
+    tags = get_global_tags()
+    lookup = {t.casefold(): (idx, t) for idx, t in enumerate(tags)}
+    entry = lookup.get(normalized.casefold())
+    if entry is None:
+        return jsonify({"error": "Tag not found"}), 404
+    idx, canonical = entry
+    canon_key = canonical.casefold()
+    for sid, conf in settings.items():
+        if sid.startswith("_") or not isinstance(conf, dict):
+            continue
+        stream_tags = conf.get(TAG_KEY) or []
+        for tag in stream_tags:
+            if isinstance(tag, str) and tag.casefold() == canon_key:
+                return jsonify({"error": "Tag is in use"}), 409
+    tags.pop(idx)
+    save_settings(settings)
+    return jsonify({"status": "deleted", "tags": tags})
+
+
 def _queue_ai_generation(stream_id: str, ai_settings: Dict[str, Any], *, trigger_source: str = "manual") -> Dict[str, Any]:
     if stable_horde_client is None:
         raise AutoGenerationUnavailable('Stable Horde client is not configured')
@@ -1512,7 +1681,7 @@ def _queue_ai_generation(stream_id: str, ai_settings: Dict[str, Any], *, trigger
     save_settings(settings)
     _emit_ai_update(stream_id, queued_state, job=ai_jobs[stream_id])
     try:
-        socketio.emit('refresh', {'stream_id': stream_id, 'config': conf})
+        socketio.emit('refresh', {'stream_id': stream_id, 'config': conf, 'tags': get_global_tags()})
     except Exception as exc:  # pragma: no cover
         logger.debug('Socket refresh emit failed: %s', exc)
 
@@ -2287,5 +2456,3 @@ def stream_group(name):
 
 if __name__ == "__main__":
     socketio.run(app, host="0.0.0.0", port=5000, debug=True)
-
-
