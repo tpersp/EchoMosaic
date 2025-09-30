@@ -2029,7 +2029,7 @@
     if (!force && aiPresetCache.promise) {
       return aiPresetCache.promise;
     }
-    aiPresetCache.promise = fetch('/ai/presets)
+    aiPresetCache.promise = fetch('/ai/presets')
       .then(async res => {
         const data = await res.json().catch(() => ({}));
         if (!res.ok || data.error) {
@@ -2041,6 +2041,10 @@
         refreshAllPresetSelects(presets);
         return presets;
       })
+      .catch(err => {
+        console.error('Failed to load presets', err);
+        throw err;
+      })
       .finally(() => {
         aiPresetCache.promise = null;
       });
@@ -2048,10 +2052,14 @@
   }
 
   async function savePresetRequest(name, settings, overwrite = false) {
-    const res = await fetch('/ai/presets, {
+    const trimmed = (name || '').trim();
+    if (!trimmed) {
+      throw new Error('Preset name is required');
+    }
+    const res = await fetch('/ai/presets', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name, settings, overwrite })
+      body: JSON.stringify({ name: trimmed, settings, overwrite })
     });
     const data = await res.json().catch(() => ({}));
     if (res.status === 409 && data.status === 'exists' && !overwrite) {
@@ -2067,10 +2075,14 @@
   }
 
   async function renamePresetRequest(oldName, newName) {
+    const trimmed = (newName || '').trim();
+    if (!trimmed) {
+      throw new Error('Preset name is required');
+    }
     const res = await fetch(`/ai/presets/${encodeURIComponent(oldName)}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: newName })
+      body: JSON.stringify({ name: trimmed })
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok || data.error) {
@@ -2091,19 +2103,20 @@
     aiPresetCache.items = null;
     return data;
   }
+
   async function fetchAiModels() {
     if (aiModelCache.models) {
       return aiModelCache.models;
     }
     if (!aiModelCache.promise) {
       aiModelCache.promise = fetch('/ai/models')
-        .then(res => {
+        .then(async res => {
           if (!res.ok) {
-            throw new Error(`HTTP ${res.status}`);
+            throw new Error(`Request failed (${res.status})`);
           }
-          return res.json();
+          const data = await res.json().catch(() => ({}));
+          return Array.isArray(data.models) ? data.models : [];
         })
-        .then(data => Array.isArray(data.models) ? data.models : [])
         .catch(err => {
           console.error('Failed to fetch Stable Horde models', err);
           return [];
@@ -2119,6 +2132,7 @@
   }
 
   function highlightAiSelection(resultsEl, selectedPath) {
+(resultsEl, selectedPath) {
     if (!resultsEl) return;
     const target = selectedPath || '';
     resultsEl.dataset.selected = target;
