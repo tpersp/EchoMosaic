@@ -2547,6 +2547,77 @@
     aiSummaryUpdaters.set(card, updateSummary);
     updateSummary();
 
+    if (presetSelect) {
+      aiPresetSelects.add(presetSelect);
+      if (aiPresetCache.items) {
+        populatePresetSelect(presetSelect, aiPresetCache.items);
+      } else {
+        populatePresetSelect(presetSelect, []);
+        fetchAiPresets()
+          .then(presets => populatePresetSelect(presetSelect, presets))
+          .catch(() => populatePresetSelect(presetSelect, []));
+      }
+      presetSelect.addEventListener('change', e => {
+        const selectedName = e.target.value;
+        if (!selectedName) return;
+        applyPresetByName(selectedName);
+      });
+    } else {
+      fetchAiPresets().catch(() => {});
+    }
+
+    if (savePresetBtn) {
+      savePresetBtn.addEventListener('click', async () => {
+        const payload = collectAiPayload(card);
+        const suggested = presetSelect && presetSelect.value ? presetSelect.value : '';
+        const input = prompt('Save preset as', suggested);
+        if (input === null) return;
+        const trimmed = (input || '').trim();
+        if (!trimmed) {
+          showNotification('Preset name cannot be empty');
+          return;
+        }
+        try {
+          await savePresetRequest(trimmed, payload);
+        } catch (err) {
+          if (err && err.code === 'exists') {
+            const overwrite = confirm('Preset "' + trimmed + '" already exists. Overwrite?');
+            if (!overwrite) return;
+            try {
+              await savePresetRequest(trimmed, payload, true);
+            } catch (overwriteErr) {
+              showNotification(overwriteErr && overwriteErr.message ? overwriteErr.message : 'Failed to save preset');
+              return;
+            }
+          } else {
+            showNotification(err && err.message ? err.message : 'Failed to save preset');
+            return;
+          }
+        }
+        try {
+          const presets = await fetchAiPresets(true);
+          if (presetManagerModal && !presetManagerModal.hidden) {
+            renderPresetManager(presets);
+          }
+          if (presetSelect) {
+            populatePresetSelect(presetSelect, presets);
+            presetSelect.value = trimmed;
+          }
+          showNotification('Preset "' + trimmed + '" saved');
+        } catch (refreshErr) {
+          showNotification(refreshErr && refreshErr.message ? refreshErr.message : 'Preset saved, but list failed to refresh');
+        }
+      });
+    } else {
+      fetchAiPresets().catch(() => {});
+    }
+
+    if (managePresetBtn) {
+      managePresetBtn.addEventListener('click', () => {
+        openPresetManager();
+      });
+    }
+
     if (openSettingsBtn) {
       openSettingsBtn.addEventListener('click', () => {
         updateSummary();

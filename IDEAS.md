@@ -43,9 +43,9 @@ A running list of ideas and future improvements. Add new items anywhere below.
 
 - [ ] Add ability to show movie files, like mp4, mpv, and other common movie media file types.
 
-- [ ] Add ability to save AI image gen presets, so user don't need to remember different settings for each type of image.
+- [x] Add ability to save AI image gen presets, so user don't need to remember different settings for each type of image.
 
-- [ ] Add feature to catagorize streams on the dashboard, and add feature to then be able to sort and filter catagories, that way users can get better overview when having many streams.
+- [x] Add feature to catagorize streams on the dashboard, and add feature to then be able to sort and filter catagories, that way users can get better overview when having many streams.
 
 ---
 
