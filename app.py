@@ -51,6 +51,7 @@ IMAGE_QUALITY_CHOICES = {"auto", "thumb", "medium", "full"}
 AI_MODE = "ai"
 AI_SETTINGS_KEY = "ai_settings"
 AI_STATE_KEY = "ai_state"
+AI_PRESETS_KEY = "_ai_presets"
 
 TAG_KEY = "tags"
 GLOBAL_TAGS_KEY = "_tags"
@@ -611,6 +612,34 @@ def _sanitize_ai_settings(
         else:
             current[key] = value
     return current
+
+
+
+def _sanitize_ai_presets(raw: Any) -> Dict[str, Dict[str, Any]]:
+    sanitized: Dict[str, Dict[str, Any]] = {}
+    if isinstance(raw, dict):
+        for name, payload in raw.items():
+            if not isinstance(name, str):
+                continue
+            trimmed = name.strip()
+            if not trimmed:
+                continue
+            if not isinstance(payload, dict):
+                continue
+            sanitized[trimmed] = _sanitize_ai_settings(payload, defaults=AI_FALLBACK_DEFAULTS)
+    return sanitized
+
+
+def _sorted_presets(presets: Dict[str, Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
+    return dict(sorted(presets.items(), key=lambda item: item[0].lower()))
+
+
+def ensure_ai_presets_storage() -> Dict[str, Dict[str, Any]]:
+    raw = settings.get(AI_PRESETS_KEY) if isinstance(settings, dict) else {}
+    sanitized = _sanitize_ai_presets(raw)
+    ordered = _sorted_presets(sanitized)
+    settings[AI_PRESETS_KEY] = ordered
+    return ordered
 
 
 def _ai_settings_match_defaults(candidate: Dict[str, Any], defaults: Optional[Dict[str, Any]] = None) -> bool:
@@ -1198,6 +1227,7 @@ settings["_ai_defaults"] = _sanitize_ai_settings(
     defaults=AI_FALLBACK_DEFAULTS,
 )
 
+ensure_ai_presets_storage()
 # Backfill defaults for existing stream entries
 for k, v in list(settings.items()):
     if not k.startswith("_") and isinstance(v, dict):
@@ -1514,9 +1544,93 @@ def update_ai_defaults():
             conf[AI_SETTINGS_KEY] = deepcopy(new_defaults)
             conf["_ai_customized"] = False
 
+    current_presets = ensure_ai_presets_storage()
+    refreshed_presets: Dict[str, Dict[str, Any]] = {}
+    for name, preset in current_presets.items():
+        refreshed_presets[name] = _sanitize_ai_settings(preset, defaults=AI_FALLBACK_DEFAULTS)
+    settings[AI_PRESETS_KEY] = _sorted_presets(refreshed_presets)
+
     save_settings(settings)
     return jsonify({"status": "success", "defaults": new_defaults})
 
+
+
+@app.route("/ai/presets", methods=["GET"])
+def list_ai_presets():
+    presets = ensure_ai_presets_storage()
+    payload = [
+        {"name": name, "settings": deepcopy(config)}
+        for name, config in presets.items()
+    ]
+    return jsonify({"presets": payload})
+
+
+@app.route("/ai/presets", methods=["POST"])
+def create_ai_preset():
+    data = request.get_json(silent=True) or {}
+    if not isinstance(data, dict):
+        return jsonify({"error": "Invalid payload"}), 400
+    name = str(data.get("name") or "").strip()
+    if not name:
+        return jsonify({"error": "Preset name is required"}), 400
+    settings_payload = data.get("settings")
+    if not isinstance(settings_payload, dict):
+        return jsonify({"error": "Preset settings must be an object"}), 400
+    overwrite = bool(data.get("overwrite"))
+    presets = ensure_ai_presets_storage()
+    if name in presets and not overwrite:
+        return jsonify({"error": "Preset already exists", "status": "exists"}), 409
+    sanitized = _sanitize_ai_settings(settings_payload, defaults=AI_FALLBACK_DEFAULTS)
+    updated = dict(presets)
+    updated[name] = sanitized
+    settings[AI_PRESETS_KEY] = _sorted_presets(updated)
+    save_settings(settings)
+    return jsonify({"status": "saved", "preset": {"name": name, "settings": deepcopy(sanitized)}})
+
+
+@app.route("/ai/presets/<preset_name>", methods=["PATCH"])
+def update_ai_preset(preset_name: str):
+    name = (preset_name or "").strip()
+    if not name:
+        return jsonify({"error": "Preset not found"}), 404
+    presets = ensure_ai_presets_storage()
+    if name not in presets:
+        return jsonify({"error": "Preset not found"}), 404
+    data = request.get_json(silent=True) or {}
+    if not isinstance(data, dict):
+        return jsonify({"error": "Invalid payload"}), 400
+    new_name = data.get("name")
+    new_settings = data.get("settings")
+    target_name = name
+    if new_name is not None:
+        candidate = str(new_name).strip()
+        if not candidate:
+            return jsonify({"error": "Preset name cannot be empty"}), 400
+        if candidate != name and candidate in presets:
+            return jsonify({"error": "Preset with that name already exists"}), 409
+        target_name = candidate
+    if new_settings is not None and not isinstance(new_settings, dict):
+        return jsonify({"error": "Preset settings must be an object"}), 400
+    sanitized = _sanitize_ai_settings(new_settings or presets[name], defaults=AI_FALLBACK_DEFAULTS)
+    updated = dict(presets)
+    updated.pop(name, None)
+    updated[target_name] = sanitized
+    settings[AI_PRESETS_KEY] = _sorted_presets(updated)
+    save_settings(settings)
+    return jsonify({"status": "updated", "preset": {"name": target_name, "settings": deepcopy(sanitized)}})
+
+
+@app.route("/ai/presets/<preset_name>", methods=["DELETE"])
+def delete_ai_preset(preset_name: str):
+    name = (preset_name or "").strip()
+    presets = ensure_ai_presets_storage()
+    if name not in presets:
+        return jsonify({"error": "Preset not found"}), 404
+    updated = dict(presets)
+    updated.pop(name, None)
+    settings[AI_PRESETS_KEY] = _sorted_presets(updated)
+    save_settings(settings)
+    return jsonify({"status": "deleted"})
 
 @app.route('/ai/loras')
 def ai_loras():

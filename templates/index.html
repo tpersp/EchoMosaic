@@ -254,6 +254,14 @@
             <h3>AI Image Settings</h3>
             <button type="button" class="ai-close-settings" aria-label="Close">&times;</button>
           </div>
+          <div class="ai-preset-controls" data-stream="{{ stream_id }}">
+            <label for="ai-preset-select-{{ stream_id }}">Preset</label>
+            <select id="ai-preset-select-{{ stream_id }}" class="ai-preset-select" data-stream="{{ stream_id }}" disabled>
+              <option value="" selected>No presets saved</option>
+            </select>
+            <button type="button" class="ai-preset-save" data-stream="{{ stream_id }}">Save Preset</button>
+            <button type="button" class="ai-preset-manage" data-stream="{{ stream_id }}">Manage</button>
+          </div>
           {% set sampler_options = ['k_euler','k_euler_a','k_dpmpp_2m','k_dpmpp_2m_sde','k_dpmpp_sde','k_lms','k_heun','k_dpm_2','k_dpm_2_a','k_dpm_fast','k_dpm_adaptive','ddim','plms'] %}
           <label for="ai-prompt-{{ stream_id }}">Prompt</label>
           <textarea id="ai-prompt-{{ stream_id }}" class="ai-prompt-input" data-stream="{{ stream_id }}" rows="3" placeholder="Describe the image you want">{{ ai.prompt or '' }}</textarea>
@@ -463,6 +471,19 @@
   <button id="save-notes">Save</button>
 </div>
 
+  <div id="ai-preset-manager-backdrop" class="ai-preset-manager-backdrop" hidden></div>
+  <div id="ai-preset-manager" class="ai-preset-manager" role="dialog" aria-modal="true" aria-labelledby="ai-preset-manager-title" hidden>
+    <div class="ai-preset-manager-content">
+      <div class="ai-preset-manager-header">
+        <h3 id="ai-preset-manager-title">Preset Manager</h3>
+        <button type="button" class="ai-preset-manager-close" aria-label="Close">&times;</button>
+      </div>
+      <div class="ai-preset-manager-body">
+        <p class="ai-preset-empty" hidden>No presets saved.</p>
+        <ul class="ai-preset-list"></ul>
+      </div>
+    </div>
+  </div>
 <script src="https://cdn.socket.io/4.0.1/socket.io.min.js"></script>
 <script>
   // Theme toggle (sun/moon)
@@ -530,7 +551,13 @@
   }
 
   document.addEventListener('keydown', e => {
-    if (e.key === 'Escape' && openAiCard) {
+    if (e.key !== 'Escape') return;
+    if (presetManagerModal && !presetManagerModal.hidden) {
+      e.preventDefault();
+      closePresetManager();
+      return;
+    }
+    if (openAiCard) {
       e.preventDefault();
       closeAiSettings(openAiCard);
     }
@@ -1825,7 +1852,246 @@
   // elements with a ``data-stream`` attribute.
 
   const aiModelCache = { models: null, promise: null };
+  const aiPresetCache = { items: null, promise: null };
+  const aiPresetSelects = new Set();
+  let presetManagerModal = null;
+  let presetManagerBackdrop = null;
+  let presetManagerList = null;
+  let presetManagerEmpty = null;
   const aiActiveJobs = new Map();
+
+  function setupPresetManagerElements() {
+    if (presetManagerModal) return;
+    presetManagerModal = document.getElementById('ai-preset-manager');
+    presetManagerBackdrop = document.getElementById('ai-preset-manager-backdrop');
+    if (presetManagerModal) {
+      presetManagerList = presetManagerModal.querySelector('.ai-preset-list');
+      presetManagerEmpty = presetManagerModal.querySelector('.ai-preset-empty');
+      const closeBtn = presetManagerModal.querySelector('.ai-preset-manager-close');
+      if (closeBtn) closeBtn.addEventListener('click', closePresetManager);
+    }
+    if (presetManagerBackdrop) {
+      presetManagerBackdrop.addEventListener('click', closePresetManager);
+    }
+  }
+
+  function closePresetManager() {
+    if (presetManagerModal) {
+      presetManagerModal.hidden = true;
+      presetManagerModal.setAttribute('aria-hidden', 'true');
+    }
+    if (presetManagerBackdrop) presetManagerBackdrop.hidden = true;
+    document.body.classList.remove('ai-preset-manager-open');
+  }
+
+  function renderPresetManager(presets) {
+    setupPresetManagerElements();
+    if (!presetManagerModal || !presetManagerList) return;
+    presetManagerList.innerHTML = '';
+    const items = Array.isArray(presets) ? presets : [];
+    if (!items.length) {
+      if (presetManagerEmpty) presetManagerEmpty.hidden = false;
+      return;
+    }
+    if (presetManagerEmpty) presetManagerEmpty.hidden = true;
+    items.forEach(preset => {
+      const li = document.createElement('li');
+      li.className = 'ai-preset-item';
+      const header = document.createElement('div');
+      header.className = 'ai-preset-item-row';
+      const nameEl = document.createElement('span');
+      nameEl.className = 'ai-preset-item-name';
+      nameEl.textContent = preset.name;
+      header.appendChild(nameEl);
+      const actions = document.createElement('div');
+      actions.className = 'ai-preset-item-actions';
+      const renameBtn = document.createElement('button');
+      renameBtn.type = 'button';
+      renameBtn.className = 'ai-preset-rename';
+      renameBtn.textContent = 'Rename';
+      renameBtn.addEventListener('click', async () => {
+        const next = prompt('Rename preset', preset.name);
+        if (next === null) return;
+        const trimmed = (next || '').trim();
+        if (!trimmed || trimmed === preset.name) {
+          if (!trimmed) showNotification('Preset name cannot be empty');
+          return;
+        }
+        try {
+          await renamePresetRequest(preset.name, trimmed);
+          const updated = await fetchAiPresets(true);
+          refreshAllPresetSelects(updated);
+          renderPresetManager(updated);
+          showNotification('Preset "' + trimmed + '" saved');
+        } catch (err) {
+          showNotification(err && err.message ? err.message : 'Failed to rename preset');
+        }
+      });
+      actions.appendChild(renameBtn);
+      const deleteBtn = document.createElement('button');
+      deleteBtn.type = 'button';
+      deleteBtn.className = 'ai-preset-delete';
+      deleteBtn.textContent = 'Delete';
+      deleteBtn.addEventListener('click', async () => {
+        if (!confirm('Delete preset "' + preset.name + '"?')) return;
+        try {
+          await deletePresetRequest(preset.name);
+          const updated = await fetchAiPresets(true);
+          refreshAllPresetSelects(updated);
+          renderPresetManager(updated);
+          showNotification('Preset "' + preset.name + '" deleted');
+        } catch (err) {
+          showNotification(err && err.message ? err.message : 'Failed to delete preset');
+        }
+      });
+      actions.appendChild(deleteBtn);
+      const viewDetails = document.createElement('details');
+      viewDetails.className = 'ai-preset-item-details';
+      const summary = document.createElement('summary');
+      summary.textContent = 'View settings';
+      const pre = document.createElement('pre');
+      pre.textContent = JSON.stringify(preset.settings || {}, null, 2);
+      viewDetails.appendChild(summary);
+      viewDetails.appendChild(pre);
+      header.appendChild(actions);
+      li.appendChild(header);
+      li.appendChild(viewDetails);
+      presetManagerList.appendChild(li);
+    });
+  }
+
+  async function openPresetManager() {
+    setupPresetManagerElements();
+    if (!presetManagerModal) return;
+    presetManagerModal.hidden = false;
+    presetManagerModal.setAttribute('aria-hidden', 'false');
+    if (presetManagerBackdrop) presetManagerBackdrop.hidden = false;
+    document.body.classList.add('ai-preset-manager-open');
+    try {
+      const presets = await fetchAiPresets();
+      renderPresetManager(presets);
+    } catch (err) {
+      renderPresetManager([]);
+      showNotification(err && err.message ? err.message : 'Failed to load presets');
+    }
+  }
+
+  function populatePresetSelect(select, presets) {
+    if (!select) return;
+    const items = Array.isArray(presets) ? presets : [];
+    const previous = select.value;
+    select.innerHTML = '';
+    if (!items.length) {
+      const option = document.createElement('option');
+      option.value = '';
+      option.textContent = 'No presets saved';
+      option.disabled = true;
+      option.selected = true;
+      select.appendChild(option);
+      select.disabled = true;
+      return;
+    }
+    select.disabled = false;
+    const placeholder = document.createElement('option');
+    placeholder.value = '';
+    placeholder.disabled = true;
+    placeholder.textContent = 'Select a preset...';
+    select.appendChild(placeholder);
+    items.forEach(preset => {
+      const option = document.createElement('option');
+      option.value = preset.name;
+      option.textContent = preset.name;
+      select.appendChild(option);
+    });
+    if (items.some(p => p.name === previous)) {
+      select.value = previous;
+    } else {
+      placeholder.selected = true;
+    }
+  }
+
+  function refreshAllPresetSelects(presets) {
+    Array.from(aiPresetSelects).forEach(select => {
+      if (!select || !select.isConnected) {
+        aiPresetSelects.delete(select);
+        return;
+      }
+      populatePresetSelect(select, presets);
+    });
+  }
+
+  async function fetchAiPresets(force = false) {
+    if (force) {
+      aiPresetCache.items = null;
+    } else if (aiPresetCache.items) {
+      return aiPresetCache.items;
+    }
+    if (!force && aiPresetCache.promise) {
+      return aiPresetCache.promise;
+    }
+    aiPresetCache.promise = fetch('/ai/presets')
+      .then(async res => {
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || data.error) {
+          throw new Error(data.error || Request failed ());
+        }
+        const presets = Array.isArray(data.presets) ? data.presets.slice() : [];
+        presets.sort((a, b) => a.name.localeCompare(b.name));
+        aiPresetCache.items = presets;
+        refreshAllPresetSelects(presets);
+        return presets;
+      })
+      .finally(() => {
+        aiPresetCache.promise = null;
+      });
+    return aiPresetCache.promise;
+  }
+
+  async function savePresetRequest(name, settings, overwrite = false) {
+    const res = await fetch('/ai/presets', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, settings, overwrite })
+    });
+    const data = await res.json().catch(() => ({}));
+    if (res.status === 409 && data.status === 'exists' && !overwrite) {
+      const err = new Error(data.error || 'Preset already exists');
+      err.code = 'exists';
+      throw err;
+    }
+    if (!res.ok || data.error) {
+      throw new Error(data.error || Request failed ());
+    }
+    aiPresetCache.items = null;
+    return data.preset;
+  }
+
+  async function renamePresetRequest(oldName, newName) {
+    const res = await fetch(/ai/presets/, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: newName })
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || data.error) {
+      throw new Error(data.error || Request failed ());
+    }
+    aiPresetCache.items = null;
+    return data.preset;
+  }
+
+  async function deletePresetRequest(name) {
+    const res = await fetch(/ai/presets/, {
+      method: 'DELETE'
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || data.error) {
+      throw new Error(data.error || Request failed ());
+    }
+    aiPresetCache.items = null;
+    return data;
+  }
+
 
   async function fetchAiModels() {
     if (aiModelCache.models) {
@@ -2143,6 +2409,9 @@
     aiSection.setAttribute('aria-hidden', 'true');
     const summaryRoot = card.querySelector('.ai-summary');
     const modalBackdrop = card.querySelector('.ai-modal-backdrop');
+    const presetSelect = card.querySelector('.ai-preset-select');
+    const savePresetBtn = card.querySelector('.ai-preset-save');
+    const managePresetBtn = card.querySelector('.ai-preset-manage');
     const openSettingsBtn = card.querySelector('.ai-open-settings');
     const closeSettingsButtons = aiSection.querySelectorAll('.ai-close-settings, .ai-close-settings-secondary');
     const autoModeSelect = card.querySelector('.ai-auto-mode');
@@ -2151,6 +2420,7 @@
     const autoIntervalInput = card.querySelector('.ai-auto-interval');
     const autoUnitSelect = card.querySelector('.ai-auto-interval-unit');
     const autoClockInput = card.querySelector('.ai-auto-clock');
+    let applyingPreset = false;
     const updateAutoVisibility = () => {
       const modeValue = autoModeSelect ? autoModeSelect.value : 'off';
       if (autoTimerRow) autoTimerRow.hidden = modeValue !== 'timer';
@@ -2498,6 +2768,185 @@
           error.textContent = err && err.message ? err.message : 'Unable to load LoRAs';
           loraResultsList.appendChild(error);
         }
+      }
+    }
+
+
+    function applyPresetSettings(preset) {
+      if (!preset || typeof preset !== 'object') return;
+      const aiSection = card.querySelector('.ai-generator');
+      const promptInput = card.querySelector('.ai-prompt-input');
+      if (promptInput) promptInput.value = preset.prompt || '';
+      const negativeInput = card.querySelector('.ai-negative-input');
+      if (negativeInput) negativeInput.value = preset.negative_prompt || '';
+      const modelSelect = card.querySelector('.ai-model-select');
+      if (modelSelect) {
+        const value = preset.model || '';
+        if (value && !Array.from(modelSelect.options).some(opt => opt.value === value)) {
+          const opt = document.createElement('option');
+          opt.value = value;
+          opt.textContent = value;
+          modelSelect.appendChild(opt);
+        }
+        modelSelect.value = value;
+      }
+      const samplerSelect = card.querySelector('.ai-sampler-select');
+      if (samplerSelect) {
+        const samplerValue = preset.sampler || 'k_euler';
+        if (samplerValue && !Array.from(samplerSelect.options).some(opt => opt.value === samplerValue)) {
+          const opt = document.createElement('option');
+          opt.value = samplerValue;
+          opt.textContent = samplerValue;
+          samplerSelect.appendChild(opt);
+        }
+        samplerSelect.value = samplerValue;
+      }
+      const widthInput = card.querySelector('.ai-width-input');
+      if (widthInput) {
+        const width = Number(preset.width);
+        widthInput.value = Number.isFinite(width) ? String(width) : '';
+      }
+      const heightInput = card.querySelector('.ai-height-input');
+      if (heightInput) {
+        const height = Number(preset.height);
+        heightInput.value = Number.isFinite(height) ? String(height) : '';
+      }
+      const stepsInput = card.querySelector('.ai-steps-input');
+      if (stepsInput) {
+        const steps = Number(preset.steps);
+        stepsInput.value = Number.isFinite(steps) ? String(steps) : '';
+      }
+      const cfgInput = card.querySelector('.ai-cfg-input');
+      if (cfgInput) {
+        const cfg = Number(preset.cfg_scale);
+        cfgInput.value = Number.isFinite(cfg) ? String(cfg) : '';
+      }
+      const samplesInput = card.querySelector('.ai-samples-input');
+      if (samplesInput) {
+        const samples = Number(preset.samples);
+        samplesInput.value = Number.isFinite(samples) ? String(samples) : '';
+      }
+      const seedInput = card.querySelector('.ai-seed-input');
+      if (seedInput) seedInput.value = preset.seed && preset.seed !== 'random' ? preset.seed : '';
+      const styleInput = card.querySelector('.ai-style-input');
+      if (styleInput) styleInput.value = preset.style || '';
+      const clipSkipInput = card.querySelector('.ai-clip-skip');
+      if (clipSkipInput) {
+        const clip = Number(preset.clip_skip);
+        clipSkipInput.value = Number.isFinite(clip) ? String(clip) : '';
+      }
+      const facefixerInput = card.querySelector('.ai-facefixer');
+      if (facefixerInput) {
+        const val = Number(preset.facefixer_strength);
+        facefixerInput.value = Number.isFinite(val) ? String(val) : '';
+      }
+      const denoiseInput = card.querySelector('.ai-denoise');
+      if (denoiseInput) {
+        const val = Number(preset.denoising_strength);
+        denoiseInput.value = Number.isFinite(val) ? String(val) : '';
+      }
+      const hiresDenoiseInput = card.querySelector('.ai-hires-denoise');
+      if (hiresDenoiseInput) {
+        const val = Number(preset.hires_fix_denoising_strength);
+        hiresDenoiseInput.value = Number.isFinite(val) ? String(val) : '';
+      }
+      const boolPairs = [
+        ['.ai-hires-fix', 'hires_fix'],
+        ['.ai-karras', 'karras'],
+        ['.ai-tiling', 'tiling'],
+        ['.ai-transparent', 'transparent'],
+        ['.ai-trusted-workers', 'trusted_workers'],
+        ['.ai-validated-backends', 'validated_backends'],
+        ['.ai-slow-workers', 'slow_workers'],
+        ['.ai-extra-slow-workers', 'extra_slow_workers'],
+        ['.ai-disable-batching', 'disable_batching'],
+        ['.ai-allow-downgrade', 'allow_downgrade']
+      ];
+      boolPairs.forEach(([selector, key]) => {
+        const input = card.querySelector(selector);
+        if (input) input.checked = !!preset[key];
+      });
+      const saveOutput = card.querySelector('.ai-save-output');
+      if (saveOutput) saveOutput.checked = !!preset.save_output;
+      const nsfw = card.querySelector('.ai-nsfw');
+      if (nsfw) nsfw.checked = !!preset.nsfw;
+      const censor = card.querySelector('.ai-censor');
+      if (censor) censor.checked = !!preset.censor_nsfw;
+      const postChecks = card.querySelectorAll('.ai-post-proc');
+      if (postChecks.length) {
+        const selected = new Set(Array.isArray(preset.post_processing) ? preset.post_processing : []);
+        postChecks.forEach(chk => {
+          chk.checked = selected.has(chk.value);
+        });
+      }
+      if (loraList) {
+        loraList.innerHTML = '';
+        const loras = Array.isArray(preset.loras) ? preset.loras : [];
+        loras.forEach(lora => {
+          const row = appendEmptyLoraRow();
+          if (!row) return;
+          const nameInput = row.querySelector('.ai-lora-name');
+          if (nameInput) nameInput.value = lora && lora.name ? lora.name : '';
+          const modelInput = row.querySelector('.ai-lora-model');
+          if (modelInput) modelInput.value = lora && lora.model !== undefined && lora.model !== null ? String(lora.model) : '';
+          const clipInput = row.querySelector('.ai-lora-clip');
+          if (clipInput) clipInput.value = lora && lora.clip !== undefined && lora.clip !== null ? String(lora.clip) : '';
+          const triggerInput = row.querySelector('.ai-lora-trigger');
+          if (triggerInput) triggerInput.value = lora && lora.inject_trigger ? lora.inject_trigger : '';
+          const flagInput = row.querySelector('.ai-lora-is-version');
+          if (flagInput) flagInput.checked = !!(lora && lora.is_version);
+        });
+        updateLoraAddState();
+      }
+      const autoModeSelect = card.querySelector('.ai-auto-mode');
+      if (autoModeSelect) {
+        const modeValue = typeof preset.auto_generate_mode === 'string' ? preset.auto_generate_mode.toLowerCase() : 'off';
+        autoModeSelect.value = modeValue;
+        updateAutoVisibility();
+      }
+      const autoIntervalInput = card.querySelector('.ai-auto-interval');
+      if (autoIntervalInput) {
+        const interval = Number(preset.auto_generate_interval_value);
+        autoIntervalInput.value = Number.isFinite(interval) ? String(interval) : '';
+      }
+      const autoUnitSelect = card.querySelector('.ai-auto-interval-unit');
+      if (autoUnitSelect) {
+        const unit = typeof preset.auto_generate_interval_unit === 'string' ? preset.auto_generate_interval_unit.toLowerCase() : 'minutes';
+        autoUnitSelect.value = unit === 'hours' ? 'hours' : 'minutes';
+      }
+      const autoClockInputEl = card.querySelector('.ai-auto-clock');
+      if (autoClockInputEl) autoClockInputEl.value = preset.auto_generate_clock_time || '';
+      if (aiSection) {
+        const timeoutValue = Number(preset.timeout);
+        if (Number.isFinite(timeoutValue) && timeoutValue > 0) {
+          aiSection.dataset.timeout = String(timeoutValue);
+        } else {
+          aiSection.dataset.timeout = '';
+        }
+      }
+      updateSummary();
+    }
+
+    async function applyPresetByName(presetName) {
+      if (!presetName || applyingPreset) return;
+      applyingPreset = true;
+      try {
+        const presets = await fetchAiPresets();
+        const preset = presets.find(item => item.name === presetName);
+        if (!preset) {
+          showNotification('Preset "' + presetName + '" not found');
+          populatePresetSelect(presetSelect, presets);
+          return;
+        }
+        applyPresetSettings(preset.settings || {});
+        const payload = collectAiPayload(card);
+        const result = await saveSettings(streamId, { ai_settings: payload });
+        if (!result || result.error) return;
+        showNotification('Preset "' + presetName + '" applied');
+      } catch (err) {
+        showNotification(err && err.message ? err.message : 'Failed to apply preset');
+      } finally {
+        applyingPreset = false;
       }
     }
 
