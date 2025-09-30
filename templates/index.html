@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8"/>
@@ -187,7 +187,7 @@
           <label for="stream-url-{{ stream_id }}">URL</label>
           <div>
             <div style="display:flex; align-items:center; gap:8px; flex-wrap: wrap;">
-              <input id="stream-url-{{ stream_id }}" type="text" class="stream-url-input" data-stream="{{ stream_id }}" value="{{ conf.stream_url if conf.stream_url else '' }}" placeholder="https://…">
+              <input id="stream-url-{{ stream_id }}" type="text" class="stream-url-input" data-stream="{{ stream_id }}" value="{{ conf.stream_url if conf.stream_url else '' }}" placeholder="https://�">
               <span class="url-type-badge" aria-live="polite"></span>
               <span class="embed-status-badge" aria-live="polite"></span>
             </div>
@@ -493,7 +493,7 @@
     function apply(theme){
       const t = (theme === 'light') ? 'light' : 'dark';
       root.setAttribute('data-theme', t);
-      if (btn) btn.textContent = t === 'light' ? '☀️' : '🌙';
+      if (btn) btn.textContent = t === 'light' ? '??' : '??';
     }
     const saved = localStorage.getItem('theme') || 'dark';
     apply(saved);
@@ -1450,7 +1450,7 @@
     // Add row with combined search/select + Add
     const addRow = makeEl('div', {class:'tile-row tile-add-row'}, []);
     const dlId = `dl-${Math.random().toString(36).slice(2)}`;
-    const combo = makeEl('input', {type:'text', class:'tile-combo', placeholder:'Search or select…', list: dlId}, []);
+    const combo = makeEl('input', {type:'text', class:'tile-combo', placeholder:'Search or select�', list: dlId}, []);
     const datalist = makeEl('datalist', {id: dlId}, []);
     const addBtn = makeEl('button', {class:'tile-add-btn', type:'button'}, ['Add']);
     addRow.appendChild(combo);
@@ -2029,11 +2029,11 @@
     if (!force && aiPresetCache.promise) {
       return aiPresetCache.promise;
     }
-    aiPresetCache.promise = fetch('/ai/presets')
+    aiPresetCache.promise = fetch('/ai/presets)
       .then(async res => {
         const data = await res.json().catch(() => ({}));
         if (!res.ok || data.error) {
-          throw new Error(data.error || Request failed ());
+          throw new Error(data.error || `Request failed (${res.status})`);
         }
         const presets = Array.isArray(data.presets) ? data.presets.slice() : [];
         presets.sort((a, b) => a.name.localeCompare(b.name));
@@ -2048,7 +2048,7 @@
   }
 
   async function savePresetRequest(name, settings, overwrite = false) {
-    const res = await fetch('/ai/presets', {
+    const res = await fetch('/ai/presets, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ name, settings, overwrite })
@@ -2060,39 +2060,37 @@
       throw err;
     }
     if (!res.ok || data.error) {
-      throw new Error(data.error || Request failed ());
+      throw new Error(data.error || `Request failed (${res.status})`);
     }
     aiPresetCache.items = null;
     return data.preset;
   }
 
   async function renamePresetRequest(oldName, newName) {
-    const res = await fetch(/ai/presets/, {
+    const res = await fetch(`/ai/presets/${encodeURIComponent(oldName)}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ name: newName })
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok || data.error) {
-      throw new Error(data.error || Request failed ());
+      throw new Error(data.error || `Request failed (${res.status})`);
     }
     aiPresetCache.items = null;
     return data.preset;
   }
 
   async function deletePresetRequest(name) {
-    const res = await fetch(/ai/presets/, {
+    const res = await fetch(`/ai/presets/${encodeURIComponent(name)}`, {
       method: 'DELETE'
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok || data.error) {
-      throw new Error(data.error || Request failed ());
+      throw new Error(data.error || `Request failed (${res.status})`);
     }
     aiPresetCache.items = null;
     return data;
   }
-
-
   async function fetchAiModels() {
     if (aiModelCache.models) {
       return aiModelCache.models;
@@ -2101,7 +2099,7 @@
       aiModelCache.promise = fetch('/ai/models')
         .then(res => {
           if (!res.ok) {
-            throw new Error(HTTP );
+            throw new Error(`HTTP ${res.status}`);
           }
           return res.json();
         })
@@ -3612,7 +3610,7 @@
         if (!statusEl || !url) { if (statusEl) statusEl.textContent=''; return; }
         // Debounce rapid typing
         if (testTimer) clearTimeout(testTimer);
-        statusEl.textContent = 'Testing…';
+        statusEl.textContent = 'Testing�';
         statusEl.dataset.state = 'testing';
         testTimer = setTimeout(async () => {
           if (testAbort) { try { testAbort.abort(); } catch {} }
@@ -3754,3 +3752,8 @@
 </script>
 </body>
 </html>
+
+
+
+
+
