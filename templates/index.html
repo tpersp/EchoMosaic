@@ -649,7 +649,7 @@
     if (typeof value !== 'string') {
       return '';
     }
-    const cleaned = value.replace(/\s+/g, ' ').trim();
+    const cleaned = value.replace(/s+/g, ' ').trim();
     if (!cleaned) {
       return '';
     }
@@ -1922,7 +1922,7 @@
           const updated = await fetchAiPresets(true);
           refreshAllPresetSelects(updated);
           renderPresetManager(updated);
-          showNotification(\`Preset "${trimmed}" saved\`);
+          showNotification(`Preset "${trimmed}" saved`);
         } catch (err) {
           showNotification(err && err.message ? err.message : 'Failed to rename preset');
         }
@@ -1933,13 +1933,13 @@
       deleteBtn.className = 'ai-preset-delete';
       deleteBtn.textContent = 'Delete';
       deleteBtn.addEventListener('click', async () => {
-        if (!confirm(\`Delete preset "${preset.name}"?\`)) return;
+        if (!confirm(`Delete preset "${preset.name}"?`)) return;
         try {
           await deletePresetRequest(preset.name);
           const updated = await fetchAiPresets(true);
           refreshAllPresetSelects(updated);
           renderPresetManager(updated);
-          showNotification(\`Preset "${preset.name}" deleted\`);
+          showNotification(`Preset "${preset.name}" deleted`);
         } catch (err) {
           showNotification(err && err.message ? err.message : 'Failed to delete preset');
         }
@@ -2178,7 +2178,7 @@
   }
 
   function formatAutoTime(value) {
-    const fallback = '\u2014';
+    const fallback = 'u2014';
     if (!value) return fallback;
     const parsed = new Date(value);
     if (!Number.isNaN(parsed.getTime())) {
@@ -2581,7 +2581,7 @@
           await savePresetRequest(trimmed, payload);
         } catch (err) {
           if (err && err.code === 'exists') {
-            const overwrite = confirm(\`Preset "${trimmed}" already exists. Overwrite?\`);
+            const overwrite = confirm(`Preset "${trimmed}" already exists. Overwrite?`);
             if (!overwrite) return;
             try {
               await savePresetRequest(trimmed, payload, true);
@@ -2603,7 +2603,7 @@
             populatePresetSelect(presetSelect, presets);
             presetSelect.value = trimmed;
           }
-          showNotification(\`Preset "${trimmed}" saved\`);
+          showNotification(`Preset "${trimmed}" saved`);
         } catch (refreshErr) {
           showNotification(refreshErr && refreshErr.message ? refreshErr.message : 'Preset saved, but list failed to refresh');
         }
@@ -3005,7 +3005,7 @@
         const presets = await fetchAiPresets();
         const preset = presets.find(item => item.name === presetName);
         if (!preset) {
-          showNotification(\`Preset "${presetName}" not found\`);
+          showNotification(`Preset "${presetName}" not found`);
           populatePresetSelect(presetSelect, presets);
           return;
         }
@@ -3013,7 +3013,7 @@
         const payload = collectAiPayload(card);
         const result = await saveSettings(streamId, { ai_settings: payload });
         if (!result || result.error) return;
-        showNotification(\`Preset "${presetName}" applied\`);
+        showNotification(`Preset "${presetName}" applied`);
       } catch (err) {
         showNotification(err && err.message ? err.message : 'Failed to apply preset');
       } finally {
