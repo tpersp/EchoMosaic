@@ -187,7 +187,7 @@
           <label for="stream-url-{{ stream_id }}">URL</label>
           <div>
             <div style="display:flex; align-items:center; gap:8px; flex-wrap: wrap;">
-              <input id="stream-url-{{ stream_id }}" type="text" class="stream-url-input" data-stream="{{ stream_id }}" value="{{ conf.stream_url if conf.stream_url else '' }}" placeholder="https://…">
+              <input id="stream-url-{{ stream_id }}" type="text" class="stream-url-input" data-stream="{{ stream_id }}" value="{{ conf.stream_url if conf.stream_url else '' }}" placeholder="https://...">
               <span class="url-type-badge" aria-live="polite"></span>
               <span class="embed-status-badge" aria-live="polite"></span>
             </div>
@@ -363,7 +363,7 @@
               <div class="ai-lora-search">
                 <input type="text" class="ai-lora-search-input" placeholder="Search LoRAs on CivitAI (e.g. 'anime style')">
                 <button type="button" class="ai-lora-search-btn" data-stream="{{ stream_id }}">Search</button>
-                <a href="https://civitai.com/models?types=LORA&sort=Highest%20Rated" class="ai-lora-browse" target="_blank" rel="noopener">Browse</a>
+                <a href="https://civitai.com/models...types=LORA&sort=Highest%20Rated" class="ai-lora-browse" target="_blank" rel="noopener">Browse</a>
               </div>
               <div class="ai-lora-results" hidden>
                 <div class="ai-lora-results-header"></div>
@@ -491,15 +491,15 @@
     const root = document.documentElement;
     const btn = document.getElementById('theme-toggle');
     function apply(theme){
-      const t = (theme === 'light') ? 'light' : 'dark';
+      const t = (theme === 'light') ... 'light' : 'dark';
       root.setAttribute('data-theme', t);
-      if (btn) btn.textContent = t === 'light' ? '??' : '??';
+      if (btn) btn.textContent = t === 'light' ... '......' : '......';
     }
     const saved = localStorage.getItem('theme') || 'dark';
     apply(saved);
     if (btn) btn.addEventListener('click', () => {
-      const cur = root.getAttribute('data-theme') === 'light' ? 'light' : 'dark';
-      const next = cur === 'light' ? 'dark' : 'light';
+      const cur = root.getAttribute('data-theme') === 'light' ... 'light' : 'dark';
+      const next = cur === 'light' ... 'dark' : 'light';
       apply(next);
       try { localStorage.setItem('theme', next); } catch(e){}
     });
@@ -589,7 +589,7 @@
 
   const initialGlobalTags = {{ global_tags|tojson }};
   const globalTagState = {
-    list: Array.isArray(initialGlobalTags) ? initialGlobalTags.slice() : [],
+    list: Array.isArray(initialGlobalTags) ... initialGlobalTags.slice() : [],
     map: new Map()
   };
   globalTagState.list.forEach(tag => {
@@ -623,8 +623,8 @@
     const layout = mosaicLayoutSel.value;
     const colsLabel = document.getElementById('mosaic-cols-label');
     const showCols = layout === 'grid';
-    mosaicColsInput.style.display = showCols ? 'inline-block' : 'none';
-    if (colsLabel) colsLabel.style.display = showCols ? 'inline' : 'none';
+    mosaicColsInput.style.display = showCols ... 'inline-block' : 'none';
+    if (colsLabel) colsLabel.style.display = showCols ... 'inline' : 'none';
   }
   function saveMosaic() {
     if (!mosaicLayoutSel) return;
@@ -653,7 +653,7 @@
     if (!cleaned) {
       return '';
     }
-    return cleaned.length > 48 ? cleaned.slice(0, 48).trim() : cleaned;
+    return cleaned.length > 48 ... cleaned.slice(0, 48).trim() : cleaned;
   }
 
   function tagsEqual(a, b) {
@@ -676,7 +676,7 @@
     }
     try {
       const parsed = JSON.parse(raw);
-      return Array.isArray(parsed) ? parsed.filter(t => typeof t === 'string') : [];
+      return Array.isArray(parsed) ... parsed.filter(t => typeof t === 'string') : [];
     } catch (err) {
       return [];
     }
@@ -686,7 +686,7 @@
     if (!card) {
       return [];
     }
-    const cleaned = Array.isArray(tags) ? tags.filter(t => typeof t === 'string') : [];
+    const cleaned = Array.isArray(tags) ... tags.filter(t => typeof t === 'string') : [];
     card.dataset.tags = JSON.stringify(cleaned);
     cardTagsMap.set(card, cleaned.slice());
     const chipList = card.querySelector('.tag-chip-list');
@@ -735,14 +735,14 @@
     if (!streamId) {
       return;
     }
-    const sanitized = Array.isArray(nextTags) ? nextTags.map(normalizeTagInput).filter(Boolean) : [];
+    const sanitized = Array.isArray(nextTags) ... nextTags.map(normalizeTagInput).filter(Boolean) : [];
     const current = getCardTags(card);
     if (tagsEqual(current, sanitized)) {
       return;
     }
     const editor = card.querySelector('.tag-editor');
-    const input = editor ? editor.querySelector('.tag-entry') : null;
-    const buttons = editor ? Array.from(editor.querySelectorAll('.tag-remove')) : [];
+    const input = editor ... editor.querySelector('.tag-entry') : null;
+    const buttons = editor ... Array.from(editor.querySelectorAll('.tag-remove')) : [];
     if (input) {
       input.disabled = true;
     }
@@ -841,7 +841,7 @@
       chip.appendChild(label);
       const countEl = document.createElement('span');
       countEl.className = 'tag-usage';
-      countEl.textContent = `${count} stream${count === 1 ? '' : 's'}`;
+      countEl.textContent = `${count} stream${count === 1 ... '' : 's'}`;
       const removeBtn = document.createElement('button');
       removeBtn.type = 'button';
       removeBtn.className = 'tag-remove-btn';
@@ -865,7 +865,7 @@
       .then(res => res.json().then(data => ({ ok: res.ok, data })))
       .then(result => {
         if (result.ok) {
-          const tags = Array.isArray(result.data.tags) ? result.data.tags : [];
+          const tags = Array.isArray(result.data.tags) ... result.data.tags : [];
           syncGlobalTags(tags);
           showNotification('Tag removed');
         } else {
@@ -978,8 +978,8 @@
     const filterSet = new Set(activeTagFilters.map(tag => tag.toLowerCase()));
     cardTagsMap.forEach((tags, card) => {
       const matches = filterSet.size === 0 || tags.some(tag => filterSet.has(tag.toLowerCase()));
-      card.dataset.matchesFilter = matches ? 'true' : 'false';
-      card.style.display = matches ? '' : 'none';
+      card.dataset.matchesFilter = matches ... 'true' : 'false';
+      card.style.display = matches ... '' : 'none';
     });
     while (dashboardGrid.firstChild) {
       dashboardGrid.removeChild(dashboardGrid.firstChild);
@@ -1068,12 +1068,12 @@
       .then(res => res.json().then(data => ({ ok: res.ok, data })))
       .then(result => {
         if (result.ok) {
-          const tags = Array.isArray(result.data.tags) ? result.data.tags : [];
+          const tags = Array.isArray(result.data.tags) ... result.data.tags : [];
           syncGlobalTags(tags);
           if (newTagInput) {
             newTagInput.value = '';
           }
-          const created = typeof result.data.tag === 'string' ? result.data.tag : value;
+          const created = typeof result.data.tag === 'string' ... result.data.tag : value;
           showNotification(`Tag '${created}' saved`);
         } else {
           showNotification(result.data.error || 'Unable to create tag');
@@ -1107,7 +1107,7 @@
       return Promise.resolve();
     }
     const streamId = card.dataset.stream;
-    const url = hideNsfw ? '/folders?hide_nsfw=1' : '/folders';
+    const url = hideNsfw ... '/folders...hide_nsfw=1' : '/folders';
     return fetch(url)
       .then(r => {
         if (!r.ok) {
@@ -1166,7 +1166,7 @@
         } else {
           folderSelect.title = folderSelect.value || assigned;
         }
-        card.dataset.hideNsfw = hideNsfw ? 'true' : 'false';
+        card.dataset.hideNsfw = hideNsfw ... 'true' : 'false';
         return { effectiveFolder };
       })
       .then(result => {
@@ -1188,7 +1188,7 @@
   function makeEl(tag, attrs = {}, children = []) {
     const e = document.createElement(tag);
     Object.entries(attrs).forEach(([k,v]) => { if (k==='class') e.className=v; else if (k==='style') e.style.cssText=v; else e.setAttribute(k,v); });
-    children.forEach(c => e.appendChild(typeof c==='string' ? document.createTextNode(c) : c));
+    children.forEach(c => e.appendChild(typeof c==='string' ... document.createTextNode(c) : c));
     return e;
   }
 
@@ -1267,19 +1267,19 @@
     return Array.from(container.querySelectorAll('input[type="checkbox"]:checked')).map(c=>c.value);
   }
   function createGroupTile(streamsMeta, groups, name) {
-    const gdata = name ? (groups[name]||[]) : [];
-    const initial = Array.isArray(gdata) ? gdata.slice() : ((gdata?.streams || []).slice());
-    const order = Array.isArray(initial) ? initial.slice() : [];
+    const gdata = name ... (groups[name]||[]) : [];
+    const initial = Array.isArray(gdata) ... gdata.slice() : ((gdata....streams || []).slice());
+    const order = Array.isArray(initial) ... initial.slice() : [];
     const members = new Set(order);
-    const gLayout = Array.isArray(gdata) ? {} : (gdata?.layout || {});
+    const gLayout = Array.isArray(gdata) ... {} : (gdata....layout || {});
     const isNew = !name;
     const tile = makeEl('div', {class:'group-tile'}, []);
     const header = makeEl('div', {class:'tile-header'}, []);
     const title = makeEl('span', {class:'tile-title'}, [name || 'New Group']);
     const actions = makeEl('div', {class:'tile-actions'}, []);
-    const open = name ? makeEl('a', {href:`/stream/group/${encodeURIComponent(name)}`, target:'_blank'}, ['Open']) : null;
+    const open = name ... makeEl('a', {href:`/stream/group/${encodeURIComponent(name)}`, target:'_blank'}, ['Open']) : null;
     const edit = makeEl('button', {class:'tile-edit'}, ['Edit']);
-    const del = name ? makeEl('button', {class:'tile-del'}, ['Delete']) : null;
+    const del = name ... makeEl('button', {class:'tile-del'}, ['Delete']) : null;
     if (open) actions.appendChild(open);
     actions.appendChild(edit);
     if (del) actions.appendChild(del);
@@ -1351,7 +1351,7 @@
       if (mode === '1-2') {
         const p = makeEl('div', {class:'layout-preview'}, []);
         p.style.display = 'grid'; p.style.gridTemplateColumns='repeat(2,1fr)'; p.style.gridTemplateRows='repeat(2,1fr)';
-        const order = (pos==='right') ? ['a','main','b','main'] : ['main','a','main','b'];
+        const order = (pos==='right') ... ['a','main','b','main'] : ['main','a','main','b'];
         order.forEach(()=>p.appendChild(makeEl('div',{class:'cell'},[])));
         // tint main cells
         Array.from(p.children).forEach((c,i)=>{ if (order[i]==='main') c.style.background='#262626'; });
@@ -1361,7 +1361,7 @@
         const p = makeEl('div', {class:'layout-preview'}, []);
         p.style.display='grid'; p.style.gridTemplateColumns='repeat(3,1fr)'; p.style.gridTemplateRows='repeat(2,1fr)';
         const top = (pos==='top');
-        const order = top ? ['m','m','m','a','b','c'] : ['a','b','c','m','m','m'];
+        const order = top ... ['m','m','m','a','b','c'] : ['a','b','c','m','m','m'];
         order.forEach(()=>p.appendChild(makeEl('div',{class:'cell'},[])));
         Array.from(p.children).forEach((c,i)=>{ if (order[i]==='m') c.style.background='#262626'; });
         return p;
@@ -1394,7 +1394,7 @@
     }
     function addOption(kind, label, onPick, builder) {
       const opt = makeEl('div', {class:'layout-option', 'data-kind': kind}, []);
-      const preview = builder ? builder() : makeEl('div', {class:'layout-preview'}, []);
+      const preview = builder ... builder() : makeEl('div', {class:'layout-preview'}, []);
       opt.appendChild(preview);
       opt.appendChild(makeEl('span', {class:'caption'}, [label]));
       opt.addEventListener('click', () => { onPick(); setActive(kind); });
@@ -1450,7 +1450,7 @@
     // Add row with combined search/select + Add
     const addRow = makeEl('div', {class:'tile-row tile-add-row'}, []);
     const dlId = `dl-${Math.random().toString(36).slice(2)}`;
-    const combo = makeEl('input', {type:'text', class:'tile-combo', placeholder:'Search or select…', list: dlId}, []);
+    const combo = makeEl('input', {type:'text', class:'tile-combo', placeholder:'Search or select...', list: dlId}, []);
     const datalist = makeEl('datalist', {id: dlId}, []);
     const addBtn = makeEl('button', {class:'tile-add-btn', type:'button'}, ['Add']);
     addRow.appendChild(combo);
@@ -1461,7 +1461,7 @@
     const chips = makeEl('div', {class:'member-chips'}, []);
     body.appendChild(chips);
     // helpers to refresh UI
-    function labelOf(id) { return (streamsMeta[id]?.label || id) + ''; }
+    function labelOf(id) { return (streamsMeta[id]....label || id) + ''; }
     function candidates(query) {
       const q = (query||'').toLowerCase();
       return Object.keys(streamsMeta)
@@ -1471,12 +1471,12 @@
     }
     function refreshTitleCount() {
       const count = members.size;
-      title.textContent = (tile.querySelector('.tile-name')?.value?.trim() || name || 'New Group') + ` (${count})`;
+      title.textContent = (tile.querySelector('.tile-name')....value....trim() || name || 'New Group') + ` (${count})`;
     }
     function refreshPipSelects() {
       const mem = order.slice();
-      let mainSel = gLayout.pip_main && members.has(gLayout.pip_main) ? gLayout.pip_main : (mem[0] || '');
-      let pipSel = gLayout.pip_pip && members.has(gLayout.pip_pip) ? gLayout.pip_pip : (mem.find(x=>x!==mainSel) || '');
+      let mainSel = gLayout.pip_main && members.has(gLayout.pip_main) ... gLayout.pip_main : (mem[0] || '');
+      let pipSel = gLayout.pip_pip && members.has(gLayout.pip_pip) ... gLayout.pip_pip : (mem.find(x=>x!==mainSel) || '');
       // ensure different
       if (pipSel === mainSel) pipSel = mem.find(x=>x!==mainSel) || '';
       // fill main
@@ -1507,15 +1507,15 @@
         const o = makeEl('option', {value:id}, [labelOf(id)]);
         focusMain.appendChild(o);
       });
-      const desired = gLayout.focus_main && members.has(gLayout.focus_main) ? gLayout.focus_main : (mem[0] || '');
+      const desired = gLayout.focus_main && members.has(gLayout.focus_main) ... gLayout.focus_main : (mem[0] || '');
       Array.from(focusMain.options).forEach(o => o.selected = (o.value===desired));
     }
     function updateLayoutVisibility() {
       const v = layoutSelect.value;
-      colsWrap.style.display = (v==='grid') ? '' : 'none';
-      rowsWrap.style.display = (v==='grid') ? '' : 'none';
-      focusWrap.style.display = (v==='focus') ? '' : 'none';
-      pipWrap.style.display = (v==='pip') ? '' : 'none';
+      colsWrap.style.display = (v==='grid') ... '' : 'none';
+      rowsWrap.style.display = (v==='grid') ... '' : 'none';
+      focusWrap.style.display = (v==='focus') ... '' : 'none';
+      pipWrap.style.display = (v==='pip') ... '' : 'none';
       if (v==='pip') refreshPipSelects();
       refreshChips();
     }
@@ -1546,7 +1546,7 @@
       const list = makeEl('ul', {class:'member-list'}, []);
       const cap = capacityForLayout();
       order.forEach((id, idx) => {
-        const li = makeEl('li', {class:'member-item' + (idx >= cap ? ' overflow' : '')}, []);
+        const li = makeEl('li', {class:'member-item' + (idx >= cap ... ' overflow' : '')}, []);
         li.setAttribute('draggable', 'true');
         li.dataset.id = id;
         const nameSpan = makeEl('span', {class:'member-name'}, [labelOf(id)]);
@@ -1588,7 +1588,7 @@
           order.splice(fromIdx, 1);
           // Recompute target index after removal
           let insertAt = order.indexOf(id);
-          insertAt = before ? insertAt : insertAt + 1;
+          insertAt = before ... insertAt : insertAt + 1;
           order.splice(insertAt, 0, fromId);
           refreshChips();
           refreshPipSelects();
@@ -1676,7 +1676,7 @@
     });
     if (del) {
       del.addEventListener('click', async () => {
-        if (!confirm(`Delete group ${name}?`)) return;
+        if (!confirm(`Delete group ${name}...`)) return;
         await fetch(`/groups/${encodeURIComponent(name)}`, {method:'DELETE'});
         markOpen(name, false);
         tile.classList.remove('expanded');
@@ -1751,7 +1751,7 @@
     }
     if (e.target.classList.contains('menu-remove')) {
       const id = e.target.dataset.stream;
-      if (confirm('Delete ' + id + '?')) {
+      if (confirm('Delete ' + id + '...')) {
         fetch('/streams/' + encodeURIComponent(id), {method:'DELETE'})
           .then(res => res.json())
           .then(data => {
@@ -1888,7 +1888,7 @@
     setupPresetManagerElements();
     if (!presetManagerModal || !presetManagerList) return;
     presetManagerList.innerHTML = '';
-    const items = Array.isArray(presets) ? presets : [];
+    const items = Array.isArray(presets) ... presets : [];
     if (!items.length) {
       if (presetManagerEmpty) presetManagerEmpty.hidden = false;
       return;
@@ -1924,7 +1924,7 @@
           renderPresetManager(updated);
           showNotification(`Preset "${trimmed}" saved`);
         } catch (err) {
-          showNotification(err && err.message ? err.message : 'Failed to rename preset');
+          showNotification(err && err.message ... err.message : 'Failed to rename preset');
         }
       });
       actions.appendChild(renameBtn);
@@ -1933,7 +1933,7 @@
       deleteBtn.className = 'ai-preset-delete';
       deleteBtn.textContent = 'Delete';
       deleteBtn.addEventListener('click', async () => {
-        if (!confirm(`Delete preset "${preset.name}"?`)) return;
+        if (!confirm(`Delete preset "${preset.name}"...`)) return;
         try {
           await deletePresetRequest(preset.name);
           const updated = await fetchAiPresets(true);
@@ -1941,7 +1941,7 @@
           renderPresetManager(updated);
           showNotification(`Preset "${preset.name}" deleted`);
         } catch (err) {
-          showNotification(err && err.message ? err.message : 'Failed to delete preset');
+          showNotification(err && err.message ... err.message : 'Failed to delete preset');
         }
       });
       actions.appendChild(deleteBtn);
@@ -1972,13 +1972,13 @@
       renderPresetManager(presets);
     } catch (err) {
       renderPresetManager([]);
-      showNotification(err && err.message ? err.message : 'Failed to load presets');
+      showNotification(err && err.message ... err.message : 'Failed to load presets');
     }
   }
 
   function populatePresetSelect(select, presets) {
     if (!select) return;
-    const items = Array.isArray(presets) ? presets : [];
+    const items = Array.isArray(presets) ... presets : [];
     const previous = select.value;
     select.innerHTML = '';
     if (!items.length) {
@@ -2035,7 +2035,7 @@
         if (!res.ok || data.error) {
           throw new Error(data.error || `Request failed (${res.status})`);
         }
-        const presets = Array.isArray(data.presets) ? data.presets.slice() : [];
+        const presets = Array.isArray(data.presets) ... data.presets.slice() : [];
         presets.sort((a, b) => a.name.localeCompare(b.name));
         aiPresetCache.items = presets;
         refreshAllPresetSelects(presets);
@@ -2103,7 +2103,7 @@
           }
           return res.json();
         })
-        .then(data => Array.isArray(data.models) ? data.models : [])
+        .then(data => Array.isArray(data.models) ... data.models : [])
         .catch(err => {
           console.error('Failed to fetch Stable Horde models', err);
           return [];
@@ -2138,7 +2138,7 @@
     const empty = card.querySelector('.ai-generated-empty');
     if (!resultsEl || !grid || !empty) return;
     grid.innerHTML = '';
-    const list = Array.isArray(images) ? images : [];
+    const list = Array.isArray(images) ... images : [];
     if (!list.length) {
       empty.style.display = '';
       highlightAiSelection(resultsEl, resultsEl.dataset.selected || '');
@@ -2150,7 +2150,7 @@
       const item = document.createElement('div');
       item.className = 'ai-generated-item';
       item.dataset.path = img.path;
-      item.dataset.persisted = img.persisted ? 'true' : 'false';
+      item.dataset.persisted = img.persisted ... 'true' : 'false';
       const imageEl = document.createElement('img');
       imageEl.src = `/stream/image/${img.path}`;
       imageEl.alt = (`Generated image ${img.seed || ''}`).trim();
@@ -2219,7 +2219,7 @@
     const jobInfo = job || {};
     const status = (jobInfo.status || info.status || 'idle').toLowerCase();
     let label = status.charAt(0).toUpperCase() + status.slice(1);
-    const queuePos = jobInfo.queue_position ?? info.queue_position;
+    const queuePos = jobInfo.queue_position ...... info.queue_position;
     if (queuePos !== undefined && queuePos !== null && queuePos !== '') {
       label += ` (queue ${queuePos})`;
     }
@@ -2227,7 +2227,7 @@
     if (note && ['error', 'timeout', 'cancelled'].includes(status)) {
       label += ` - ${note}`;
     } else if (status === 'cancelling') {
-      label += note ? ` - ${note}` : '...';
+      label += note ... ` - ${note}` : '...';
     }
     statusEl.dataset.status = status;
     statusEl.textContent = label;
@@ -2263,7 +2263,7 @@
     const result = [];
     rows.forEach(row => {
       const nameInput = row.querySelector('.ai-lora-name');
-      const name = nameInput ? nameInput.value.trim() : '';
+      const name = nameInput ... nameInput.value.trim() : '';
       if (!name) return;
       const entry = { name };
       const modelInput = row.querySelector('.ai-lora-model');
@@ -2305,19 +2305,19 @@
     const saveOutput = card.querySelector('.ai-save-output');
     const nsfw = card.querySelector('.ai-nsfw');
     const censor = card.querySelector('.ai-censor');
-    payload.prompt = promptInput ? promptInput.value : '';
-    payload.negative_prompt = negativeInput ? negativeInput.value : '';
-    payload.model = modelSelect ? modelSelect.value : '';
-    payload.sampler = samplerSelect ? samplerSelect.value : '';
-    payload.width = widthInput ? parseInt(widthInput.value, 10) : undefined;
-    payload.height = heightInput ? parseInt(heightInput.value, 10) : undefined;
-    payload.steps = stepsInput ? parseInt(stepsInput.value, 10) : undefined;
-    payload.cfg_scale = cfgInput ? parseFloat(cfgInput.value) : undefined;
-    payload.samples = samplesInput ? parseInt(samplesInput.value, 10) : undefined;
-    payload.seed = seedInput ? seedInput.value : '';
-    payload.save_output = saveOutput ? saveOutput.checked : undefined;
-    payload.nsfw = nsfw ? nsfw.checked : undefined;
-    payload.censor_nsfw = censor ? censor.checked : undefined;
+    payload.prompt = promptInput ... promptInput.value : '';
+    payload.negative_prompt = negativeInput ... negativeInput.value : '';
+    payload.model = modelSelect ... modelSelect.value : '';
+    payload.sampler = samplerSelect ... samplerSelect.value : '';
+    payload.width = widthInput ... parseInt(widthInput.value, 10) : undefined;
+    payload.height = heightInput ... parseInt(heightInput.value, 10) : undefined;
+    payload.steps = stepsInput ... parseInt(stepsInput.value, 10) : undefined;
+    payload.cfg_scale = cfgInput ... parseFloat(cfgInput.value) : undefined;
+    payload.samples = samplesInput ... parseInt(samplesInput.value, 10) : undefined;
+    payload.seed = seedInput ... seedInput.value : '';
+    payload.save_output = saveOutput ... saveOutput.checked : undefined;
+    payload.nsfw = nsfw ... nsfw.checked : undefined;
+    payload.censor_nsfw = censor ... censor.checked : undefined;
     payload.post_processing = gatherPostProcessing(card);
     payload.loras = gatherLoras(card);
     const boolPairs = [
@@ -2337,32 +2337,32 @@
       if (el) payload[key] = el.checked;
     });
     const styleInput = card.querySelector('.ai-style-input');
-    payload.style = styleInput ? styleInput.value.trim() : '';
+    payload.style = styleInput ... styleInput.value.trim() : '';
     const clipSkipInput = card.querySelector('.ai-clip-skip');
     if (clipSkipInput && clipSkipInput.value.trim() !== '') {
       const parsedClip = parseInt(clipSkipInput.value, 10);
-      payload.clip_skip = Number.isNaN(parsedClip) ? null : parsedClip;
+      payload.clip_skip = Number.isNaN(parsedClip) ... null : parsedClip;
     } else {
       payload.clip_skip = null;
     }
     const facefixerInput = card.querySelector('.ai-facefixer');
     if (facefixerInput && facefixerInput.value.trim() !== '') {
       const parsed = parseFloat(facefixerInput.value);
-      payload.facefixer_strength = Number.isNaN(parsed) ? null : parsed;
+      payload.facefixer_strength = Number.isNaN(parsed) ... null : parsed;
     } else {
       payload.facefixer_strength = null;
     }
     const denoiseInput = card.querySelector('.ai-denoise');
     if (denoiseInput && denoiseInput.value.trim() !== '') {
       const parsed = parseFloat(denoiseInput.value);
-      payload.denoising_strength = Number.isNaN(parsed) ? null : parsed;
+      payload.denoising_strength = Number.isNaN(parsed) ... null : parsed;
     } else {
       payload.denoising_strength = null;
     }
     const hiresDenoiseInput = card.querySelector('.ai-hires-denoise');
     if (hiresDenoiseInput && hiresDenoiseInput.value.trim() !== '') {
       const parsed = parseFloat(hiresDenoiseInput.value);
-      payload.hires_fix_denoising_strength = Number.isNaN(parsed) ? null : parsed;
+      payload.hires_fix_denoising_strength = Number.isNaN(parsed) ... null : parsed;
     } else {
       payload.hires_fix_denoising_strength = null;
     }
@@ -2371,7 +2371,7 @@
       const stored = aiSection.dataset.timeout;
       if (stored) {
         const parsedTimeout = parseFloat(stored);
-        payload.timeout = Number.isFinite(parsedTimeout) ? parsedTimeout : null;
+        payload.timeout = Number.isFinite(parsedTimeout) ... parsedTimeout : null;
       } else {
         payload.timeout = null;
       }
@@ -2420,7 +2420,7 @@
     const autoClockInput = card.querySelector('.ai-auto-clock');
     let applyingPreset = false;
     const updateAutoVisibility = () => {
-      const modeValue = autoModeSelect ? autoModeSelect.value : 'off';
+      const modeValue = autoModeSelect ... autoModeSelect.value : 'off';
       if (autoTimerRow) autoTimerRow.hidden = modeValue !== 'timer';
       if (autoClockRow) autoClockRow.hidden = modeValue !== 'clock';
       if (autoIntervalInput) autoIntervalInput.disabled = modeValue !== 'timer';
@@ -2440,15 +2440,15 @@
       const cfgVal = Number(data.cfg_scale);
       const samplesVal = Number(data.samples);
       const summaryValues = {
-        model: data.model && data.model.trim() ? data.model : 'Auto',
-        sampler: data.sampler ? data.sampler : 'k_euler',
-        size: `${Number.isFinite(width) ? width : 512}x${Number.isFinite(height) ? height : 512}`,
-        steps: Number.isFinite(stepsVal) ? stepsVal : 30,
-        cfg: Number.isFinite(cfgVal) ? cfgVal : 7.5,
-        samples: Number.isFinite(samplesVal) ? samplesVal : 1,
+        model: data.model && data.model.trim() ... data.model : 'Auto',
+        sampler: data.sampler ... data.sampler : 'k_euler',
+        size: `${Number.isFinite(width) ... width : 512}x${Number.isFinite(height) ... height : 512}`,
+        steps: Number.isFinite(stepsVal) ... stepsVal : 30,
+        cfg: Number.isFinite(cfgVal) ... cfgVal : 7.5,
+        samples: Number.isFinite(samplesVal) ... samplesVal : 1,
         loras: (data.loras || []).length,
         post: (data.post_processing || []).length,
-        save: data.save_output ? 'Yes' : 'Temp',
+        save: data.save_output ... 'Yes' : 'Temp',
       };
       let timeoutValue = null;
       if (data.timeout !== undefined && data.timeout !== null && data.timeout !== '') {
@@ -2468,7 +2468,7 @@
           aiGen.dataset.timeout = '';
         }
       }
-      const timeoutLabel = Number.isFinite(timeoutValue) && timeoutValue > 0 ? timeoutValue : 'No limit';
+      const timeoutLabel = Number.isFinite(timeoutValue) && timeoutValue > 0 ... timeoutValue : 'No limit';
       const mapping = {
         '.ai-summary-model': summaryValues.model,
         '.ai-summary-sampler': summaryValues.sampler,
@@ -2492,18 +2492,18 @@
         if (modeValue === 'timer') {
           const intervalInput = card.querySelector('.ai-auto-interval');
           const unitSelect = card.querySelector('.ai-auto-interval-unit');
-          const unitLabel = unitSelect && unitSelect.value === 'hours' ? 'hr' : 'min';
-          const intervalValue = intervalInput ? parseFloat(intervalInput.value) : NaN;
+          const unitLabel = unitSelect && unitSelect.value === 'hours' ... 'hr' : 'min';
+          const intervalValue = intervalInput ... parseFloat(intervalInput.value) : NaN;
           if (!Number.isNaN(intervalValue) && intervalValue > 0) {
             const rounded = Number(intervalValue.toFixed(2));
-            const display = Number.isInteger(rounded) ? rounded.toString() : rounded.toString();
+            const display = Number.isInteger(rounded) ... rounded.toString() : rounded.toString();
             autoLabel = `Timer (${display} ${unitLabel})`;
           } else {
             autoLabel = 'Timer';
           }
         } else if (modeValue === 'clock') {
           const clockInput = card.querySelector('.ai-auto-clock');
-          const timeValue = clockInput && clockInput.value ? clockInput.value : '--:--';
+          const timeValue = clockInput && clockInput.value ... clockInput.value : '--:--';
           autoLabel = `Clock (${timeValue})`;
         }
       }
@@ -2567,7 +2567,7 @@
     if (savePresetBtn) {
       savePresetBtn.addEventListener('click', async () => {
         const payload = collectAiPayload(card);
-        const suggested = presetSelect && presetSelect.value ? presetSelect.value : '';
+        const suggested = presetSelect && presetSelect.value ... presetSelect.value : '';
         const input = prompt('Save preset as', suggested);
         if (input === null) return;
         const trimmed = (input || '').trim();
@@ -2579,16 +2579,16 @@
           await savePresetRequest(trimmed, payload);
         } catch (err) {
           if (err && err.code === 'exists') {
-            const overwrite = confirm(`Preset "${trimmed}" already exists. Overwrite?`);
+            const overwrite = confirm(`Preset "${trimmed}" already exists. Overwrite...`);
             if (!overwrite) return;
             try {
               await savePresetRequest(trimmed, payload, true);
             } catch (overwriteErr) {
-              showNotification(overwriteErr && overwriteErr.message ? overwriteErr.message : 'Failed to save preset');
+              showNotification(overwriteErr && overwriteErr.message ... overwriteErr.message : 'Failed to save preset');
               return;
             }
           } else {
-            showNotification(err && err.message ? err.message : 'Failed to save preset');
+            showNotification(err && err.message ... err.message : 'Failed to save preset');
             return;
           }
         }
@@ -2603,7 +2603,7 @@
           }
           showNotification(`Preset "${trimmed}" saved`);
         } catch (refreshErr) {
-          showNotification(refreshErr && refreshErr.message ? refreshErr.message : 'Preset saved, but list failed to refresh');
+          showNotification(refreshErr && refreshErr.message ... refreshErr.message : 'Preset saved, but list failed to refresh');
         }
       });
     } else {
@@ -2662,7 +2662,7 @@
           if (!models || !modelSelect) return;
           const values = new Set(Array.from(modelSelect.options).map(opt => opt.value));
           models.forEach(model => {
-            const name = model && model.name ? model.name : '';
+            const name = model && model.name ... model.name : '';
             if (!name || values.has(name)) return;
             const opt = document.createElement('option');
             opt.value = name;
@@ -2678,12 +2678,12 @@
       });
     }
     const loraSection = card.querySelector('.ai-lora-section');
-    const loraList = loraSection ? loraSection.querySelector('.ai-lora-list') : null;
-    const loraSearchInput = loraSection ? loraSection.querySelector('.ai-lora-search-input') : null;
-    const loraSearchBtn = loraSection ? loraSection.querySelector('.ai-lora-search-btn') : null;
-    const loraResultsWrap = loraSection ? loraSection.querySelector('.ai-lora-results') : null;
-    const loraResultsHeader = loraResultsWrap ? loraResultsWrap.querySelector('.ai-lora-results-header') : null;
-    const loraResultsList = loraResultsWrap ? loraResultsWrap.querySelector('.ai-lora-results-list') : null;
+    const loraList = loraSection ... loraSection.querySelector('.ai-lora-list') : null;
+    const loraSearchInput = loraSection ... loraSection.querySelector('.ai-lora-search-input') : null;
+    const loraSearchBtn = loraSection ... loraSection.querySelector('.ai-lora-search-btn') : null;
+    const loraResultsWrap = loraSection ... loraSection.querySelector('.ai-lora-results') : null;
+    const loraResultsHeader = loraResultsWrap ... loraResultsWrap.querySelector('.ai-lora-results-header') : null;
+    const loraResultsList = loraResultsWrap ... loraResultsWrap.querySelector('.ai-lora-results-list') : null;
 
 
     function bindNumeric(selector, key) {
@@ -2762,9 +2762,9 @@
       loraResultsList.innerHTML = '';
       if (loraResultsHeader) {
         if (results.length) {
-          loraResultsHeader.textContent = query ? `Results for "${query}"` : 'LoRA results';
+          loraResultsHeader.textContent = query ... `Results for "${query}"` : 'LoRA results';
         } else {
-          loraResultsHeader.textContent = query ? `No LoRAs found for "${query}"` : 'No LoRAs found';
+          loraResultsHeader.textContent = query ... `No LoRAs found for "${query}"` : 'No LoRAs found';
         }
       }
       if (!results.length) {
@@ -2823,7 +2823,7 @@
       if (loraResultsHeader) loraResultsHeader.textContent = 'Searching...';
       if (loraResultsList) loraResultsList.innerHTML = '';
       try {
-        const res = await fetch(`/ai/loras?q=${encodeURIComponent(term)}`);
+        const res = await fetch(`/ai/loras...q=${encodeURIComponent(term)}`);
         const data = await res.json().catch(() => ({}));
         if (!res.ok || data.error) {
           throw new Error(data.error || `Request failed (${res.status})`);
@@ -2834,7 +2834,7 @@
         if (loraResultsList) {
           const error = document.createElement('div');
           error.className = 'ai-lora-result-error';
-          error.textContent = err && err.message ? err.message : 'Unable to load LoRAs';
+          error.textContent = err && err.message ... err.message : 'Unable to load LoRAs';
           loraResultsList.appendChild(error);
         }
       }
@@ -2873,51 +2873,51 @@
       const widthInput = card.querySelector('.ai-width-input');
       if (widthInput) {
         const width = Number(preset.width);
-        widthInput.value = Number.isFinite(width) ? String(width) : '';
+        widthInput.value = Number.isFinite(width) ... String(width) : '';
       }
       const heightInput = card.querySelector('.ai-height-input');
       if (heightInput) {
         const height = Number(preset.height);
-        heightInput.value = Number.isFinite(height) ? String(height) : '';
+        heightInput.value = Number.isFinite(height) ... String(height) : '';
       }
       const stepsInput = card.querySelector('.ai-steps-input');
       if (stepsInput) {
         const steps = Number(preset.steps);
-        stepsInput.value = Number.isFinite(steps) ? String(steps) : '';
+        stepsInput.value = Number.isFinite(steps) ... String(steps) : '';
       }
       const cfgInput = card.querySelector('.ai-cfg-input');
       if (cfgInput) {
         const cfg = Number(preset.cfg_scale);
-        cfgInput.value = Number.isFinite(cfg) ? String(cfg) : '';
+        cfgInput.value = Number.isFinite(cfg) ... String(cfg) : '';
       }
       const samplesInput = card.querySelector('.ai-samples-input');
       if (samplesInput) {
         const samples = Number(preset.samples);
-        samplesInput.value = Number.isFinite(samples) ? String(samples) : '';
+        samplesInput.value = Number.isFinite(samples) ... String(samples) : '';
       }
       const seedInput = card.querySelector('.ai-seed-input');
-      if (seedInput) seedInput.value = preset.seed && preset.seed !== 'random' ? preset.seed : '';
+      if (seedInput) seedInput.value = preset.seed && preset.seed !== 'random' ... preset.seed : '';
       const styleInput = card.querySelector('.ai-style-input');
       if (styleInput) styleInput.value = preset.style || '';
       const clipSkipInput = card.querySelector('.ai-clip-skip');
       if (clipSkipInput) {
         const clip = Number(preset.clip_skip);
-        clipSkipInput.value = Number.isFinite(clip) ? String(clip) : '';
+        clipSkipInput.value = Number.isFinite(clip) ... String(clip) : '';
       }
       const facefixerInput = card.querySelector('.ai-facefixer');
       if (facefixerInput) {
         const val = Number(preset.facefixer_strength);
-        facefixerInput.value = Number.isFinite(val) ? String(val) : '';
+        facefixerInput.value = Number.isFinite(val) ... String(val) : '';
       }
       const denoiseInput = card.querySelector('.ai-denoise');
       if (denoiseInput) {
         const val = Number(preset.denoising_strength);
-        denoiseInput.value = Number.isFinite(val) ? String(val) : '';
+        denoiseInput.value = Number.isFinite(val) ... String(val) : '';
       }
       const hiresDenoiseInput = card.querySelector('.ai-hires-denoise');
       if (hiresDenoiseInput) {
         const val = Number(preset.hires_fix_denoising_strength);
-        hiresDenoiseInput.value = Number.isFinite(val) ? String(val) : '';
+        hiresDenoiseInput.value = Number.isFinite(val) ... String(val) : '';
       }
       const boolPairs = [
         ['.ai-hires-fix', 'hires_fix'],
@@ -2943,25 +2943,25 @@
       if (censor) censor.checked = !!preset.censor_nsfw;
       const postChecks = card.querySelectorAll('.ai-post-proc');
       if (postChecks.length) {
-        const selected = new Set(Array.isArray(preset.post_processing) ? preset.post_processing : []);
+        const selected = new Set(Array.isArray(preset.post_processing) ... preset.post_processing : []);
         postChecks.forEach(chk => {
           chk.checked = selected.has(chk.value);
         });
       }
       if (loraList) {
         loraList.innerHTML = '';
-        const loras = Array.isArray(preset.loras) ? preset.loras : [];
+        const loras = Array.isArray(preset.loras) ... preset.loras : [];
         loras.forEach(lora => {
           const row = appendEmptyLoraRow();
           if (!row) return;
           const nameInput = row.querySelector('.ai-lora-name');
-          if (nameInput) nameInput.value = lora && lora.name ? lora.name : '';
+          if (nameInput) nameInput.value = lora && lora.name ... lora.name : '';
           const modelInput = row.querySelector('.ai-lora-model');
-          if (modelInput) modelInput.value = lora && lora.model !== undefined && lora.model !== null ? String(lora.model) : '';
+          if (modelInput) modelInput.value = lora && lora.model !== undefined && lora.model !== null ... String(lora.model) : '';
           const clipInput = row.querySelector('.ai-lora-clip');
-          if (clipInput) clipInput.value = lora && lora.clip !== undefined && lora.clip !== null ? String(lora.clip) : '';
+          if (clipInput) clipInput.value = lora && lora.clip !== undefined && lora.clip !== null ... String(lora.clip) : '';
           const triggerInput = row.querySelector('.ai-lora-trigger');
-          if (triggerInput) triggerInput.value = lora && lora.inject_trigger ? lora.inject_trigger : '';
+          if (triggerInput) triggerInput.value = lora && lora.inject_trigger ... lora.inject_trigger : '';
           const flagInput = row.querySelector('.ai-lora-is-version');
           if (flagInput) flagInput.checked = !!(lora && lora.is_version);
         });
@@ -2969,19 +2969,19 @@
       }
       const autoModeSelect = card.querySelector('.ai-auto-mode');
       if (autoModeSelect) {
-        const modeValue = typeof preset.auto_generate_mode === 'string' ? preset.auto_generate_mode.toLowerCase() : 'off';
+        const modeValue = typeof preset.auto_generate_mode === 'string' ... preset.auto_generate_mode.toLowerCase() : 'off';
         autoModeSelect.value = modeValue;
         updateAutoVisibility();
       }
       const autoIntervalInput = card.querySelector('.ai-auto-interval');
       if (autoIntervalInput) {
         const interval = Number(preset.auto_generate_interval_value);
-        autoIntervalInput.value = Number.isFinite(interval) ? String(interval) : '';
+        autoIntervalInput.value = Number.isFinite(interval) ... String(interval) : '';
       }
       const autoUnitSelect = card.querySelector('.ai-auto-interval-unit');
       if (autoUnitSelect) {
-        const unit = typeof preset.auto_generate_interval_unit === 'string' ? preset.auto_generate_interval_unit.toLowerCase() : 'minutes';
-        autoUnitSelect.value = unit === 'hours' ? 'hours' : 'minutes';
+        const unit = typeof preset.auto_generate_interval_unit === 'string' ... preset.auto_generate_interval_unit.toLowerCase() : 'minutes';
+        autoUnitSelect.value = unit === 'hours' ... 'hours' : 'minutes';
       }
       const autoClockInputEl = card.querySelector('.ai-auto-clock');
       if (autoClockInputEl) autoClockInputEl.value = preset.auto_generate_clock_time || '';
@@ -3013,7 +3013,7 @@
         if (!result || result.error) return;
         showNotification(`Preset "${presetName}" applied`);
       } catch (err) {
-        showNotification(err && err.message ? err.message : 'Failed to apply preset');
+        showNotification(err && err.message ... err.message : 'Failed to apply preset');
       } finally {
         applyingPreset = false;
       }
@@ -3110,7 +3110,7 @@
       }
       if (loraSearchBtn) {
         loraSearchBtn.addEventListener('click', () => {
-          performLoraSearch(loraSearchInput ? loraSearchInput.value : '');
+          performLoraSearch(loraSearchInput ... loraSearchInput.value : '');
         });
       }
       if (loraSearchInput) {
@@ -3180,7 +3180,7 @@
       const handleCancel = async event => {
         event.preventDefault();
         const currentJob = aiActiveJobs.get(streamId) || null;
-        const currentStatus = (currentJob && currentJob.status) || (card.querySelector('.ai-status')?.dataset.status || 'idle');
+        const currentStatus = (currentJob && currentJob.status) || (card.querySelector('.ai-status')....dataset.status || 'idle');
         setCancelDisabled(true);
         try {
           const res = await fetch(`/ai/cancel/${encodeURIComponent(streamId)}`, { method: 'POST' });
@@ -3198,18 +3198,18 @@
           const updatedJob = Object.assign({}, currentJob || {}, { status: 'cancelling', message: 'Cancellation requested', cancel_requested: true });
           aiActiveJobs.set(streamId, updatedJob);
           renderAiStatus(card, { status: 'cancelling', message: 'Cancellation requested' }, updatedJob);
-          const label = data && data.status ? `AI ${data.status}` : 'Cancellation requested';
+          const label = data && data.status ... `AI ${data.status}` : 'Cancellation requested';
           showNotification(label);
           if (data && data.warning) {
             showNotification(data.warning);
           }
         } catch (err) {
           console.error('AI cancel failed', err);
-          const message = err && err.message ? err.message : 'Failed to cancel job';
+          const message = err && err.message ... err.message : 'Failed to cancel job';
           showNotification(message);
           setCancelDisabled(false);
-          const revertJob = currentJob ? Object.assign({}, currentJob) : null;
-          renderAiStatus(card, { status: currentStatus, message: revertJob && revertJob.message ? revertJob.message : undefined }, revertJob);
+          const revertJob = currentJob ... Object.assign({}, currentJob) : null;
+          renderAiStatus(card, { status: currentStatus, message: revertJob && revertJob.message ... revertJob.message : undefined }, revertJob);
         }
       };
       cancelButtons.forEach(btn => btn.addEventListener('click', handleCancel));
@@ -3237,8 +3237,8 @@
         }
       });
     }
-    renderAiStatus(card, { status: card.querySelector('.ai-status')?.dataset.status || 'idle' }, aiActiveJobs.get(streamId) || null);
-    highlightAiSelection(resultsEl, resultsEl ? resultsEl.dataset.selected || '' : '');
+    renderAiStatus(card, { status: card.querySelector('.ai-status')....dataset.status || 'idle' }, aiActiveJobs.get(streamId) || null);
+    highlightAiSelection(resultsEl, resultsEl ... resultsEl.dataset.selected || '' : '');
   }
 
   function saveSettings(streamId, payload, opts = {}) {
@@ -3269,7 +3269,7 @@
             }
           }
           if (data.new_config && data.new_config.hide_nsfw !== undefined) {
-            card.dataset.hideNsfw = data.new_config.hide_nsfw ? 'true' : 'false';
+            card.dataset.hideNsfw = data.new_config.hide_nsfw ... 'true' : 'false';
             const hideToggle = card.querySelector('.hide-nsfw-toggle');
             if (hideToggle) {
               hideToggle.checked = !!data.new_config.hide_nsfw;
@@ -3292,7 +3292,7 @@
             if (valEl) valEl.textContent = `${amount}%`;
           }
           if (data.new_config && data.new_config.tags !== undefined) {
-            const tagList = Array.isArray(data.new_config.tags) ? data.new_config.tags : [];
+            const tagList = Array.isArray(data.new_config.tags) ... data.new_config.tags : [];
             setCardTags(card, tagList);
             applyFiltersAndSorting();
             renderTagManager();
@@ -3322,7 +3322,7 @@
               const clockInput = autoWrapper.querySelector('.ai-auto-clock');
               const timerRow = autoWrapper.querySelector('.ai-auto-timer-row');
               const clockRow = autoWrapper.querySelector('.ai-auto-clock-row');
-              const normalizedMode = typeof aiSettings.auto_generate_mode === 'string' ? aiSettings.auto_generate_mode.toLowerCase() : 'off';
+              const normalizedMode = typeof aiSettings.auto_generate_mode === 'string' ... aiSettings.auto_generate_mode.toLowerCase() : 'off';
               if (modeSelect) modeSelect.value = normalizedMode;
               if (intervalInput && aiSettings.auto_generate_interval_value !== undefined) {
                 const intervalVal = Number(aiSettings.auto_generate_interval_value);
@@ -3380,10 +3380,10 @@
     const qualityRow = card.querySelector('.image-quality-row');
     const nsfwRow = card.querySelector('.nsfw-row');
     const backgroundRow = card.querySelector('.background-row');
-    if (durationDiv) durationDiv.style.display = (mode === 'random') ? '' : 'none';
-    if (shuffleChk) shuffleChk.closest('label').style.display = (mode === 'random') ? '' : 'none';
-    if (urlDiv) urlDiv.style.display = (mode === 'livestream') ? '' : 'none';
-    if (imagePicker) imagePicker.style.display = (mode === 'specific') ? '' : 'none';
+    if (durationDiv) durationDiv.style.display = (mode === 'random') ... '' : 'none';
+    if (shuffleChk) shuffleChk.closest('label').style.display = (mode === 'random') ... '' : 'none';
+    if (urlDiv) urlDiv.style.display = (mode === 'livestream') ... '' : 'none';
+    if (imagePicker) imagePicker.style.display = (mode === 'specific') ... '' : 'none';
     const aiSection = card.querySelector('.ai-generator');
     const aiSummary = card.querySelector('.ai-summary');
     if (mode === 'ai') {
@@ -3396,14 +3396,14 @@
     }
     const summaryUpdater = aiSummaryUpdaters.get(card);
     if (summaryUpdater) summaryUpdater();
-    if (selectedRow) selectedRow.style.display = (mode === 'specific' || mode === 'ai') ? '' : 'none';
-    if (folderRow) folderRow.style.display = (mode === 'livestream' || mode === 'ai') ? 'none' : '';
-    if (nsfwRow) nsfwRow.style.display = (mode === 'livestream') ? 'none' : '';
-    if (qualityRow) qualityRow.style.display = (mode === 'livestream') ? 'none' : '';
-    if (backgroundRow) backgroundRow.style.display = (mode === 'livestream') ? 'none' : '';
+    if (selectedRow) selectedRow.style.display = (mode === 'specific' || mode === 'ai') ... '' : 'none';
+    if (folderRow) folderRow.style.display = (mode === 'livestream' || mode === 'ai') ... 'none' : '';
+    if (nsfwRow) nsfwRow.style.display = (mode === 'livestream') ... 'none' : '';
+    if (qualityRow) qualityRow.style.display = (mode === 'livestream') ... 'none' : '';
+    if (backgroundRow) backgroundRow.style.display = (mode === 'livestream') ... 'none' : '';
     // Only show YT options if URL looks like YouTube
     const type = detectUrlType(streamUrl);
-    if (ytSettingsDiv) ytSettingsDiv.style.display = (mode === 'livestream' && type === 'YouTube') ? '' : 'none';
+    if (ytSettingsDiv) ytSettingsDiv.style.display = (mode === 'livestream' && type === 'YouTube') ... '' : 'none';
   }
 
   function loadImagesFor(streamId, folder) {
@@ -3412,20 +3412,20 @@
     const imageGrid = card.querySelector('.image-picker .image-grid');
     if (!imageGrid) return;
     const selectedDisplay = card.querySelector('.selected-image-display');
-    const currentSelected = selectedDisplay ? selectedDisplay.textContent.trim() : null;
+    const currentSelected = selectedDisplay ... selectedDisplay.textContent.trim() : null;
     const hideNsfw = card.dataset.hideNsfw === 'true';
     const params = new URLSearchParams({ folder });
     if (hideNsfw) {
       params.set('hide_nsfw', '1');
     }
     imageGrid.innerHTML = 'Loading...';
-    fetch(`/images?${params.toString()}`)
+    fetch(`/images...${params.toString()}`)
       .then(res => res.json())
       .then(imgs => {
         imageGrid.innerHTML = '';
         imgs.forEach(path => {
           const imgEl = document.createElement('img');
-          imgEl.src = `/stream/image/${path}?size=thumb`;
+          imgEl.src = `/stream/image/${path}...size=thumb`;
           imgEl.title = path;
           imgEl.classList.add('picker-thumbnail');
           if (currentSelected === path) {
@@ -3469,7 +3469,7 @@
       const folderSelect = card.querySelector('.folder-select');
       if (folderSelect) {
         const initialOption = folderSelect.options[folderSelect.selectedIndex];
-        const initialAssigned = folderSelect.dataset.currentFolder || (initialOption ? (initialOption.dataset.filtered === 'true' ? (initialOption.title || 'all') : (initialOption.value || 'all')) : 'all');
+        const initialAssigned = folderSelect.dataset.currentFolder || (initialOption ... (initialOption.dataset.filtered === 'true' ... (initialOption.title || 'all') : (initialOption.value || 'all')) : 'all');
         folderSelect.dataset.currentFolder = initialAssigned || 'all';
         if (initialOption) {
           folderSelect.title = initialOption.title || initialOption.textContent || folderSelect.value;
@@ -3480,7 +3480,7 @@
           const selectEl = e.target;
           if (selectEl.value === '__filtered__') {
             const filteredOption = selectEl.options[selectEl.selectedIndex];
-            selectEl.title = filteredOption ? (filteredOption.title || filteredOption.textContent || selectEl.title) : selectEl.title;
+            selectEl.title = filteredOption ... (filteredOption.title || filteredOption.textContent || selectEl.title) : selectEl.title;
             return;
           }
           const folder = selectEl.value || 'all';
@@ -3570,14 +3570,14 @@
             if (muteChk) payload.yt_mute = muteChk.checked;
             if (qualitySelect) payload.yt_quality = qualitySelect.value;
             // If URL isn't YouTube, force AUTO for compatibility
-            const t = detectUrlType(urlInput ? urlInput.value : '');
+            const t = detectUrlType(urlInput ... urlInput.value : '');
             if (t !== 'YouTube' && qualitySelect) {
               qualitySelect.value = 'auto';
               payload.yt_quality = 'auto';
             }
           }
           saveSettings(streamId, payload);
-          toggleVisibilityForMode(card, mode, urlInput ? urlInput.value : '');
+          toggleVisibilityForMode(card, mode, urlInput ... urlInput.value : '');
         });
       }
       // Duration change
@@ -3601,7 +3601,7 @@
         const t = detectUrlType(url);
         badge.textContent = t || '';
         badge.dataset.type = (t || '').toLowerCase();
-        badge.style.visibility = t ? 'visible' : 'hidden';
+        badge.style.visibility = t ... 'visible' : 'hidden';
       }
       let testAbort = null;
       let testTimer = null;
@@ -3610,7 +3610,7 @@
         if (!statusEl || !url) { if (statusEl) statusEl.textContent=''; return; }
         // Debounce rapid typing
         if (testTimer) clearTimeout(testTimer);
-        statusEl.textContent = 'Testing…';
+        statusEl.textContent = 'Testing...';
         statusEl.dataset.state = 'testing';
         testTimer = setTimeout(async () => {
           if (testAbort) { try { testAbort.abort(); } catch {} }
@@ -3680,7 +3680,7 @@
       if (renameBtn) {
         renameBtn.addEventListener('click', () => {
           const a = card.querySelector('.card-header h2 a.stream-link');
-          const current = a ? a.textContent.trim() : streamId;
+          const current = a ... a.textContent.trim() : streamId;
           const next = prompt('Rename stream', current);
           if (next === null) return; // cancelled
           // preemptive duplicate check
@@ -3708,17 +3708,17 @@
       const reloadBtn = card.querySelector('.reload-images-btn');
       if (reloadBtn) {
         reloadBtn.addEventListener('click', () => {
-          const folder = folderSelect ? (folderSelect.value === '__filtered__' ? (folderSelect.dataset.currentFolder || 'all') : folderSelect.value) : 'all';
+          const folder = folderSelect ... (folderSelect.value === '__filtered__' ... (folderSelect.dataset.currentFolder || 'all') : folderSelect.value) : 'all';
           loadImagesFor(streamId, folder);
         });
       }
 
-      toggleVisibilityForMode(card, modeSelect ? modeSelect.value : '', urlInput ? urlInput.value : '');
+      toggleVisibilityForMode(card, modeSelect ... modeSelect.value : '', urlInput ... urlInput.value : '');
     });
     originalCardOrder = Array.from(cardTagsMap.keys());
     renderTagManager();
     renderFilterChips();
-    currentSortMode = (sortSelect && sortSelect.value === 'group') ? 'group' : 'default';
+    currentSortMode = (sortSelect && sortSelect.value === 'group') ... 'group' : 'default';
     applyFiltersAndSorting();
     if (tagFilterInput) {
       tagFilterInput.addEventListener('keydown', e => {
@@ -3733,7 +3733,7 @@
     }
     if (sortSelect) {
       sortSelect.addEventListener('change', e => {
-        currentSortMode = e.target.value === 'group' ? 'group' : 'default';
+        currentSortMode = e.target.value === 'group' ... 'group' : 'default';
         applyFiltersAndSorting();
       });
     }
@@ -3752,6 +3752,7 @@
 </script>
 </body>
 </html>
+
 
 
 
