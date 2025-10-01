@@ -493,7 +493,7 @@
     function apply(theme){
       const t = (theme === 'light') ? 'light' : 'dark';
       root.setAttribute('data-theme', t);
-      if (btn) btn.textContent = t === 'light' ? 'SUN' : 'MOON';
+      if (btn) btn.textContent = t === 'light' ? '\u2600' : '\u263D';
     }
     const saved = localStorage.getItem('theme') || 'dark';
     apply(saved);
