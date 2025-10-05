@@ -116,6 +116,9 @@ except AttributeError:  # Pillow < 9.1
     IMAGE_THUMBNAIL_FILTER = Image.LANCZOS
 
 IMAGE_EXTENSIONS = (".png", ".jpg", ".jpeg", ".gif", ".webp")
+VIDEO_EXTENSIONS = (".mp4", ".mkv", ".webm", ".mov", ".avi", ".m4v", ".mpg", ".mpeg")
+MEDIA_EXTENSIONS = IMAGE_EXTENSIONS + VIDEO_EXTENSIONS
+VIDEO_PLAYBACK_MODES = {"duration", "until_end", "loop"}
 
 NSFW_KEYWORD = "nsfw"
 
@@ -136,7 +139,7 @@ def _resolve_folder_path(folder_key: str) -> str:
     return IMAGE_DIR if folder_key == "all" else os.path.join(IMAGE_DIR, folder_key)
 
 
-def _scan_folder_for_cache(folder_key: str) -> Tuple[List[str], Dict[str, float]]:
+def _scan_folder_for_cache(folder_key: str) -> Tuple[List[Dict[str, str]], Dict[str, float]]:
     """Scan a folder on disk and build the cached payload for it."""
     target_dir = _resolve_folder_path(folder_key)
     dir_markers: Dict[str, float] = {}
@@ -149,6 +152,7 @@ def _scan_folder_for_cache(folder_key: str) -> Tuple[List[str], Dict[str, float]
         dir_markers[target_dir] = 0.0
         return [], dir_markers
 
+    media: List[Dict[str, str]] = []
     images: List[str] = []
     for root, _, files in os.walk(target_dir):
         if root != target_dir:
@@ -158,11 +162,21 @@ def _scan_folder_for_cache(folder_key: str) -> Tuple[List[str], Dict[str, float]
                 # If a directory becomes unavailable, surface that as a change on the next poll.
                 dir_markers[root] = time.time()
         for file_name in files:
-            if file_name.lower().endswith(IMAGE_EXTENSIONS):
+            ext = os.path.splitext(file_name)[1].lower()
+            if ext in MEDIA_EXTENSIONS:
                 rel_path = os.path.relpath(os.path.join(root, file_name), IMAGE_DIR)
-                images.append(rel_path.replace("\\", "/"))
+                normalized = rel_path.replace("\\", "/")
+                kind = "video" if ext in VIDEO_EXTENSIONS else "image"
+                media.append({
+                    "path": normalized,
+                    "kind": kind,
+                    "extension": ext,
+                })
+                if kind == "image":
+                    images.append(normalized)
     images.sort(key=str.lower)
-    return images, dir_markers
+    media.sort(key=lambda item: item["path"].lower())
+    return media, dir_markers
 
 
 def _directory_markers_changed(markers: Dict[str, float]) -> bool:
@@ -200,9 +214,11 @@ def refresh_image_cache(folder: str = "all", force: bool = False) -> List[str]:
     if not needs_refresh:
         return cached_images
 
-    images, dir_markers = _scan_folder_for_cache(folder_key)
+    media, dir_markers = _scan_folder_for_cache(folder_key)
+    images = [item["path"] for item in media if item.get("kind") == "image"]
     entry = {
         "images": images,
+        "media": media,
         "dir_markers": dir_markers,
         "last_updated": time.time(),
     }
@@ -223,6 +239,7 @@ def initialize_image_cache() -> None:
             return
         base_markers = dict(all_entry.get("dir_markers", {}))
         base_updated = all_entry.get("last_updated", time.time())
+        all_media = [dict(item) for item in all_entry.get("media", [])]
 
     for root, _, _ in os.walk(IMAGE_DIR):
         rel = os.path.relpath(root, IMAGE_DIR)
@@ -231,6 +248,7 @@ def initialize_image_cache() -> None:
         folder_key = rel.replace("\\", "/")
         folder_root = _resolve_folder_path(folder_key)
         folder_images = [img for img in all_images if img.startswith(f"{folder_key}/")]
+        folder_media = [item for item in all_media if item.get("path", "").startswith(f"{folder_key}/")]
         folder_markers = {
             path: mtime
             for path, mtime in base_markers.items()
@@ -243,6 +261,7 @@ def initialize_image_cache() -> None:
                 folder_markers[folder_root] = 0.0
         entry = {
             "images": folder_images,
+            "media": folder_media,
             "dir_markers": folder_markers,
             "last_updated": base_updated,
         }
@@ -674,7 +693,10 @@ def default_stream_config():
         "mode": "random",
         "folder": "all",
         "selected_image": None,
+        "selected_media_kind": None,
         "duration": 5,
+        "video_playback_mode": "duration",
+        "video_volume": 1.0,
         "shuffle": True,
         "hide_nsfw": False,
         "stream_url": None,
@@ -1239,6 +1261,27 @@ for k, v in list(settings.items()):
         ensure_ai_defaults(v)
         ensure_background_defaults(v)
         ensure_tag_defaults(v)
+        mode_value = v.get("video_playback_mode")
+        if not isinstance(mode_value, str) or mode_value.lower().strip() not in VIDEO_PLAYBACK_MODES:
+            v["video_playback_mode"] = "duration"
+        else:
+            v["video_playback_mode"] = mode_value.lower().strip()
+        if "video_volume" not in v or not isinstance(v.get("video_volume"), (int, float)):
+            v["video_volume"] = 1.0
+        else:
+            try:
+                vol = float(v["video_volume"])
+            except (TypeError, ValueError):
+                vol = 1.0
+            v["video_volume"] = max(0.0, min(1.0, vol))
+        if "selected_media_kind" not in v or not isinstance(v.get("selected_media_kind"), str):
+            v["selected_media_kind"] = _detect_media_kind(v.get("selected_image"))
+        else:
+            kind = v["selected_media_kind"].strip().lower()
+            if kind not in ("image", "video"):
+                v["selected_media_kind"] = _detect_media_kind(v.get("selected_image"))
+            else:
+                v["selected_media_kind"] = kind
 
 # Ensure notes key exists
 settings.setdefault("_notes", "")
@@ -1248,6 +1291,15 @@ settings.setdefault("_groups", {})
 
 def _path_contains_nsfw(value: Optional[str]) -> bool:
     return bool(value and NSFW_KEYWORD in value.lower())
+
+
+def _detect_media_kind(value: Optional[str]) -> str:
+    if not value:
+        return "image"
+    ext = os.path.splitext(str(value))[1].lower()
+    if ext in VIDEO_EXTENSIONS:
+        return "video"
+    return "image"
 
 
 def _filter_nsfw_images(paths: List[str], hide_nsfw: bool) -> List[str]:
@@ -1286,6 +1338,23 @@ def list_images(folder="all", hide_nsfw: bool = False):
     """Return cached image paths for the folder, refreshing when necessary."""
     images = refresh_image_cache(folder)
     return _filter_nsfw_images(images, hide_nsfw)
+
+
+
+def list_media(folder="all", hide_nsfw: bool = False) -> List[Dict[str, Any]]:
+    """Return cached media entries (images and videos) for the folder."""
+    folder_key = _normalize_folder_key(folder)
+    refresh_image_cache(folder)
+    with IMAGE_CACHE_LOCK:
+        cached_entry = IMAGE_CACHE.get(folder_key)
+        if cached_entry:
+            media = [dict(item) for item in cached_entry.get("media", [])]
+        else:
+            media = []
+    if hide_nsfw:
+        media = [item for item in media if not _path_contains_nsfw(item.get("path"))]
+    return media
+
 
 
 def try_get_hls(original_url):
@@ -1445,7 +1514,7 @@ def update_stream_settings(stream_id):
     if stream_id not in settings:
         return jsonify({"error": f"No stream '{stream_id}' found"}), 404
 
-    data = request.json
+    data = request.get_json(silent=True) or {}
     conf = settings[stream_id]
     ensure_ai_defaults(conf)
     previous_mode = conf.get("mode")
@@ -1453,7 +1522,8 @@ def update_stream_settings(stream_id):
     # We'll add new keys for YouTube: "yt_cc", "yt_mute", "yt_quality"
     for key in ["mode", "folder", "selected_image", "duration", "shuffle", "stream_url",
                 "image_quality", "yt_cc", "yt_mute", "yt_quality", "label", "hide_nsfw",
-                "background_blur_enabled", "background_blur_amount", TAG_KEY]:
+                "background_blur_enabled", "background_blur_amount", "video_playback_mode",
+                "video_volume", "selected_media_kind", TAG_KEY]:
         if key in data:
             val = data[key]
             if key == "stream_url":
@@ -1482,6 +1552,29 @@ def update_stream_settings(stream_id):
             elif key == "background_blur_amount":
                 amount = _coerce_int(val, conf.get(key, 50))
                 conf[key] = max(0, min(100, amount))
+            elif key == "video_playback_mode":
+                normalized = (val or "").strip().lower() if isinstance(val, str) else ""
+                if normalized not in VIDEO_PLAYBACK_MODES:
+                    normalized = "duration"
+                conf[key] = normalized
+            elif key == "video_volume":
+                try:
+                    volume = float(val)
+                except (TypeError, ValueError):
+                    volume = conf.get(key, 1.0)
+                conf[key] = max(0.0, min(1.0, volume))
+            elif key == "selected_media_kind":
+                if isinstance(val, str):
+                    kind = val.strip().lower()
+                else:
+                    kind = ""
+                if kind not in ("image", "video"):
+                    kind = _detect_media_kind(conf.get("selected_image"))
+                conf[key] = kind
+            elif key == "selected_image":
+                conf[key] = val
+                if "selected_media_kind" not in data:
+                    conf["selected_media_kind"] = _detect_media_kind(val)
             elif key == "image_quality":
                 normalized = (val or "").strip().lower() if isinstance(val, str) else ""
                 if normalized not in IMAGE_QUALITY_CHOICES:
@@ -2507,6 +2600,43 @@ def get_random_image():
     return jsonify({"path": random.choice(images)})
 
 
+@app.route("/media", methods=["GET"])
+def get_media_entries():
+    folder = request.args.get("folder", "all")
+    limit_arg = request.args.get("limit")
+    offset_arg = request.args.get("offset")
+    try:
+        offset = int(offset_arg) if offset_arg is not None else 0
+        limit = int(limit_arg) if limit_arg is not None else None
+    except (TypeError, ValueError):
+        return jsonify({"error": "limit and offset must be integers"}), 400
+    if offset < 0 or (limit is not None and limit < 0):
+        return jsonify({"error": "limit and offset must be non-negative"}), 400
+    hide_nsfw = _parse_truthy(request.args.get("hide_nsfw"))
+    kind_filter = (request.args.get("kind") or "").strip().lower()
+    media = list_media(folder, hide_nsfw=hide_nsfw)
+    if kind_filter in ("image", "video"):
+        media = [item for item in media if item.get("kind") == kind_filter]
+    if limit_arg is not None or offset_arg is not None:
+        end = offset + limit if limit is not None else None
+        media = media[offset:end]
+    return jsonify(media)
+
+
+@app.route("/media/random", methods=["GET"])
+def get_random_media():
+    folder = request.args.get("folder", "all")
+    hide_nsfw = _parse_truthy(request.args.get("hide_nsfw"))
+    kind_filter = (request.args.get("kind") or "").strip().lower()
+    entries = list_media(folder, hide_nsfw=hide_nsfw)
+    if kind_filter in ("image", "video"):
+        entries = [item for item in entries if item.get("kind") == kind_filter]
+    if not entries:
+        return jsonify({"error": "No media found"}), 404
+    choice = dict(random.choice(entries))
+    return jsonify(choice)
+
+
 @app.route("/notes", methods=["GET", "POST"])
 def notes():
     if request.method == "GET":
@@ -2534,12 +2664,39 @@ def _send_image_response(path: Union[str, Path]):
     response.headers["Cache-Control"] = f"public, max-age={IMAGE_CACHE_CONTROL_MAX_AGE}"
     return response
 
+
+def _send_video_response(path: Union[str, Path]):
+    """Support streaming video files with caching and range requests."""
+    abs_path = os.fspath(path)
+    response = send_file(
+        abs_path,
+        conditional=True,
+    )
+    response.headers.setdefault("Cache-Control", f"public, max-age={IMAGE_CACHE_TIMEOUT}")
+    return response
+
+
 @app.route("/stream/image/<path:image_path>")
 def serve_image(image_path):
     full_path = Path(IMAGE_DIR_PATH) / image_path
     if not full_path.exists():
         return "Not found", 404
     return _send_image_response(full_path)
+
+
+@app.route("/stream/video/<path:video_path>")
+def serve_video(video_path):
+    base_root = IMAGE_DIR_PATH.resolve()
+    target_path = (base_root / video_path).resolve()
+    try:
+        target_path.relative_to(base_root)
+    except ValueError:
+        return "Invalid path", 400
+    if not target_path.exists() or not target_path.is_file():
+        return "Not found", 404
+    if target_path.suffix.lower() not in VIDEO_EXTENSIONS:
+        return "Unsupported media type", 415
+    return _send_video_response(target_path)
 
 
 @app.route("/stream/group/<name>")
@@ -2567,6 +2724,31 @@ def stream_group(name):
             if k in g_layout:
                 mosaic[k] = g_layout[k]
     return render_template("streams.html", stream_settings=streams, mosaic_settings=mosaic)
+
+@socketio.on('video_control')
+def handle_video_control(payload):
+    if not isinstance(payload, dict):
+        return
+    stream_id = str(payload.get('stream_id') or '').strip()
+    if not stream_id:
+        return
+    action = str(payload.get('action') or '').strip().lower()
+    allowed_actions = {"play", "pause", "toggle", "skip_next", "skip_prev", "set_volume"}
+    if action not in allowed_actions:
+        return
+    message: Dict[str, Any] = {
+        "stream_id": stream_id,
+        "action": action,
+        "timestamp": time.time(),
+    }
+    if action == 'set_volume':
+        try:
+            volume = float(payload.get('volume'))
+        except (TypeError, ValueError):
+            return
+        message['volume'] = max(0.0, min(1.0, volume))
+    socketio.emit('video_control', message)
+
 
 if __name__ == "__main__":
     socketio.run(app, host="0.0.0.0", port=5000, debug=True)

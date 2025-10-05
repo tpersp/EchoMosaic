@@ -81,7 +81,7 @@
   <div id="dashboard-grid" class="dashboard-grid">
     {# Generate a card for each stream dynamically #}
     {% for stream_id, conf in stream_settings.items() %}
-    <div class="stream-card" data-stream="{{ stream_id }}" data-hide-nsfw="{{ "true" if conf.hide_nsfw|default(False) else "false" }}" data-tags='{{ (conf.tags|default([]))|tojson }}'>
+    <div class="stream-card" data-stream="{{ stream_id }}" data-hide-nsfw="{{ "true" if conf.hide_nsfw|default(False) else "false" }}" data-tags='{{ (conf.tags|default([]))|tojson }}' data-selected-path="{{ conf.selected_image or '' }}" data-selected-kind="{{ conf.selected_media_kind or '' }}" data-video-mode="{{ conf.video_playback_mode|default('duration') }}" data-video-volume="{{ conf.video_volume|default(1.0) }}">
       <div class="card-header">
         <div class="title-row">
           <h2><a class="stream-link" href="{{ url_for('render_stream', name=(conf.label if conf.label else stream_id)|slugify) }}" target="_blank">{{ conf.label if conf.label else stream_id|capitalize }}</a></h2>
@@ -168,6 +168,30 @@
               <input type="range" min="0" max="100" class="background-blur-slider" data-stream="{{ stream_id }}" value="{{ blur_amount }}" {% if not blur_enabled %}disabled{% endif %}>
               <span class="background-blur-value">{{ blur_amount }}%</span>
             </div>
+          </div>
+        </div>
+
+        {% set video_mode = conf.video_playback_mode|default('duration') %}
+        <div class="form-row video-mode-row" {% if conf.mode in ['livestream', 'ai'] %}style="display:none;"{% endif %}>
+          <label for="video-mode-{{ stream_id }}">Video Playback</label>
+          <select id="video-mode-{{ stream_id }}" class="video-mode-select" data-stream="{{ stream_id }}">
+            <option value="duration" {% if video_mode == 'duration' %}selected{% endif %}>Play for duration setting</option>
+            <option value="until_end" {% if video_mode == 'until_end' %}selected{% endif %}>Play until video ends</option>
+            <option value="loop" {% if video_mode == 'loop' %}selected{% endif %}>Loop continuously</option>
+          </select>
+        </div>
+        {% set video_volume_pct = (conf.video_volume|default(1.0) * 100)|round(0, 'floor') %}
+        <div class="form-row playback-controls-row" {% if conf.mode not in ['random', 'specific'] %}style="display:none;"{% endif %}>
+          <label>Playback Controls</label>
+          <div class="playback-controls" data-stream="{{ stream_id }}">
+            <button type="button" class="playback-btn playback-prev" data-stream="{{ stream_id }}" data-action="skip_prev" title="Previous">&#9664;</button>
+            <button type="button" class="playback-btn playback-play" data-stream="{{ stream_id }}" data-action="play" title="Play">&#9654;</button>
+            <button type="button" class="playback-btn playback-pause" data-stream="{{ stream_id }}" data-action="pause" title="Pause">&#10074;&#10074;</button>
+            <button type="button" class="playback-btn playback-next" data-stream="{{ stream_id }}" data-action="skip_next" title="Next">&#9654;&#9654;</button>
+            <label class="volume-control">
+              <span>Volume</span>
+              <input type="range" min="0" max="100" value="{{ video_volume_pct }}" class="video-volume-slider" data-stream="{{ stream_id }}">
+            </label>
           </div>
         </div>
 
@@ -443,15 +467,15 @@
       <!-- Specific Image Picker -->
       <div class="image-picker" data-stream="{{ stream_id }}" {% if conf.mode != 'specific' %} style="display:none;" {% endif %}>
         <div class="image-picker-header">
-          <label>Pick an Image (Folder: {{ conf.folder }})</label>
+          <label>Pick Media (Folder: {{ conf.folder }})</label>
           <button type="button" class="reload-images-btn" data-stream="{{ stream_id }}">Reload</button>
         </div>
         <div class="image-grid"></div>
       </div>
 
       <p class="selected-image-row" {% if conf.mode not in ['specific', 'ai'] %} style="display:none;" {% endif %}>
-        <strong>Selected Image:</strong>
-        <span class="selected-image-display">{{ conf.selected_image if conf.selected_image else "None" }}</span>
+        <strong>Selected Media:</strong>
+        <span class="selected-image-display">{{ conf.selected_image if conf.selected_image else "None" }}{% if conf.selected_media_kind == 'video' and conf.selected_image %} (video){% endif %}</span>
       </p>
     </div>
     {% endfor %}
@@ -1175,7 +1199,7 @@
         }
         const { effectiveFolder } = result;
         if (streamId) {
-          loadImagesFor(streamId, effectiveFolder);
+          loadMediaFor(streamId, effectiveFolder);
         }
       })
       .catch(err => {
@@ -1805,12 +1829,34 @@
     if (Array.isArray(data.tags)) {
       syncGlobalTags(data.tags);
     }
-    if (conf.selected_image !== undefined) {
+    if (conf.selected_image !== undefined || conf.selected_media_kind !== undefined) {
+      const selectedPath = conf.selected_image || '';
+      const selectedKind = (conf.selected_media_kind || card.dataset.selectedKind || '').toLowerCase();
+      card.dataset.selectedPath = selectedPath;
+      card.dataset.selectedKind = selectedKind;
       const display = card.querySelector('.selected-image-display');
-      if (display) display.textContent = conf.selected_image || 'None';
+      if (display) {
+        display.textContent = selectedPath ? (selectedKind === 'video' ? `${selectedPath} (video)` : selectedPath) : 'None';
+      }
       const resultsEl = card.querySelector('.ai-results');
       if (resultsEl) {
-        highlightAiSelection(resultsEl, conf.selected_image || '');
+        highlightAiSelection(resultsEl, selectedPath);
+      }
+    }
+    if (conf.video_playback_mode !== undefined) {
+      const nextMode = (conf.video_playback_mode || 'duration').toLowerCase();
+      card.dataset.videoMode = nextMode;
+      const videoModeSelect = card.querySelector('.video-mode-select');
+      if (videoModeSelect) videoModeSelect.value = nextMode;
+    }
+    if (conf.video_volume !== undefined) {
+      const volumeValue = Number(conf.video_volume);
+      card.dataset.videoVolume = String(volumeValue);
+      card.dataset.videoVolumePersisted = String(volumeValue);
+      const volumeSlider = card.querySelector('.video-volume-slider');
+      if (volumeSlider) {
+        const pct = Math.max(0, Math.min(1, Number.isFinite(volumeValue) ? volumeValue : 1)) * 100;
+        volumeSlider.value = String(Math.round(pct));
       }
     }
     if (conf.ai_state) {
@@ -3266,13 +3312,33 @@
         showNotification(`Updated settings for ${streamId}`);
         const card = document.querySelector(`.stream-card[data-stream="${streamId}"]`);
         if (card) {
-          if (data.new_config && data.new_config.selected_image !== undefined) {
+          if (data.new_config && (data.new_config.selected_image !== undefined || data.new_config.selected_media_kind !== undefined)) {
             const selectedPath = data.new_config.selected_image || "";
+            const selectedKind = (data.new_config.selected_media_kind || card.dataset.selectedKind || '').toLowerCase();
+            card.dataset.selectedPath = selectedPath;
+            card.dataset.selectedKind = selectedKind;
+            const displayText = selectedPath ? (selectedKind === 'video' ? `${selectedPath} (video)` : selectedPath) : 'None';
             const disp = card.querySelector('.selected-image-display');
-            if (disp) disp.textContent = selectedPath || "None";
+            if (disp) disp.textContent = displayText;
             const aiResults = card.querySelector('.ai-results');
             if (aiResults) {
               highlightAiSelection(aiResults, selectedPath);
+            }
+          }
+          if (data.new_config && data.new_config.video_playback_mode !== undefined) {
+            const nextMode = (data.new_config.video_playback_mode || 'duration').toLowerCase();
+            card.dataset.videoMode = nextMode;
+            const videoModeSelect = card.querySelector('.video-mode-select');
+            if (videoModeSelect) videoModeSelect.value = nextMode;
+          }
+          if (data.new_config && data.new_config.video_volume !== undefined) {
+            const volumeValue = Number(data.new_config.video_volume);
+            card.dataset.videoVolume = String(volumeValue);
+            card.dataset.videoVolumePersisted = String(volumeValue);
+            const volumeSlider = card.querySelector('.video-volume-slider');
+            if (volumeSlider) {
+              const pct = Math.max(0, Math.min(1, Number.isFinite(volumeValue) ? volumeValue : 1)) * 100;
+              volumeSlider.value = String(Math.round(pct));
             }
           }
           if (data.new_config && data.new_config.image_quality !== undefined) {
@@ -3387,6 +3453,8 @@
     const shuffleChk = card.querySelector('.shuffle-chk');
     const urlDiv = card.querySelector('.stream-url-container');
     const imagePicker = card.querySelector('.image-picker');
+    const videoModeRow = card.querySelector('.video-mode-row');
+    const playbackRow = card.querySelector('.playback-controls-row');
     const ytSettingsDiv = card.querySelector('.yt-settings');
     const selectedRow = card.querySelector('.selected-image-row');
     const folderRow = card.querySelector('.folder-row');
@@ -3397,6 +3465,8 @@
     if (shuffleChk) shuffleChk.closest('label').style.display = (mode === 'random') ? '' : 'none';
     if (urlDiv) urlDiv.style.display = (mode === 'livestream') ? '' : 'none';
     if (imagePicker) imagePicker.style.display = (mode === 'specific') ? '' : 'none';
+    if (videoModeRow) videoModeRow.style.display = (mode === 'livestream' || mode === 'ai') ? 'none' : '';
+    if (playbackRow) playbackRow.style.display = (mode === 'random' || mode === 'specific') ? '' : 'none';
     const aiSection = card.querySelector('.ai-generator');
     const aiSummary = card.querySelector('.ai-summary');
     if (mode === 'ai') {
@@ -3419,43 +3489,74 @@
     if (ytSettingsDiv) ytSettingsDiv.style.display = (mode === 'livestream' && type === 'YouTube') ? '' : 'none';
   }
 
-  function loadImagesFor(streamId, folder) {
+  function loadMediaFor(streamId, folder) {
     const card = document.querySelector(`.stream-card[data-stream="${streamId}"]`);
     if (!card) return;
-    const imageGrid = card.querySelector('.image-picker .image-grid');
-    if (!imageGrid) return;
-    const selectedDisplay = card.querySelector('.selected-image-display');
-    const currentSelected = selectedDisplay ? selectedDisplay.textContent.trim() : null;
+    const grid = card.querySelector('.image-picker .image-grid');
+    if (!grid) return;
     const hideNsfw = card.dataset.hideNsfw === 'true';
     const params = new URLSearchParams({ folder });
     if (hideNsfw) {
       params.set('hide_nsfw', '1');
     }
-    imageGrid.innerHTML = 'Loading...';
-    fetch(`/images?${params.toString()}`)
+    grid.textContent = 'Loading...';
+    fetch(`/media?${params.toString()}`)
       .then(res => res.json())
-      .then(imgs => {
-        imageGrid.innerHTML = '';
-        imgs.forEach(path => {
-          const imgEl = document.createElement('img');
-          imgEl.src = `/stream/image/${path}?size=thumb`;
-          imgEl.title = path;
-          imgEl.classList.add('picker-thumbnail');
-          if (currentSelected === path) {
-            imgEl.classList.add('selected-thumb');
-          }
-          imgEl.addEventListener('click', () => {
-            saveSettings(streamId, { selected_image: path });
-          });
-          imageGrid.appendChild(imgEl);
-        });
-        if (!imgs.length) {
-          imageGrid.innerHTML = '(No images found in this folder)';
+      .then(items => {
+        const list = Array.isArray(items) ? items : [];
+        const selectedPath = card.dataset.selectedPath || '';
+        const selectedKind = card.dataset.selectedKind || '';
+        grid.innerHTML = '';
+        if (!list.length) {
+          grid.textContent = '(No media found in this folder)';
+          return;
         }
+        const frag = document.createDocumentFragment();
+        list.forEach(item => {
+          if (!item || !item.path) {
+            return;
+          }
+          const kind = (item.kind || '').toLowerCase() === 'video' ? 'video' : 'image';
+          const tile = document.createElement('div');
+          tile.className = 'picker-thumbnail media-thumb';
+          tile.dataset.path = item.path;
+          tile.dataset.kind = kind;
+          if (item.path === selectedPath && (!selectedKind || selectedKind === kind)) {
+            tile.classList.add('selected-thumb');
+          }
+          if (kind === 'image') {
+            const img = document.createElement('img');
+            img.src = `/stream/image/${item.path}?size=thumb`;
+            img.alt = item.path;
+            tile.appendChild(img);
+          } else {
+            tile.classList.add('media-thumb-video');
+            const icon = document.createElement('span');
+            icon.className = 'media-icon';
+            icon.textContent = 'Video';
+            const label = document.createElement('span');
+            label.className = 'media-label';
+            label.textContent = item.path.split('/').pop();
+            tile.append(icon, label);
+          }
+          tile.addEventListener('click', () => {
+            card.dataset.selectedPath = item.path;
+            card.dataset.selectedKind = kind;
+            grid.querySelectorAll('.media-thumb').forEach(el => el.classList.remove('selected-thumb'));
+            tile.classList.add('selected-thumb');
+            const display = card.querySelector('.selected-image-display');
+            if (display) {
+              display.textContent = kind === 'video' ? `${item.path} (video)` : item.path;
+            }
+            saveSettings(streamId, { selected_image: item.path, selected_media_kind: kind });
+          });
+          frag.appendChild(tile);
+        });
+        grid.appendChild(frag);
       })
       .catch(err => {
-        console.error('Error fetching images for folder:', err);
-        imageGrid.innerHTML = 'Error loading images.';
+        console.error('Error fetching media for folder:', err);
+        grid.textContent = 'Error loading media.';
       });
   }
 
@@ -3508,8 +3609,12 @@
           } else {
             selectEl.title = folder;
           }
-          saveSettings(streamId, { folder, selected_image: null });
-          loadImagesFor(streamId, folder);
+          card.dataset.selectedPath = '';
+          card.dataset.selectedKind = '';
+          const display = card.querySelector('.selected-image-display');
+          if (display) display.textContent = 'None';
+          saveSettings(streamId, { folder, selected_image: null, selected_media_kind: null });
+          loadMediaFor(streamId, folder);
         });
       }
       const hideNsfwToggle = card.querySelector('.hide-nsfw-toggle');
@@ -3563,6 +3668,54 @@
           saveSettings(streamId, { background_blur_amount: amount });
         });
       }
+      const videoModeSelect = card.querySelector('.video-mode-select');
+      if (videoModeSelect) {
+        const initialMode = (card.dataset.videoMode || videoModeSelect.value || 'duration').toLowerCase();
+        videoModeSelect.value = initialMode;
+        card.dataset.videoMode = initialMode;
+        videoModeSelect.addEventListener('change', e => {
+          const nextMode = (e.target.value || 'duration').toLowerCase();
+          card.dataset.videoMode = nextMode;
+          saveSettings(streamId, { video_playback_mode: nextMode });
+        });
+      }
+      const playbackButtons = card.querySelectorAll('.playback-controls .playback-btn');
+      playbackButtons.forEach(btn => {
+        btn.addEventListener('click', () => {
+          const action = btn.dataset.action;
+          if (!action) return;
+          socket.emit('video_control', { stream_id: streamId, action });
+        });
+      });
+      const volumeSlider = card.querySelector('.video-volume-slider');
+      if (volumeSlider) {
+        const fromSlider = value => {
+          const num = Number(value);
+          if (!Number.isFinite(num)) return 1;
+          return Math.max(0, Math.min(100, num)) / 100;
+        };
+        const datasetAttr = card.dataset.videoVolume;
+        const datasetVol = (datasetAttr !== undefined && datasetAttr !== '') ? Number(datasetAttr) : NaN;
+        const initialVol = Number.isFinite(datasetVol) ? Math.max(0, Math.min(1, datasetVol)) : fromSlider(volumeSlider.value);
+        volumeSlider.value = String(Math.round(initialVol * 100));
+        card.dataset.videoVolume = String(initialVol);
+        card.dataset.videoVolumePersisted = card.dataset.videoVolumePersisted || String(initialVol);
+        volumeSlider.addEventListener('input', e => {
+          const normalized = fromSlider(e.target.value);
+          card.dataset.videoVolume = String(normalized);
+          socket.emit('video_control', { stream_id: streamId, action: 'set_volume', volume: normalized });
+        });
+        volumeSlider.addEventListener('change', e => {
+          const normalized = fromSlider(e.target.value);
+          card.dataset.videoVolume = String(normalized);
+          const persisted = Number(card.dataset.videoVolumePersisted);
+          if (Number.isFinite(persisted) && Math.abs(normalized - persisted) <= 0.005) {
+            volumeSlider.value = String(Math.round(Math.max(0, Math.min(1, persisted)) * 100));
+            return;
+          }
+          saveSettings(streamId, { video_volume: normalized });
+        });
+      }
       // Mode change
       const modeSelect = card.querySelector('.mode-select');
       const urlInput = card.querySelector('.stream-url-input');
@@ -3591,6 +3744,10 @@
           }
           saveSettings(streamId, payload);
           toggleVisibilityForMode(card, mode, urlInput ? urlInput.value : '');
+          if (mode === 'specific') {
+            const effectiveFolder = folderSelect ? (folderSelect.value === '__filtered__' ? (folderSelect.dataset.currentFolder || 'all') : folderSelect.value) : 'all';
+            loadMediaFor(streamId, effectiveFolder);
+          }
         });
       }
       // Duration change
@@ -3722,7 +3879,7 @@
       if (reloadBtn) {
         reloadBtn.addEventListener('click', () => {
           const folder = folderSelect ? (folderSelect.value === '__filtered__' ? (folderSelect.dataset.currentFolder || 'all') : folderSelect.value) : 'all';
-          loadImagesFor(streamId, folder);
+          loadMediaFor(streamId, folder);
         });
       }
 
