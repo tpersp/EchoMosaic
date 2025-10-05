@@ -1249,6 +1249,15 @@ settings["_ai_defaults"] = _sanitize_ai_settings(
     defaults=AI_FALLBACK_DEFAULTS,
 )
 
+def _detect_media_kind(value: Optional[str]) -> str:
+    if not value:
+        return "image"
+    ext = os.path.splitext(str(value))[1].lower()
+    if ext in VIDEO_EXTENSIONS:
+        return "video"
+    return "image"
+
+
 ensure_ai_presets_storage()
 # Backfill defaults for existing stream entries
 for k, v in list(settings.items()):
@@ -1291,15 +1300,6 @@ settings.setdefault("_groups", {})
 
 def _path_contains_nsfw(value: Optional[str]) -> bool:
     return bool(value and NSFW_KEYWORD in value.lower())
-
-
-def _detect_media_kind(value: Optional[str]) -> str:
-    if not value:
-        return "image"
-    ext = os.path.splitext(str(value))[1].lower()
-    if ext in VIDEO_EXTENSIONS:
-        return "video"
-    return "image"
 
 
 def _filter_nsfw_images(paths: List[str], hide_nsfw: bool) -> List[str]:
