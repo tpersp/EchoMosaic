@@ -2,71 +2,47 @@
 
 A running list of ideas and future improvements. Add new items anywhere below.
 
-- [ ] Stream real-time update logs via Socket.IO instead of a client-side animation.
+## Active Ideas
+- [ ] Stream real-time update logs via Socket.IO instead of the current client-side animation.
+- [ ] "Slideshow sync": sync transitions across all streams (for example, they all change every 10 seconds together) to prevent random offsets when multiple screens are visible at once.
+- [ ] Low-bandwidth mode: automatically reduce image resolution and caching behaviour for remote access.
+- [ ] Show a live thumbnail preview for each stream's current content directly on the dashboard so you can see all streams at a glance before opening them.
+- [ ] Add server-side rendering as an option so everyone who opens the site sees the same frame at the same time. This should be controlled at the group level (a single-stream group covers the one-off case).
+- [ ] Add system monitoring to surface CPU usage, memory usage (used/max), GPU usage (if available), storage available for media, and other useful info.
+- [ ] Implement a better rollback feature that lets admins mark a restore point so the server can always roll back to a known good state on demand.
 
-- [ ] “Slideshow sync”: sync transitions across all streams (e.g., all change every 10s together), to prevent them from changing at "random interval" when having multiple streams on one screen or near each other.
-
-- [ ] Low-bandwidth mode: auto-reduces image resolution for remote access.
-
-- [ ] Show a live thumbnail preview for each stream’s current content directly on the dashboard (so you can see all streams at a glance before opening them).
-
-- [ ] add server sided rendering as an option if possible. so it feels more like a proper stream as everyone who opens the site sees the same thing at the same time. - maybe not all streams, but the option to enable server side rendering for a specific group would be nice, if single stream is needed then the user would just make group with only one stream, hence SSR should be controlled on group level.
-
-- [ ] Add system monitoring, to watch cpu usage, memory usage(using/max), gpu usage(if any), storage available for media, other useful info. - Add next
-
-- [ ] Implement Stable Horde image generation.
-
-- [ ] Implement a better an improved rollback feature, enabeling users to mark a rollback point, where the server stores the specific point so the user always have a "known good" restore point.
-
-## Suggestions from a friend:
-- [ ]  [2025-09-08] Add optional authentication or API‑key protection for the dashboard and update endpoints. The README notes that after installation you can access the dashboard directly at http://your‑server:PORT/, so anyone on the network can modify streams and run updates. Implementing a simple login or token-based auth would improve security. - Lets drop the api key but use a simple login with session cache for some time to not annoy the user.
-
-- [ ]  [2025-09-08] Make paths and constants configurable via config.json or environment variables. Users currently have to edit app.py to change where images are stored. Exposing settings like IMAGE_DIR (and other constants) through configuration files or a settings UI would improve maintainability and avoid manual code changes.
-
-- [ ]  [2025-09-08] Cache directory listings or use file-system watchers. Functions like get_subfolders() and list_images() walk the entire image directory and sort the results on every request. Caching these results and refreshing them when the file system changes (e.g., using inotify on Linux) would boost performance, especially with large image libraries.
-
-- [ ]  [2025-09-08] Offload HLS lookup to a background task and cache results. The try_get_hls() function synchronously calls yt‑dlp on each request, which can block the server and slow down the UI. Running the lookup asynchronously, caching the resolved HLS URLs, and providing placeholder content or error messages during processing would improve responsiveness and stability.
-
-- [ ]  [2025-09-08] Enhance group management and stream ordering. The dashboard stores group tile states in local storage, but doesn’t persist layouts server‑side or allow drag‑and‑drop reordering. Adding drag‑and‑drop ordering, server‑side persistence of group layouts, and options to clone/share groups would make managing many streams easier.
-
-- [ ]  [2025-09-08] Improve error handling and user feedback. When an image or stream URL is missing, the server returns a generic JSON error or 404. Surfacing these errors in the UI with clear messages (e.g., “Image not found” or “Unsupported stream URL”) would help users troubleshoot issues without checking logs.
-
-- [ ]  [2025-09-08] Add configurable logging and monitoring. Operations like yt‑dlp calls and update scripts either fail silently or log to the console. Implementing configurable logging levels and persistent logs (e.g., rotating file logs) would aid debugging and provide insight into system health.
-
-- [ ]  Similarly to the stablehorde.py, add a page and function that can pull images from https://picsum.photos/ with the available options showed to the user.
-
-- [ ] Similarly to the stablehorde.py, add a page and function that can pull images from https://www.pexels.com/api/ with the available options showed to the user.
-
-- [x] Add folder filter and toggle, so user can choose to enable disable folders containing "nsfw/NSFW" in the name. that way, media from folders containing nsfw does not show up in "all" and nsfw folders does not show up in folder list.
-
-- [x] Add ability to cancel stablehorde queue, if possible. (currently it seems to be stuck in queue, and unable to generate new.)
-
-- [ ] Add ability to show movie files, like mp4, mpv, and other common movie media file types.
-
-- [x] Add ability to save AI image gen presets, so user don't need to remember different settings for each type of image.
-
-- [x] Add feature to catagorize streams on the dashboard, and add feature to then be able to sort and filter catagories, that way users can get better overview when having many streams.
-
----
+## Suggestions from a friend
+- [ ] [2025-09-08] Add optional authentication or simple login with a session cache so casual users are not blocked but the dashboard and update endpoints are protected from anyone on the network.
+- [ ] [2025-09-08] Make paths and constants configurable via `config.json` or environment variables. Today users still edit `app.py` to change where images are stored.
+- [ ] [2025-09-08] Offload HLS lookup to a background task and cache results. `try_get_hls()` currently invokes `yt-dlp` synchronously on each request, which can block the server under load.
+- [ ] [2025-09-08] Enhance group management and stream ordering. Persist layouts server-side, allow drag-and-drop reordering, and offer options to clone or share groups.
+- [ ] [2025-09-08] Improve error handling and user feedback. When an image or stream URL is missing, surface clear messages in the UI instead of generic JSON errors.
+- [ ] [2025-09-08] Add configurable logging and monitoring. Operations like `yt-dlp` calls and update scripts either fail silently or log to the console; configurable log levels and rotating file logs would help.
+- [ ] Add a page and function similar to `stablehorde.py` that can pull images from https://picsum.photos/ with the available options exposed in the UI.
+- [ ] Add a page and function similar to `stablehorde.py` that can pull images from the https://www.pexels.com/api/ with the available options exposed in the UI.
 
 ## Implemented / Completed Ideas
-
-- [x] Add a simple “Update history” view in Settings showing prior updates and commit messages.
-- [x] add prettier update feature so user isn't hit with "This site can’t be reached <site/ip> refused to connect.
-- [x] Add stream quality options instead of free text format, options should be 1080p, 720p, 480, 360p, 240p, 144p, Auto. if a non-youtube stream is used, it should automatically select "auto" for compatibility.
-- [x] Grid strict-mode: when a group has more streams than Rows×Cols, optionally show only the first N (or chosen order) instead of auto-expanding the grid. Provide pagination/scroll or a toggle to auto-fit vs. strict.
-- [x] Provide bulk toggle actions (e.g., include/exclude all). [Added “Add all” / “Remove all” in group editor]
-- [x] Add a “Show only selected” count or filter in the dashboard to quickly see which streams are included. [Member count shown in group tiles]
-- [x] Add a settings backup/export feature so custom streams/folders/tags can be quickly restored or moved to another device. [Export/Import in Settings]
-- [x] Add option to shuffle display order of media in folders - should by default shuffle, with the option to turn off shuffle. [Shuffle toggle per stream]
-- [x] [2025-09-08] Add a light/dark theme toggle. [Theme toggle added]
+- [x] Implement Stable Horde image generation. (Streams can switch to AI mode, queue jobs, and manage presets.)
+- [x] [2025-09-08] Cache directory listings so media browsing does not rescan the filesystem on every request. (Implemented via the in-process `IMAGE_CACHE`.)
+- [x] Add folder filter and toggle so the user can hide folders containing `nsfw`/`NSFW` by default.
+- [x] Add ability to cancel Stable Horde queue jobs.
+- [x] Add ability to show movie files (mp4, mkv, webm, mov, avi, m4v, mpg, mpeg).
+- [x] Add ability to save AI image generation presets so users can store different settings per workflow.
+- [x] Add a feature to categorise streams on the dashboard and provide sorting and filtering for categories to improve overview when many streams exist.
+- [x] Add a simple "Update history" view in Settings showing prior updates and commit messages.
+- [x] Add a friendlier update flow so users are not dropped onto a browser error page during restarts.
+- [x] Add stream quality options instead of free-text fields (1080p, 720p, 480p, 360p, 240p, 144p, Auto) with automatic Auto selection for non-YouTube streams.
+- [x] Grid strict-mode: when a group has more streams than Rows x Cols, optionally show only the first N instead of auto-expanding the grid. Provide pagination/scroll or a toggle to auto-fit vs. strict.
+- [x] Provide bulk toggle actions (for example, Add all / Remove all) in the group editor.
+- [x] Add a "Show only selected" indicator in the dashboard to quickly see which streams are included.
+- [x] Add a settings backup/export feature so custom streams, folders, and tags can be restored or moved to another device.
+- [x] Add an option to shuffle the display order of media in folders (enabled by default with a toggle to turn it off).
+- [x] [2025-09-08] Add a light/dark theme toggle.
 - [x] [2025-09-21] Expand Stable Horde controls with LoRA stacks, post-processing chains, and worker preference toggles directly in the dashboard.
 - [x] [2025-09-21] Move AI generator controls into a modal window and surface per-stream summaries on the dashboard.
 
 Notes
-- Use checkboxes to track status (unchecked → planned, checked → done).
-- Optionally prefix entries with a date, e.g., `[2025-09-07] Idea text…`.
+- Use checkboxes to track status (unchecked = planned, checked = done).
+- Optionally prefix entries with a date, e.g. `[2025-09-07] Idea text...`.
 - Group related items under short headings if this grows large.
-
-
 
