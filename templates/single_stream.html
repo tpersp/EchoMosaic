@@ -415,6 +415,7 @@ async function displaySingleMedia(config, container) {
 function startRandomRotation(config, container) {
   const folder = config.folder || 'all';
   const hideNsfw = Boolean(config.hide_nsfw);
+  const mediaMode = (config.media_mode || 'image').toLowerCase();
   const sequential = config.shuffle === false;
   const playbackMode = normalizePlaybackMode(config.video_playback_mode);
   const durationSeconds = Math.max(Number(config.duration) || 5, 1);
@@ -437,6 +438,11 @@ function startRandomRotation(config, container) {
   const baseParams = new URLSearchParams({ folder });
   if (hideNsfw) {
     baseParams.set('hide_nsfw', '1');
+  }
+  if (mediaMode === 'image') {
+    baseParams.set('kind', 'image');
+  } else if (mediaMode === 'video') {
+    baseParams.set('kind', 'video');
   }
 
   function getVolume() {
@@ -759,81 +765,72 @@ async function render(config) {
   container.innerHTML = '';
   setBackdropSettings(config && config.background_blur_enabled, config && config.background_blur_amount);
   setMediaController(createNoopMediaController());
-  if (config.mode === 'livestream') {
+  const mediaMode = (config && typeof config.media_mode === 'string') ? config.media_mode.trim().toLowerCase() : ((config && typeof config.mode === 'string' && config.mode.toLowerCase() === 'livestream') ? 'livestream' : (config && typeof config.mode === 'string' && config.mode.toLowerCase() === 'ai') ? 'ai' : (config && config.selected_media_kind === 'video') ? 'video' : 'image');
+  const modeValue = (config && typeof config.mode === 'string') ? config.mode.trim().toLowerCase() : 'random';
+  if (mediaMode === 'livestream') {
     updateBackdropSource('');
-  }
+    if (config.stream_url) {
+      try {
+        const response = await fetch(`/stream/live?stream_id=${encodeURIComponent(streamId)}`);
+        if (!response.ok) {
+          throw new Error(`Stream metadata request failed (${response.status})`);
+        }
+        const data = await response.json();
+        if (data.embed_type === 'youtube') {
+          const params = `?autoplay=1&mute=${config.yt_mute ? 1 : 0}&cc_load_policy=${config.yt_cc ? 1 : 0}`;
+          const iframe = document.createElement('iframe');
+          iframe.src = `https://www.youtube.com/embed/${data.embed_id}${params}`;
+          iframe.allow = 'autoplay';
+          container.appendChild(iframe);
+        } else if (data.embed_type === 'twitch') {
+          const iframe = document.createElement('iframe');
+          iframe.src = `https://player.twitch.tv/?channel=${data.embed_id}&parent=${location.hostname}&autoplay=true`;
+          iframe.allow = 'autoplay';
+          container.appendChild(iframe);
+        } else if (data.embed_type === 'hls') {
+          const video = document.createElement('video');
+          video.controls = true;
+          video.autoplay = true;
+          video.playsInline = true;
+          video.preload = 'auto';
+          video.style.width = '100%';
+          video.style.height = '100%';
+          container.appendChild(video);
 
-  if (config.mode === 'livestream' && config.stream_url) {
-    try {
-      const response = await fetch(`/stream/live?stream_id=${encodeURIComponent(streamId)}`);
-      if (!response.ok) {
-        throw new Error(`Stream metadata request failed (${response.status})`);
-      }
-      const data = await response.json();
-      if (data.embed_type === 'youtube') {
-        const params = `?autoplay=1&mute=${config.yt_mute ? 1 : 0}&cc_load_policy=${config.yt_cc ? 1 : 0}`;
-        const iframe = document.createElement('iframe');
-        iframe.src = `https://www.youtube.com/embed/${data.embed_id}${params}`;
-        iframe.allow = 'autoplay';
-        container.appendChild(iframe);
-      } else if (data.embed_type === 'twitch') {
-        const iframe = document.createElement('iframe');
-        iframe.src = `https://player.twitch.tv/?channel=${data.embed_id}&parent=${location.hostname}&autoplay=true`;
-        iframe.allow = 'autoplay';
-        container.appendChild(iframe);
-      } else if (data.embed_type === 'hls') {
-        const video = document.createElement('video');
-        video.controls = true;
-        video.autoplay = true;
-        video.playsInline = true;
-        video.preload = 'auto';
-        video.style.width = '100%';
-        video.style.height = '100%';
-        container.appendChild(video);
-
-        if (video.canPlayType('application/vnd.apple.mpegurl')) {
-          video.src = data.hls_url;
-        } else {
-          try {
-            const Hls = await ensureHlsLibrary();
-            if (Hls && Hls.isSupported()) {
-              activeHls = new Hls();
-              activeHls.loadSource(data.hls_url);
-              activeHls.attachMedia(video);
-            } else {
+          if (video.canPlayType('application/vnd.apple.mpegurl')) {
+            video.src = data.hls_url;
+          } else {
+            try {
+              const Hls = await ensureHlsLibrary();
+              if (Hls && Hls.isSupported()) {
+                activeHls = new Hls();
+                activeHls.loadSource(data.hls_url);
+                activeHls.attachMedia(video);
+              } else {
+                video.src = data.hls_url;
+              }
+            } catch (err) {
+              console.error('Failed to initialise hls.js', err);
               video.src = data.hls_url;
             }
-          } catch (err) {
-            console.error('Failed to initialise hls.js', err);
-            video.src = data.hls_url;
           }
+        } else {
+          const iframe = document.createElement('iframe');
+          iframe.src = data.original_url;
+          container.appendChild(iframe);
         }
-      } else {
-        const iframe = document.createElement('iframe');
-        iframe.src = data.original_url;
-        container.appendChild(iframe);
+      } catch (err) {
+        console.error('Failed to load livestream metadata', err);
+        container.textContent = 'Unable to load stream';
       }
-    } catch (err) {
-      console.error('Failed to load livestream metadata', err);
-      container.textContent = 'Unable to load stream';
+    } else {
+      container.textContent = 'Stream URL not configured';
     }
     return;
   }
 
-  if (config.mode === 'specific') {
-    await displaySingleMedia(config, container);
-    return;
-  }
-
-  if (config.mode === 'random') {
-    startRandomRotation(config, container);
-    return;
-  }
-
-  if (config.mode === 'ai') {
-    const aiImages = (config.ai_state && Array.isArray(config.ai_state.images))
-      ? config.ai_state.images
-      : [];
+  if (mediaMode === 'ai' || modeValue === 'ai') {
+    const aiImages = (config.ai_state && Array.isArray(config.ai_state.images)) ? config.ai_state.images : [];
     const paths = aiImages
       .map(item => (item && item.path) ? item.path : item)
       .filter(Boolean);
@@ -841,6 +838,30 @@ async function render(config) {
       paths.push(config.selected_image);
     }
     startAiRotation(paths, config, container);
+    return;
+  }
+
+  if (mediaMode === 'video') {
+    if (modeValue === 'specific') {
+      await displaySingleMedia(config, container);
+      return;
+    }
+    if (modeValue === 'random') {
+      startRandomRotation(config, container);
+      return;
+    }
+    container.textContent = 'No video content configured';
+    updateBackdropSource('');
+    return;
+  }
+
+  if (modeValue === 'specific') {
+    await displaySingleMedia(config, container);
+    return;
+  }
+
+  if (modeValue === 'random') {
+    startRandomRotation(config, container);
     return;
   }
 

@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8"/>
@@ -81,7 +81,7 @@
   <div id="dashboard-grid" class="dashboard-grid">
     {# Generate a card for each stream dynamically #}
     {% for stream_id, conf in stream_settings.items() %}
-    <div class="stream-card" data-stream="{{ stream_id }}" data-hide-nsfw="{{ "true" if conf.hide_nsfw|default(False) else "false" }}" data-tags='{{ (conf.tags|default([]))|tojson }}' data-selected-path="{{ conf.selected_image or '' }}" data-selected-kind="{{ conf.selected_media_kind or '' }}" data-video-mode="{{ conf.video_playback_mode|default('duration') }}" data-video-volume="{{ conf.video_volume|default(1.0) }}">
+    <div class="stream-card" data-stream="{{ stream_id }}" data-hide-nsfw="{{ "true" if conf.hide_nsfw|default(False) else "false" }}" data-tags='{{ (conf.tags|default([]))|tojson }}' data-selected-path="{{ conf.selected_image or '' }}" data-selected-kind="{{ conf.selected_media_kind or '' }}" data-video-mode="{{ conf.video_playback_mode|default('duration') }}" data-video-volume="{{ conf.video_volume|default(1.0) }}" data-media-mode="{{ conf.media_mode|default('image') }}">
       <div class="card-header">
         <div class="title-row">
           <h2><a class="stream-link" href="{{ url_for('render_stream', name=(conf.label if conf.label else stream_id)|slugify) }}" target="_blank">{{ conf.label if conf.label else stream_id|capitalize }}</a></h2>
@@ -97,18 +97,30 @@
 
       <div class="form-grid">
         <!-- Mode Selection (moved to top) -->
-        <div class="form-row">
-          <label for="mode-{{ stream_id }}">Mode</label>
-          <select id="mode-{{ stream_id }}" class="mode-select" data-stream="{{ stream_id }}">
-            <option value="random" {% if conf.mode == 'random' %} selected {% endif %}>Random</option>
-            <option value="specific" {% if conf.mode == 'specific' %} selected {% endif %}>Specific</option>
-            <option value="livestream" {% if conf.mode == 'livestream' %} selected {% endif %}>URL / Embed</option>
-            <option value="ai" {% if conf.mode == 'ai' %} selected {% endif %}>AI Images</option>
-          </select>
+        {% set media_mode = conf.media_mode|default('image') %}
+        {% set mode_value = conf.mode|default('random') %}
+        <div class="form-row mode-row">
+          <label for="mode-category-{{ stream_id }}">Mode</label>
+          <div class="mode-selectors">
+            <select id="mode-category-{{ stream_id }}" class="mode-category-select" data-stream="{{ stream_id }}">
+              <option value="image" {% if media_mode == 'image' %}selected{% endif %}>Image / GIF</option>
+              <option value="video" {% if media_mode == 'video' %}selected{% endif %}>Video</option>
+              <option value="livestream" {% if media_mode == 'livestream' %}selected{% endif %}>URL / Embed</option>
+              <option value="ai" {% if media_mode == 'ai' %}selected{% endif %}>AI Images</option>
+            </select>
+            <div class="mode-variant-wrapper">
+              <select id="mode-option-{{ stream_id }}" class="mode-select" data-stream="{{ stream_id }}">
+                <option value="random" data-category="image" {% if media_mode == 'image' and mode_value == 'random' %}selected{% endif %}>Random</option>
+                <option value="specific" data-category="image" {% if media_mode == 'image' and mode_value == 'specific' %}selected{% endif %}>Specific</option>
+                <option value="random" data-category="video" {% if media_mode == 'video' and mode_value == 'random' %}selected{% endif %}>Random (Video)</option>
+                <option value="specific" data-category="video" {% if media_mode == 'video' and mode_value == 'specific' %}selected{% endif %}>Specific (Video)</option>
+              </select>
+            </div>
+          </div>
         </div>
 
         <!-- Folder Selection -->
-        <div class="form-row folder-row" {% if conf.mode == 'livestream' %} style="display:none;" {% endif %}>
+        <div class="form-row folder-row" {% if media_mode in ['livestream', 'ai'] %} style="display:none;" {% endif %}>
           <label for="folder-{{ stream_id }}">Folder</label>
           {% set current_folder = conf.folder if conf.folder else 'all' %}
           {% set hide_nsfw = conf.hide_nsfw|default(False) %}
@@ -116,14 +128,15 @@
             {% if hide_nsfw and current_folder and 'nsfw' in current_folder|lower %}
               <option value="__filtered__" data-filtered="true" title="{{ current_folder }}" selected>Filtered ({{ current_folder }})</option>
             {% endif %}
-            {% for f in subfolders %}
-              {% if not (hide_nsfw and 'nsfw' in f|lower) %}
-                <option value="{{ f }}" title="{{ f }}" {% if current_folder == f %} selected {% endif %}>{{ f }}</option>
+            {% for entry in folder_inventory %}
+              {% set name = entry.name %}
+              {% if not (hide_nsfw and 'nsfw' in name|lower) %}
+                <option value="{{ name }}" title="{{ name }}" data-has-images="{{ 'true' if entry.has_images else 'false' }}" data-has-videos="{{ 'true' if entry.has_videos else 'false' }}"{% if current_folder == name %} selected{% endif %}>{{ name }}</option>
               {% endif %}
             {% endfor %}
           </select>
         </div>
-        <div class="form-row nsfw-row" {% if conf.mode == 'livestream' %} style="display:none;" {% endif %}>
+        <div class="form-row nsfw-row" {% if media_mode == 'livestream' %} style="display:none;" {% endif %}>
           <label for="hide-nsfw-{{ stream_id }}">Hide NSFW</label>
           <label class="toggle inline" title="Hide folders and files containing 'nsfw'">
             <input id="hide-nsfw-{{ stream_id }}" type="checkbox" class="hide-nsfw-toggle" data-stream="{{ stream_id }}" {% if hide_nsfw %}checked{% endif %}>
@@ -142,7 +155,7 @@
           </div>
         </div>
         <!-- Image Quality Selection -->
-        <div class="form-row image-quality-row" {% if conf.mode == 'livestream' %} style="display:none;" {% endif %}>
+        <div class="form-row image-quality-row" {% if media_mode in ['livestream', 'video'] %} style="display:none;" {% endif %}>
           <label for="image-quality-{{ stream_id }}">Image Quality</label>
           {% set image_q = (conf.image_quality or 'auto')|lower %}
           <select id="image-quality-{{ stream_id }}" class="image-quality-select" data-stream="{{ stream_id }}">
@@ -156,7 +169,7 @@
         <!-- Background Blur Controls -->
         {% set blur_enabled = conf.background_blur_enabled|default(False) %}
         {% set blur_amount = conf.background_blur_amount|default(50) %}
-        <div class="form-row background-row" {% if conf.mode == 'livestream' %}style="display:none;"{% endif %}>
+        <div class="form-row background-row" {% if media_mode in ['livestream', 'video'] %}style="display:none;"{% endif %}>
           <label for="background-toggle-{{ stream_id }}">Backdrop</label>
           <div class="background-controls">
             <label class="toggle inline">
@@ -172,16 +185,15 @@
         </div>
 
         {% set video_mode = conf.video_playback_mode|default('duration') %}
-        <div class="form-row video-mode-row" {% if conf.mode in ['livestream', 'ai'] %}style="display:none;"{% endif %}>
+        <div class="form-row video-mode-row" {% if media_mode != 'video' or mode_value != 'random' %}style="display:none;"{% endif %}>
           <label for="video-mode-{{ stream_id }}">Video Playback</label>
           <select id="video-mode-{{ stream_id }}" class="video-mode-select" data-stream="{{ stream_id }}">
             <option value="duration" {% if video_mode == 'duration' %}selected{% endif %}>Play for duration setting</option>
             <option value="until_end" {% if video_mode == 'until_end' %}selected{% endif %}>Play until video ends</option>
-            <option value="loop" {% if video_mode == 'loop' %}selected{% endif %}>Loop continuously</option>
           </select>
         </div>
         {% set video_volume_pct = (conf.video_volume|default(1.0) * 100)|round(0, 'floor') %}
-        <div class="form-row playback-controls-row" {% if conf.mode not in ['random', 'specific'] %}style="display:none;"{% endif %}>
+        <div class="form-row playback-controls-row" {% if media_mode != 'video' %}style="display:none;"{% endif %}>
           <label>Playback Controls</label>
           <div class="playback-controls" data-stream="{{ stream_id }}">
             <button type="button" class="playback-btn playback-prev" data-stream="{{ stream_id }}" data-action="skip_prev" title="Previous">&#9664;</button>
@@ -198,7 +210,7 @@
 
 
         <!-- Duration + Shuffle (for Random mode) -->
-        <div class="form-row duration-container" {% if conf.mode != 'random' %} style="display:none;" {% endif %}>
+        <div class="form-row duration-container" {% if mode_value != 'random' %} style="display:none;" {% endif %}>
           <label for="duration-{{ stream_id }}">Duration (sec)</label>
           <div class="inline-controls">
             <input id="duration-{{ stream_id }}" type="number" class="duration-input" data-stream="{{ stream_id }}" value="{{ conf.duration }}" min="1" style="max-width: 110px;">
@@ -207,7 +219,7 @@
         </div>
 
         <!-- Stream URL -->
-        <div class="form-row stream-url-container" {% if conf.mode != 'livestream' %} style="display:none;" {% endif %}>
+        <div class="form-row stream-url-container" {% if media_mode != 'livestream' %} style="display:none;" {% endif %}>
           <label for="stream-url-{{ stream_id }}">URL</label>
           <div>
             <div style="display:flex; align-items:center; gap:8px; flex-wrap: wrap;">
@@ -465,7 +477,7 @@
         </div>
       </div>
       <!-- Specific Image Picker -->
-      <div class="image-picker" data-stream="{{ stream_id }}" {% if conf.mode != 'specific' %} style="display:none;" {% endif %}>
+      <div class="image-picker" data-stream="{{ stream_id }}" {% if mode_value != 'specific' %} style="display:none;" {% endif %}>
         <div class="image-picker-header">
           <label>Pick Media (Folder: {{ conf.folder }})</label>
           <button type="button" class="reload-images-btn" data-stream="{{ stream_id }}">Reload</button>
@@ -473,7 +485,7 @@
         <div class="image-grid"></div>
       </div>
 
-      <p class="selected-image-row" {% if conf.mode not in ['specific', 'ai'] %} style="display:none;" {% endif %}>
+      <p class="selected-image-row" {% if mode_value not in ['specific', 'ai'] %} style="display:none;" {% endif %}>
         <strong>Selected Media:</strong>
         <span class="selected-image-display">{{ conf.selected_image if conf.selected_image else "None" }}{% if conf.selected_media_kind == 'video' and conf.selected_image %} (video){% endif %}</span>
       </p>
@@ -1130,6 +1142,78 @@
     if (!folderSelect) {
       return Promise.resolve();
     }
+    const url = hideNsfw ? '/folders?hide_nsfw=1' : '/folders';
+    return fetch(url)
+      .then(response => {
+        if (!response.ok) {
+          throw new Error('Failed to fetch folders');
+        }
+        return response.json();
+      })
+      .then(items => {
+        if (!Array.isArray(items)) {
+          return null;
+        }
+        const assigned = folderSelect.dataset.currentFolder || 'all';
+        const assignedLower = (assigned || '').toLowerCase();
+        const hasAssigned = items.some(entry => entry && entry.name === assigned);
+        const shouldShowPlaceholder = Boolean(hideNsfw) && assigned && assignedLower.includes('nsfw') && !hasAssigned;
+        const frag = document.createDocumentFragment();
+        if (shouldShowPlaceholder) {
+          const placeholder = document.createElement('option');
+          placeholder.value = '__filtered__';
+          placeholder.textContent = `Filtered (${assigned})`;
+          placeholder.title = assigned;
+          placeholder.dataset.filtered = 'true';
+          placeholder.selected = true;
+          frag.appendChild(placeholder);
+        }
+        items.forEach(entry => {
+          if (!entry || !entry.name) {
+            return;
+          }
+          const name = String(entry.name);
+          if (hideNsfw && name.toLowerCase().includes('nsfw')) {
+            return;
+          }
+          const opt = document.createElement('option');
+          opt.value = name;
+          opt.title = name;
+          opt.textContent = name;
+          opt.dataset.hasImages = entry.has_images ? 'true' : 'false';
+          opt.dataset.hasVideos = entry.has_videos ? 'true' : 'false';
+          if (!shouldShowPlaceholder && assigned === name) {
+            opt.selected = true;
+          }
+          frag.appendChild(opt);
+        });
+        folderSelect.replaceChildren(frag);
+        if (shouldShowPlaceholder) {
+          folderSelect.value = '__filtered__';
+          folderSelect.title = assigned;
+        } else {
+          const selectedOption = folderSelect.options[folderSelect.selectedIndex];
+          if (selectedOption) {
+            folderSelect.dataset.currentFolder = selectedOption.value || 'all';
+            folderSelect.title = selectedOption.title || selectedOption.textContent || folderSelect.value;
+          } else if (folderSelect.options.length) {
+            const first = folderSelect.options[0];
+            first.selected = true;
+            folderSelect.dataset.currentFolder = first.value || 'all';
+            folderSelect.title = first.title || first.textContent || folderSelect.value;
+          } else {
+            folderSelect.dataset.currentFolder = 'all';
+            folderSelect.title = 'all';
+          }
+        }
+        filterFolderOptions(card, card.dataset.mediaMode || 'image');
+        return null;
+      })
+      .catch(err => {
+        console.error('Failed to refresh folders', err);
+        return null;
+      });
+  }
     const streamId = card.dataset.stream;
     const url = hideNsfw ? '/folders?hide_nsfw=1' : '/folders';
     return fetch(url)
@@ -3312,6 +3396,12 @@
         showNotification(`Updated settings for ${streamId}`);
         const card = document.querySelector(`.stream-card[data-stream="${streamId}"]`);
         if (card) {
+          const modeCategorySelect = card.querySelector('.mode-category-select');
+          const modeVariantSelect = card.querySelector('.mode-select');
+          const urlInputEl = card.querySelector('.stream-url-input');
+          let updatedMediaMode = (modeCategorySelect ? modeCategorySelect.value : (card.dataset.mediaMode || 'image')).toLowerCase();
+          let updatedMode = modeVariantSelect ? (modeVariantSelect.value || '').toLowerCase() : ((updatedMediaMode === 'livestream' || updatedMediaMode === 'ai') ? updatedMediaMode : 'random');
+
           if (data.new_config && (data.new_config.selected_image !== undefined || data.new_config.selected_media_kind !== undefined)) {
             const selectedPath = data.new_config.selected_image || "";
             const selectedKind = (data.new_config.selected_media_kind || card.dataset.selectedKind || '').toLowerCase();
@@ -3379,6 +3469,25 @@
           if (Array.isArray(data.tags)) {
             syncGlobalTags(data.tags);
           }
+
+          if (data.new_config && data.new_config.media_mode !== undefined) {
+            updatedMediaMode = String(data.new_config.media_mode || 'image').toLowerCase();
+          }
+          card.dataset.mediaMode = updatedMediaMode;
+          if (modeCategorySelect) modeCategorySelect.value = updatedMediaMode;
+
+          if (data.new_config && data.new_config.mode !== undefined) {
+            const normalizedMode = String(data.new_config.mode || '').toLowerCase();
+            if (normalizedMode) {
+              updatedMode = normalizedMode;
+            }
+          }
+          if (modeVariantSelect && updatedMode) {
+            modeVariantSelect.value = updatedMode;
+          }
+          const effectiveMode = updatedMode || ((updatedMediaMode === 'livestream' || updatedMediaMode === 'ai') ? updatedMediaMode : 'random');
+          applyModeState(card, updatedMediaMode, effectiveMode, urlInputEl ? urlInputEl.value : '');
+
           const aiSettings = data.new_config && data.new_config.ai_settings;
           if (aiSettings) {
             const aiSection = card.querySelector('.ai-generator');
@@ -3403,24 +3512,17 @@
               const clockRow = autoWrapper.querySelector('.ai-auto-clock-row');
               const normalizedMode = typeof aiSettings.auto_generate_mode === 'string' ? aiSettings.auto_generate_mode.toLowerCase() : 'off';
               if (modeSelect) modeSelect.value = normalizedMode;
-              if (intervalInput && aiSettings.auto_generate_interval_value !== undefined) {
-                const intervalVal = Number(aiSettings.auto_generate_interval_value);
-                if (Number.isFinite(intervalVal)) {
-                  intervalInput.value = Number(intervalVal.toFixed(2)).toString();
-                }
+              if (intervalInput && aiSettings.auto_generate_interval !== undefined) {
+                intervalInput.value = aiSettings.auto_generate_interval;
               }
-              if (unitSelect && typeof aiSettings.auto_generate_interval_unit === 'string') {
-                unitSelect.value = aiSettings.auto_generate_interval_unit.toLowerCase();
+              if (unitSelect && aiSettings.auto_generate_interval_unit) {
+                unitSelect.value = aiSettings.auto_generate_interval_unit;
               }
-              if (clockInput && aiSettings.auto_generate_clock_time !== undefined) {
-                clockInput.value = aiSettings.auto_generate_clock_time || '';
+              if (clockInput && aiSettings.auto_generate_clock) {
+                clockInput.value = aiSettings.auto_generate_clock;
               }
-              const effectiveMode = normalizedMode;
-              if (timerRow) timerRow.hidden = effectiveMode !== 'timer';
-              if (clockRow) clockRow.hidden = effectiveMode !== 'clock';
-              if (intervalInput) intervalInput.disabled = effectiveMode !== 'timer';
-              if (unitSelect) unitSelect.disabled = effectiveMode !== 'timer';
-              if (clockInput) clockInput.disabled = effectiveMode !== 'clock';
+              if (timerRow) timerRow.hidden = normalizedMode !== 'timer';
+              if (clockRow) clockRow.hidden = normalizedMode !== 'clock';
             }
           }
           if (data.new_config && data.new_config.ai_state) {
@@ -3448,12 +3550,75 @@
     });
   }
 
-  function toggleVisibilityForMode(card, mode, streamUrl) {
+  function filterFolderOptions(card, mediaMode) {
+    const select = card.querySelector('.folder-select');
+    if (!select) {
+      return;
+    }
+    const normalized = typeof mediaMode === 'string' ? mediaMode.toLowerCase() : 'image';
+    const wantsImages = normalized === 'image';
+    const wantsVideos = normalized === 'video';
+    const shouldFilter = wantsImages || wantsVideos;
+    const options = Array.from(select.options);
+    if (!shouldFilter) {
+      options.forEach(option => {
+        if (option.dataset.filtered === 'true') {
+          option.hidden = false;
+        } else {
+          option.hidden = false;
+        }
+      });
+      return;
+    }
+    options.forEach(option => {
+      if (option.dataset.filtered === 'true') {
+        option.hidden = false;
+        return;
+      }
+      const hasImages = option.dataset.hasImages === 'true';
+      const hasVideos = option.dataset.hasVideos === 'true';
+      const visible = wantsImages ? hasImages : hasVideos;
+      option.hidden = !visible;
+    });
+    const selectedOption = select.options[select.selectedIndex];
+    if (selectedOption && selectedOption.hidden) {
+      const fallback = options.find(opt => !opt.hidden && opt.dataset.filtered !== 'true');
+      if (fallback) {
+        select.value = fallback.value;
+        select.dataset.currentFolder = fallback.value || 'all';
+        const streamId = card.dataset.stream;
+        if (streamId) {
+          const folder = fallback.value || 'all';
+          card.dataset.selectedPath = '';
+          card.dataset.selectedKind = '';
+          const display = card.querySelector('.selected-image-display');
+          if (display) display.textContent = 'None';
+          saveSettings(streamId, { folder, selected_image: null, selected_media_kind: null });
+          loadMediaFor(streamId, folder);
+        }
+      }
+    }
+  }
+
+  function applyModeState(card, mediaMode, mode, streamUrl) {
+    const normalizedMedia = typeof mediaMode === 'string' ? mediaMode.toLowerCase() : 'image';
+    const normalizedMode = typeof mode === 'string' ? mode.toLowerCase() : '';
+    const isImage = normalizedMedia === 'image';
+    const isVideo = normalizedMedia === 'video';
+    const isLivestream = normalizedMedia === 'livestream';
+    const isAi = normalizedMedia === 'ai';
+    const isRandom = normalizedMode === 'random';
+    const isSpecific = normalizedMode === 'specific';
+
     const durationDiv = card.querySelector('.duration-container');
     const shuffleChk = card.querySelector('.shuffle-chk');
+    const shuffleLabel = shuffleChk ? shuffleChk.closest('label') : null;
     const urlDiv = card.querySelector('.stream-url-container');
     const imagePicker = card.querySelector('.image-picker');
+    const variantWrapper = card.querySelector('.mode-variant-wrapper');
+    const modeSelect = card.querySelector('.mode-select');
     const videoModeRow = card.querySelector('.video-mode-row');
+    const videoModeSelect = card.querySelector('.video-mode-select');
     const playbackRow = card.querySelector('.playback-controls-row');
     const ytSettingsDiv = card.querySelector('.yt-settings');
     const selectedRow = card.querySelector('.selected-image-row');
@@ -3461,17 +3626,46 @@
     const qualityRow = card.querySelector('.image-quality-row');
     const nsfwRow = card.querySelector('.nsfw-row');
     const backgroundRow = card.querySelector('.background-row');
-    if (durationDiv) durationDiv.style.display = (mode === 'random') ? '' : 'none';
-    if (shuffleChk) shuffleChk.closest('label').style.display = (mode === 'random') ? '' : 'none';
-    if (urlDiv) urlDiv.style.display = (mode === 'livestream') ? '' : 'none';
-    if (imagePicker) imagePicker.style.display = (mode === 'specific') ? '' : 'none';
-    if (videoModeRow) videoModeRow.style.display = (mode === 'livestream' || mode === 'ai') ? 'none' : '';
-    if (playbackRow) playbackRow.style.display = (mode === 'random' || mode === 'specific') ? '' : 'none';
     const aiSection = card.querySelector('.ai-generator');
     const aiSummary = card.querySelector('.ai-summary');
-    if (mode === 'ai') {
+
+    const showVariant = isImage || isVideo;
+    if (variantWrapper) {
+      variantWrapper.style.display = showVariant ? '' : 'none';
+    }
+    if (modeSelect) {
+      const options = Array.from(modeSelect.options);
+      options.forEach(opt => {
+        const category = (opt.dataset.category || 'image').toLowerCase();
+        const visible = showVariant && category === normalizedMedia;
+        opt.hidden = !visible;
+      });
+      if (showVariant) {
+        const matching = options.find(opt => !opt.hidden && opt.value === normalizedMode);
+        if (matching) {
+          modeSelect.value = matching.value;
+        } else {
+          const fallback = options.find(opt => !opt.hidden);
+          if (fallback) modeSelect.value = fallback.value;
+        }
+        modeSelect.disabled = false;
+      } else {
+        modeSelect.disabled = true;
+      }
+    }
+
+    if (durationDiv) durationDiv.style.display = (isRandom && (isImage || isVideo)) ? '' : 'none';
+    if (shuffleLabel) shuffleLabel.style.display = (isRandom && (isImage || isVideo)) ? '' : 'none';
+    if (urlDiv) urlDiv.style.display = isLivestream ? '' : 'none';
+    if (imagePicker) imagePicker.style.display = (isSpecific && (isImage || isVideo)) ? '' : 'none';
+    if (videoModeRow) videoModeRow.style.display = (isVideo && isRandom) ? '' : 'none';
+    if (playbackRow) playbackRow.style.display = isVideo ? '' : 'none';
+
+    if (isAi) {
       if (aiSummary) aiSummary.style.display = '';
-      if (aiSection && !card.classList.contains('ai-settings-open')) aiSection.setAttribute('aria-hidden', 'true');
+      if (aiSection && !card.classList.contains('ai-settings-open')) {
+        aiSection.setAttribute('aria-hidden', 'true');
+      }
     } else {
       if (aiSummary) aiSummary.style.display = 'none';
       if (aiSection) aiSection.setAttribute('aria-hidden', 'true');
@@ -3479,14 +3673,35 @@
     }
     const summaryUpdater = aiSummaryUpdaters.get(card);
     if (summaryUpdater) summaryUpdater();
-    if (selectedRow) selectedRow.style.display = (mode === 'specific' || mode === 'ai') ? '' : 'none';
-    if (folderRow) folderRow.style.display = (mode === 'livestream' || mode === 'ai') ? 'none' : '';
-    if (nsfwRow) nsfwRow.style.display = (mode === 'livestream') ? 'none' : '';
-    if (qualityRow) qualityRow.style.display = (mode === 'livestream') ? 'none' : '';
-    if (backgroundRow) backgroundRow.style.display = (mode === 'livestream') ? 'none' : '';
-    // Only show YT options if URL looks like YouTube
-    const type = detectUrlType(streamUrl);
-    if (ytSettingsDiv) ytSettingsDiv.style.display = (mode === 'livestream' && type === 'YouTube') ? '' : 'none';
+
+    if (selectedRow) {
+      const showSelected = (isSpecific && (isImage || isVideo)) || isAi;
+      selectedRow.style.display = showSelected ? '' : 'none';
+    }
+    if (folderRow) folderRow.style.display = (isImage || isVideo) ? '' : 'none';
+    if (nsfwRow) nsfwRow.style.display = isLivestream ? 'none' : '';
+    if (qualityRow) qualityRow.style.display = (isLivestream || isVideo) ? 'none' : '';
+    if (backgroundRow) backgroundRow.style.display = (isLivestream || isVideo) ? 'none' : '';
+
+    if (videoModeSelect) {
+      if (isVideo && isRandom) {
+        const current = (videoModeSelect.value || '').toLowerCase();
+        if (current !== 'duration' && current !== 'until_end') {
+          videoModeSelect.value = 'duration';
+        }
+        videoModeSelect.disabled = false;
+      } else {
+        videoModeSelect.disabled = true;
+        if (isVideo) {
+          videoModeSelect.value = 'loop';
+        }
+      }
+    }
+
+    const urlType = detectUrlType(streamUrl);
+    if (ytSettingsDiv) ytSettingsDiv.style.display = (isLivestream && urlType === 'YouTube') ? '' : 'none';
+
+    filterFolderOptions(card, normalizedMedia);
   }
 
   function loadMediaFor(streamId, folder) {
@@ -3498,6 +3713,11 @@
     const params = new URLSearchParams({ folder });
     if (hideNsfw) {
       params.set('hide_nsfw', '1');
+    }
+    if (mediaMode === 'image') {
+      params.set('kind', 'image');
+    } else if (mediaMode === 'video') {
+      params.set('kind', 'video');
     }
     grid.textContent = 'Loading...';
     fetch(`/media?${params.toString()}`)
@@ -3517,6 +3737,12 @@
             return;
           }
           const kind = (item.kind || '').toLowerCase() === 'video' ? 'video' : 'image';
+          if (mediaMode === 'image' && kind !== 'image') {
+            return;
+          }
+          if (mediaMode === 'video' && kind !== 'video') {
+            return;
+          }
           const tile = document.createElement('div');
           tile.className = 'picker-thumbnail media-thumb';
           tile.dataset.path = item.path;
@@ -3717,17 +3943,37 @@
         });
       }
       // Mode change
+      const modeCategorySelect = card.querySelector('.mode-category-select');
       const modeSelect = card.querySelector('.mode-select');
       const urlInput = card.querySelector('.stream-url-input');
-      if (modeSelect) {
-        modeSelect.addEventListener('change', e => {
-          const mode = e.target.value;
-          const payload = { mode };
-          if (mode === 'random') {
+
+      const getCurrentMediaMode = () => {
+        return (modeCategorySelect ? modeCategorySelect.value : (card.dataset.mediaMode || 'image')).toLowerCase();
+      };
+
+      const getStreamUrl = () => (urlInput ? urlInput.value : '');
+
+      if (modeCategorySelect) {
+        modeCategorySelect.addEventListener('change', e => {
+          const mediaMode = (e.target.value || 'image').toLowerCase();
+          card.dataset.mediaMode = mediaMode;
+          let nextMode = (modeSelect && !modeSelect.disabled) ? (modeSelect.value || 'random').toLowerCase() : 'random';
+          if (mediaMode === 'image' || mediaMode === 'video') {
+            if (nextMode !== 'random' && nextMode !== 'specific') {
+              nextMode = 'random';
+              if (modeSelect) modeSelect.value = nextMode;
+            }
+          } else if (mediaMode === 'livestream') {
+            nextMode = 'livestream';
+          } else {
+            nextMode = 'ai';
+          }
+          const payload = { media_mode: mediaMode, mode: nextMode };
+          if ((mediaMode === 'image' || mediaMode === 'video') && nextMode === 'random') {
             const durInput = card.querySelector('.duration-input');
             if (durInput) payload.duration = durInput.value;
           }
-          if (mode === 'livestream') {
+          if (mediaMode === 'livestream') {
             if (urlInput) payload.stream_url = urlInput.value;
             const ccChk = card.querySelector('.yt-cc-chk');
             const muteChk = card.querySelector('.yt-mute-chk');
@@ -3735,21 +3981,39 @@
             if (ccChk) payload.yt_cc = ccChk.checked;
             if (muteChk) payload.yt_mute = muteChk.checked;
             if (qualitySelect) payload.yt_quality = qualitySelect.value;
-            // If URL isn't YouTube, force AUTO for compatibility
-            const t = detectUrlType(urlInput ? urlInput.value : '');
-            if (t !== 'YouTube' && qualitySelect) {
+            const urlType = detectUrlType(getStreamUrl());
+            if (urlType !== 'YouTube' && qualitySelect) {
               qualitySelect.value = 'auto';
               payload.yt_quality = 'auto';
             }
           }
           saveSettings(streamId, payload);
-          toggleVisibilityForMode(card, mode, urlInput ? urlInput.value : '');
-          if (mode === 'specific') {
+          applyModeState(card, mediaMode, nextMode, getStreamUrl());
+          if (nextMode === 'specific' && (mediaMode === 'image' || mediaMode === 'video')) {
             const effectiveFolder = folderSelect ? (folderSelect.value === '__filtered__' ? (folderSelect.dataset.currentFolder || 'all') : folderSelect.value) : 'all';
             loadMediaFor(streamId, effectiveFolder);
           }
         });
       }
+
+      if (modeSelect) {
+        modeSelect.addEventListener('change', e => {
+          const mediaMode = getCurrentMediaMode();
+          const mode = (e.target.value || 'random').toLowerCase();
+          const payload = { media_mode: mediaMode, mode };
+          if ((mediaMode === 'image' || mediaMode === 'video') && mode === 'random') {
+            const durInput = card.querySelector('.duration-input');
+            if (durInput) payload.duration = durInput.value;
+          }
+          saveSettings(streamId, payload);
+          applyModeState(card, mediaMode, mode, getStreamUrl());
+          if (mode === 'specific' && (mediaMode === 'image' || mediaMode === 'video')) {
+            const effectiveFolder = folderSelect ? (folderSelect.value === '__filtered__' ? (folderSelect.dataset.currentFolder || 'all') : folderSelect.value) : 'all';
+            loadMediaFor(streamId, effectiveFolder);
+          }
+        });
+      }
+
       // Duration change
       const durInput = card.querySelector('.duration-input');
       if (durInput) {
@@ -3808,12 +4072,12 @@
         runEmbedTest(urlInput.value || '');
         urlInput.addEventListener('input', e => {
           setUrlBadge(e.target.value);
-          toggleVisibilityForMode(card, modeSelect.value, e.target.value);
+          applyModeState(card, getCurrentMediaMode(), modeSelect ? modeSelect.value : '', e.target.value);
           runEmbedTest(e.target.value);
         });
         urlInput.addEventListener('change', e => {
           saveSettings(streamId, { stream_url: e.target.value });
-          toggleVisibilityForMode(card, modeSelect.value, e.target.value);
+          applyModeState(card, getCurrentMediaMode(), modeSelect ? modeSelect.value : '', e.target.value);
           // If not YouTube, force quality AUTO
           const qualitySelect = card.querySelector('.yt-quality-select');
           const t = detectUrlType(e.target.value);
@@ -3883,7 +4147,9 @@
         });
       }
 
-      toggleVisibilityForMode(card, modeSelect ? modeSelect.value : '', urlInput ? urlInput.value : '');
+      const initialMediaMode = (modeCategorySelect ? modeCategorySelect.value : (card.dataset.mediaMode || 'image')).toLowerCase();
+      const initialModeValue = modeSelect ? (modeSelect.value || '').toLowerCase() : ((initialMediaMode === 'livestream' || initialMediaMode === 'ai') ? initialMediaMode : 'random');
+      applyModeState(card, initialMediaMode, initialModeValue, urlInput ? urlInput.value : '');
     });
     originalCardOrder = Array.from(cardTagsMap.keys());
     renderTagManager();
@@ -3922,6 +4188,41 @@
 </script>
 </body>
 </html>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

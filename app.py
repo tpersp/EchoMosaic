@@ -120,6 +120,23 @@ VIDEO_EXTENSIONS = (".mp4", ".mkv", ".webm", ".mov", ".avi", ".m4v", ".mpg", ".m
 MEDIA_EXTENSIONS = IMAGE_EXTENSIONS + VIDEO_EXTENSIONS
 VIDEO_PLAYBACK_MODES = {"duration", "until_end", "loop"}
 
+MEDIA_MODE_IMAGE = "image"
+MEDIA_MODE_VIDEO = "video"
+MEDIA_MODE_LIVESTREAM = "livestream"
+MEDIA_MODE_AI = AI_MODE
+MEDIA_MODE_CHOICES = {
+    MEDIA_MODE_IMAGE,
+    MEDIA_MODE_VIDEO,
+    MEDIA_MODE_LIVESTREAM,
+    MEDIA_MODE_AI,
+}
+MEDIA_MODE_VARIANTS = {
+    MEDIA_MODE_IMAGE: {"random", "specific"},
+    MEDIA_MODE_VIDEO: {"random", "specific"},
+    MEDIA_MODE_LIVESTREAM: {"livestream"},
+    MEDIA_MODE_AI: {AI_MODE},
+}
+
 NSFW_KEYWORD = "nsfw"
 
 # Cache image paths per folder so we can serve repeated requests without rescanning the disk.
@@ -691,6 +708,7 @@ def default_stream_config():
     """Return the default configuration for a new stream."""
     return {
         "mode": "random",
+        "media_mode": MEDIA_MODE_IMAGE,
         "folder": "all",
         "selected_image": None,
         "selected_media_kind": None,
@@ -1214,6 +1232,7 @@ def _run_ai_generation(stream_id: str, options: Dict[str, Any], cancel_event: Op
         if images:
             conf['selected_image'] = images[0]['path']
         conf['mode'] = AI_MODE
+        conf['media_mode'] = MEDIA_MODE_AI
         save_settings(settings)
         _emit_ai_update(stream_id, conf[AI_STATE_KEY])
         try:
@@ -1258,6 +1277,27 @@ def _detect_media_kind(value: Optional[str]) -> str:
     return "image"
 
 
+def _infer_media_mode(conf: Dict[str, Any]) -> str:
+    mode_raw = conf.get("mode")
+    mode = mode_raw.strip().lower() if isinstance(mode_raw, str) else ""
+    if mode == AI_MODE:
+        return MEDIA_MODE_AI
+    if mode == "livestream":
+        return MEDIA_MODE_LIVESTREAM
+
+    selected_kind_raw = conf.get("selected_media_kind")
+    selected_kind = selected_kind_raw.strip().lower() if isinstance(selected_kind_raw, str) else ""
+    if selected_kind == "video":
+        return MEDIA_MODE_VIDEO
+
+    playback_raw = conf.get("video_playback_mode")
+    playback_mode = playback_raw.strip().lower() if isinstance(playback_raw, str) else ""
+    if mode in ("random", "specific") and playback_mode in ("until_end", "loop"):
+        return MEDIA_MODE_VIDEO
+
+    return MEDIA_MODE_IMAGE
+
+
 ensure_ai_presets_storage()
 # Backfill defaults for existing stream entries
 for k, v in list(settings.items()):
@@ -1291,6 +1331,23 @@ for k, v in list(settings.items()):
                 v["selected_media_kind"] = _detect_media_kind(v.get("selected_image"))
             else:
                 v["selected_media_kind"] = kind
+        media_mode_raw = v.get("media_mode")
+        media_mode = media_mode_raw.strip().lower() if isinstance(media_mode_raw, str) else ""
+        if media_mode not in MEDIA_MODE_CHOICES:
+            media_mode = _infer_media_mode(v)
+        if media_mode == MEDIA_MODE_AI:
+            desired_mode = AI_MODE
+        elif media_mode == MEDIA_MODE_LIVESTREAM:
+            desired_mode = "livestream"
+        else:
+            current_mode_raw = v.get("mode")
+            current_mode = current_mode_raw.strip().lower() if isinstance(current_mode_raw, str) else ""
+            allowed = MEDIA_MODE_VARIANTS.get(media_mode, {"random", "specific"})
+            desired_mode = current_mode if current_mode in allowed else "random"
+        v["media_mode"] = media_mode
+        v["mode"] = desired_mode
+        if media_mode == MEDIA_MODE_VIDEO and desired_mode == "specific":
+            v["video_playback_mode"] = "loop"
 
 # Ensure notes key exists
 settings.setdefault("_notes", "")
@@ -1328,10 +1385,25 @@ def get_subfolders(hide_nsfw: bool = False) -> List[str]:
     return subfolders
 
 
+def get_folder_inventory(hide_nsfw: bool = False) -> List[Dict[str, Any]]:
+    inventory: List[Dict[str, Any]] = []
+    for name in get_subfolders(hide_nsfw=hide_nsfw):
+        media_entries = list_media(name, hide_nsfw=hide_nsfw)
+        has_images = any(entry.get("kind") == "image" for entry in media_entries)
+        has_videos = any(entry.get("kind") == "video" for entry in media_entries)
+        inventory.append({
+            "name": name,
+            "has_images": has_images,
+            "has_videos": has_videos,
+        })
+    return inventory
+
+
 @app.route("/folders", methods=["GET"])
 def folders_collection():
     hide_nsfw = _parse_truthy(request.args.get("hide_nsfw"))
-    return jsonify(get_subfolders(hide_nsfw=hide_nsfw))
+    inventory = get_folder_inventory(hide_nsfw=hide_nsfw)
+    return jsonify(inventory)
 
 
 def list_images(folder="all", hide_nsfw: bool = False):
@@ -1376,7 +1448,8 @@ def try_get_hls(original_url):
 
 @app.route("/")
 def dashboard():
-    subfolders = get_subfolders()
+    folder_inventory = get_folder_inventory()
+    subfolders = [item["name"] for item in folder_inventory]
     streams = {k: v for k, v in settings.items() if not k.startswith("_")}
     for conf in streams.values():
         if isinstance(conf, dict):
@@ -1392,6 +1465,7 @@ def dashboard():
     return render_template(
         "index.html",
         subfolders=subfolders,
+        folder_inventory=folder_inventory,
         stream_settings=streams,
         mosaic_settings=mosaic,
         groups=groups,
@@ -1523,7 +1597,7 @@ def update_stream_settings(stream_id):
     for key in ["mode", "folder", "selected_image", "duration", "shuffle", "stream_url",
                 "image_quality", "yt_cc", "yt_mute", "yt_quality", "label", "hide_nsfw",
                 "background_blur_enabled", "background_blur_amount", "video_playback_mode",
-                "video_volume", "selected_media_kind", TAG_KEY]:
+                "video_volume", "selected_media_kind", "media_mode", TAG_KEY]:
         if key in data:
             val = data[key]
             if key == "stream_url":
@@ -1571,6 +1645,17 @@ def update_stream_settings(stream_id):
                 if kind not in ("image", "video"):
                     kind = _detect_media_kind(conf.get("selected_image"))
                 conf[key] = kind
+            elif key == "media_mode":
+                if isinstance(val, str):
+                    media_mode = val.strip().lower()
+                else:
+                    media_mode = ""
+                if media_mode in MEDIA_MODE_CHOICES:
+                    conf["media_mode"] = media_mode
+                    if media_mode == MEDIA_MODE_AI:
+                        conf["mode"] = AI_MODE
+                    elif media_mode == MEDIA_MODE_LIVESTREAM:
+                        conf["mode"] = "livestream"
             elif key == "selected_image":
                 conf[key] = val
                 if "selected_media_kind" not in data:
@@ -1582,6 +1667,34 @@ def update_stream_settings(stream_id):
                 conf[key] = normalized
             else:
                 conf[key] = val
+
+    media_mode = conf.get("media_mode")
+    if isinstance(media_mode, str):
+        media_mode = media_mode.strip().lower()
+    else:
+        media_mode = ""
+    if media_mode not in MEDIA_MODE_CHOICES:
+        media_mode = _infer_media_mode(conf)
+    conf["media_mode"] = media_mode
+
+    current_mode_raw = conf.get("mode")
+    current_mode = current_mode_raw.strip().lower() if isinstance(current_mode_raw, str) else ""
+    if media_mode == MEDIA_MODE_AI:
+        conf["mode"] = AI_MODE
+    elif media_mode == MEDIA_MODE_LIVESTREAM:
+        conf["mode"] = "livestream"
+    else:
+        allowed = MEDIA_MODE_VARIANTS.get(media_mode, {"random", "specific"})
+        if current_mode not in allowed:
+            fallback_mode = "random" if "random" in allowed else next(iter(sorted(allowed)))
+            conf["mode"] = fallback_mode
+        else:
+            conf["mode"] = current_mode
+        if media_mode == MEDIA_MODE_VIDEO:
+            if conf["mode"] == "specific":
+                conf["video_playback_mode"] = "loop"
+            elif conf["mode"] == "random" and conf.get("video_playback_mode") == "loop":
+                conf["video_playback_mode"] = "duration"
 
     mode_requested = data.get("mode")
     if (
@@ -1868,6 +1981,7 @@ def _queue_ai_generation(stream_id: str, ai_settings: Dict[str, Any], *, trigger
         _cleanup_temp_outputs(stream_id)
 
     conf['mode'] = AI_MODE
+    conf['media_mode'] = MEDIA_MODE_AI
     if previous_selected:
         conf['selected_image'] = previous_selected
 
@@ -2752,3 +2866,26 @@ def handle_video_control(payload):
 
 if __name__ == "__main__":
     socketio.run(app, host="0.0.0.0", port=5000, debug=True)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
