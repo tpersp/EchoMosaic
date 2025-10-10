@@ -3036,25 +3036,19 @@
     const wantsVideos = normalized === 'video';
     const shouldFilter = wantsImages || wantsVideos;
     const options = Array.from(select.options);
-    if (!shouldFilter) {
-      options.forEach(option => {
-        if (option.dataset.filtered === 'true') {
-          option.hidden = false;
-        } else {
-          option.hidden = false;
-        }
-      });
-      return;
-    }
     options.forEach(option => {
       if (option.dataset.filtered === 'true') {
         option.hidden = false;
         return;
       }
+      if (!shouldFilter) {
+        option.hidden = false;
+        return;
+      }
       const hasImages = option.dataset.hasImages === 'true';
       const hasVideos = option.dataset.hasVideos === 'true';
-      const visible = wantsImages ? hasImages : hasVideos;
-      option.hidden = !visible;
+      const isVisible = wantsImages ? hasImages : hasVideos;
+      option.hidden = !isVisible;
     });
     const selectedOption = select.options[select.selectedIndex];
     if (selectedOption && selectedOption.hidden) {
@@ -3076,92 +3070,89 @@
     }
   }
 
-  function refreshFoldersForCard(card, hideNsfw) {
+  async function refreshFoldersForCard(card, hideNsfw) {
     const folderSelect = card.querySelector('.folder-select');
     if (!folderSelect) {
-      return Promise.resolve();
+      return null;
     }
     const url = hideNsfw ? '/folders?hide_nsfw=1' : '/folders';
-    return fetch(url)
-      .then(response => {
-        if (!response.ok) {
-          throw new Error('Failed to fetch folders');
-        }
-        return response.json();
-      })
-      .then(items => {
-        if (!Array.isArray(items)) {
-          return null;
-        }
-        const assigned = folderSelect.dataset.currentFolder || 'all';
-        const assignedLower = (assigned || '').toLowerCase();
-        const hasAssigned = items.some(entry => entry && entry.name === assigned);
-        const shouldShowPlaceholder = Boolean(hideNsfw) && assigned && assignedLower.includes('nsfw') && !hasAssigned;
-        const frag = document.createDocumentFragment();
-        if (shouldShowPlaceholder) {
-          const placeholder = document.createElement('option');
-          placeholder.value = '__filtered__';
-          placeholder.textContent = `Filtered (${assigned})`;
-          placeholder.title = assigned;
-          placeholder.dataset.filtered = 'true';
-          placeholder.selected = true;
-          frag.appendChild(placeholder);
-        }
-        items.forEach(entry => {
-          if (!entry || !entry.name) {
-            return;
-          }
-          const name = String(entry.name);
-          if (hideNsfw && name.toLowerCase().includes('nsfw')) {
-            return;
-          }
-          const opt = document.createElement('option');
-          opt.value = name;
-          opt.title = name;
-          opt.textContent = name;
-          opt.dataset.hasImages = entry.has_images ? 'true' : 'false';
-          opt.dataset.hasVideos = entry.has_videos ? 'true' : 'false';
-          if (!shouldShowPlaceholder && assigned === name) {
-            opt.selected = true;
-          }
-          frag.appendChild(opt);
-        });
-        folderSelect.replaceChildren(frag);
-        let currentSelection = folderSelect.dataset.currentFolder || 'all';
-        if (shouldShowPlaceholder) {
-          folderSelect.value = '__filtered__';
-          folderSelect.title = assigned;
-          folderSelect.dataset.currentFolder = assigned;
-          currentSelection = assigned || 'all';
-        } else {
-          const selectedOption = folderSelect.options[folderSelect.selectedIndex];
-          if (selectedOption) {
-            folderSelect.dataset.currentFolder = selectedOption.value || 'all';
-            folderSelect.title = selectedOption.title || selectedOption.textContent || folderSelect.value;
-            currentSelection = folderSelect.dataset.currentFolder;
-          } else if (folderSelect.options.length) {
-            const first = folderSelect.options[0];
-            first.selected = true;
-            folderSelect.dataset.currentFolder = first.value || 'all';
-            folderSelect.title = first.title || first.textContent || folderSelect.value;
-            currentSelection = folderSelect.dataset.currentFolder;
-          } else {
-            folderSelect.dataset.currentFolder = 'all';
-            folderSelect.title = 'all';
-            currentSelection = 'all';
-          }
-        }
-        filterFolderOptions(card, card.dataset.mediaMode || 'image');
-        const streamId = card.dataset.stream;
-        if (streamId) {
-          loadMediaFor(streamId, currentSelection || 'all');
-        }
+    try {
+      const response = await fetch(url);
+      if (!response.ok) {
+        throw new Error('Failed to fetch folders');
+      }
+      const items = await response.json();
+      if (!Array.isArray(items)) {
         return null;
-      })
-      .catch(err => {
-        console.error('Failed to refresh folders', err);
-        return null;
+      }
+      const assigned = folderSelect.dataset.currentFolder || 'all';
+      const assignedLower = (assigned || '').toLowerCase();
+      const hasAssigned = items.some(entry => entry && entry.name === assigned);
+      const shouldShowPlaceholder = Boolean(hideNsfw) && assigned && assignedLower.includes('nsfw') && !hasAssigned;
+      const frag = document.createDocumentFragment();
+      if (shouldShowPlaceholder) {
+        const placeholder = document.createElement('option');
+        placeholder.value = '__filtered__';
+        placeholder.textContent = `Filtered (${assigned})`;
+        placeholder.title = assigned;
+        placeholder.dataset.filtered = 'true';
+        placeholder.selected = true;
+        frag.appendChild(placeholder);
+      }
+      items.forEach(entry => {
+        if (!entry || !entry.name) {
+          return;
+        }
+        const name = String(entry.name);
+        if (hideNsfw && name.toLowerCase().includes('nsfw')) {
+          return;
+        }
+        const opt = document.createElement('option');
+        opt.value = name;
+        opt.title = name;
+        opt.textContent = name;
+        opt.dataset.hasImages = entry.has_images ? 'true' : 'false';
+        opt.dataset.hasVideos = entry.has_videos ? 'true' : 'false';
+        if (!shouldShowPlaceholder && assigned === name) {
+          opt.selected = true;
+        }
+        frag.appendChild(opt);
       });
+      folderSelect.replaceChildren(frag);
+      let currentSelection = folderSelect.dataset.currentFolder || 'all';
+      if (shouldShowPlaceholder) {
+        folderSelect.value = '__filtered__';
+        folderSelect.title = assigned;
+        folderSelect.dataset.currentFolder = assigned;
+        currentSelection = assigned || 'all';
+      } else {
+        const selectedOption = folderSelect.options[folderSelect.selectedIndex];
+        if (selectedOption) {
+          folderSelect.dataset.currentFolder = selectedOption.value || 'all';
+          folderSelect.title = selectedOption.title || selectedOption.textContent || folderSelect.value;
+          currentSelection = folderSelect.dataset.currentFolder;
+        } else if (folderSelect.options.length) {
+          const first = folderSelect.options[0];
+          first.selected = true;
+          folderSelect.dataset.currentFolder = first.value || 'all';
+          folderSelect.title = first.title || first.textContent || folderSelect.value;
+          currentSelection = folderSelect.dataset.currentFolder;
+        } else {
+          folderSelect.dataset.currentFolder = 'all';
+          folderSelect.title = 'all';
+          currentSelection = 'all';
+        }
+      }
+      filterFolderOptions(card, card.dataset.mediaMode || 'image');
+      const streamId = card.dataset.stream;
+      if (streamId) {
+        loadMediaFor(streamId, currentSelection || 'all');
+      }
+      return currentSelection;
+    } catch (err) {
+      console.error('Failed to refresh folders', err);
+      return null;
+    }
   }
 
   function applyModeState(card, mediaMode, mode, streamUrl) {
