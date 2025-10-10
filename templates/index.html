@@ -685,7 +685,7 @@
     if (typeof value !== 'string') {
       return '';
     }
-    const cleaned = value.replace(/s+/g, ' ').trim();
+    const cleaned = value.replace(/\s+/g, ' ').trim();
     if (!cleaned) {
       return '';
     }
@@ -767,6 +767,32 @@
     if (!card) {
       return;
     }
+    const streamId = card.dataset.stream;
+    if (!streamId) {
+      return;
+    }
+    const sanitized = Array.isArray(nextTags) ? nextTags.map(normalizeTagInput).filter(Boolean) : [];
+    const current = getCardTags(card);
+    if (tagsEqual(current, sanitized)) {
+      return;
+    }
+    const editor = card.querySelector('.tag-editor');
+    const input = editor ? editor.querySelector('.tag-entry') : null;
+    const buttons = editor ? Array.from(editor.querySelectorAll('.tag-remove')) : [];
+    if (input) {
+      input.disabled = true;
+    }
+    buttons.forEach(btn => { btn.disabled = true; });
+    saveSettings(streamId, { tags: sanitized }, {
+      onError: () => { setCardTags(card, current); },
+      onFinally: () => {
+        if (input) {
+          input.disabled = false;
+        }
+        buttons.forEach(btn => { btn.disabled = false; });
+      }
+    });
+  }
 
   // Group manager logic
   function makeEl(tag, attrs = {}, children = []) {
@@ -3743,44 +3769,3 @@
 </script>
 </body>
 </html>
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
