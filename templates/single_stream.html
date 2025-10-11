@@ -535,6 +535,7 @@ function startRandomRotation(config, container) {
 
   async function fetchRandomMedia() {
     const params = new URLSearchParams(baseParams);
+    params.set('stream_id', streamId);
     const res = await fetch(`/media/random?${params.toString()}`);
     if (!res.ok) {
       if (res.status === 404) {

@@ -1,4 +1,4 @@
-﻿from flask import Flask, jsonify, send_file, request, render_template, redirect, url_for
+from flask import Flask, jsonify, send_file, request, render_template, redirect, url_for
 from flask_socketio import SocketIO
 import json
 import atexit
@@ -19,6 +19,12 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 from urllib.parse import urlparse
 
 from PIL import Image, ImageDraw, ImageFont
+
+try:
+    import cv2  # type: ignore[import]
+except Exception:
+    cv2 = None
+
 from werkzeug.http import generate_etag
 
 try:
@@ -44,8 +50,8 @@ THUMBNAIL_SIZE_PRESETS = {
     "medium": (1024, 1024),
     "full": None,  # Alias for the original size
 }
-DASHBOARD_THUMBNAIL_SIZE = (320, 180)
-THUMBNAIL_JPEG_QUALITY = 70
+DASHBOARD_THUMBNAIL_SIZE = (192, 108)
+THUMBNAIL_JPEG_QUALITY = 60
 IMAGE_CACHE_TIMEOUT = 60 * 60 * 24 * 7  # One week default for conditional responses
 IMAGE_CACHE_CONTROL_MAX_AGE = 31536000  # One year for browser Cache-Control headers
 
@@ -653,8 +659,6 @@ def _sanitize_ai_settings(
         else:
             current[key] = value
     return current
-
-
 
 def _sanitize_ai_presets(raw: Any) -> Dict[str, Dict[str, Any]]:
     sanitized: Dict[str, Dict[str, Any]] = {}
@@ -1310,8 +1314,6 @@ def _infer_media_mode(conf: Dict[str, Any]) -> str:
     return MEDIA_MODE_IMAGE
 
 
-
-
 def _get_stream_runtime_state(stream_id: str) -> Dict[str, Any]:
     with STREAM_RUNTIME_LOCK:
         entry = STREAM_RUNTIME_STATE.get(stream_id)
@@ -1350,8 +1352,6 @@ def _update_stream_runtime_state(
             entry["stream_url"] = stream_url or None
         entry["timestamp"] = time.time()
         entry["source"] = source
-
-
 
 def _runtime_timestamp_to_iso(ts: Optional[float]) -> Optional[str]:
     if not ts:
@@ -1396,8 +1396,17 @@ def _generate_placeholder_thumbnail(label: str) -> Image.Image:
     return background
 
 
-def _create_thumbnail_image(media_path: Path) -> Image.Image:
+def _compose_thumbnail(frame: Image.Image) -> Image.Image:
     background = Image.new('RGB', DASHBOARD_THUMBNAIL_SIZE, (20, 20, 24))
+    prepared = frame.convert('RGB')
+    prepared.thumbnail(DASHBOARD_THUMBNAIL_SIZE, IMAGE_THUMBNAIL_FILTER)
+    offset_x = max((DASHBOARD_THUMBNAIL_SIZE[0] - prepared.width) // 2, 0)
+    offset_y = max((DASHBOARD_THUMBNAIL_SIZE[1] - prepared.height) // 2, 0)
+    background.paste(prepared, (offset_x, offset_y))
+    return background
+
+
+def _create_thumbnail_image(media_path: Path) -> Image.Image:
     try:
         with Image.open(media_path) as src:
             if getattr(src, 'is_animated', False):
@@ -1405,15 +1414,75 @@ def _create_thumbnail_image(media_path: Path) -> Image.Image:
                     src.seek(0)
                 except EOFError:
                     pass
-            frame = src.convert('RGB')
-            frame.thumbnail(DASHBOARD_THUMBNAIL_SIZE, IMAGE_THUMBNAIL_FILTER)
-            offset_x = max((DASHBOARD_THUMBNAIL_SIZE[0] - frame.width) // 2, 0)
-            offset_y = max((DASHBOARD_THUMBNAIL_SIZE[1] - frame.height) // 2, 0)
-            background.paste(frame, (offset_x, offset_y))
-            return background
+            return _compose_thumbnail(src)
     except Exception as exc:  # pragma: no cover - defensive, thumbnail best-effort
-        logger.debug('Failed to render thumbnail for %s: %s', media_path, exc)
+        logger.debug('Failed to render image thumbnail for %s: %s', media_path, exc)
     return _generate_placeholder_thumbnail('Image')
+
+
+def _create_video_thumbnail(media_path: Path) -> Optional[Image.Image]:
+    if cv2 is None:
+        return None
+    capture = cv2.VideoCapture(str(media_path))
+    if not capture.isOpened():
+        return None
+    success, frame = capture.read()
+    capture.release()
+    if not success or frame is None:
+        return None
+    try:
+        rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+    except Exception:
+        rgb_frame = frame[:, :, ::-1]
+    return _compose_thumbnail(Image.fromarray(rgb_frame))
+
+
+def _load_remote_image(url: str) -> Optional[Image.Image]:
+    if not url or requests is None:
+        return None
+    try:
+        resp = requests.get(url, timeout=5)
+        if resp.status_code != 200:
+            return None
+        buffer = io.BytesIO(resp.content)
+        image = Image.open(buffer)
+        image.load()
+        return image
+    except Exception as exc:
+        logger.debug('Remote thumbnail fetch failed for %s: %s', url, exc)
+        return None
+
+
+def _create_livestream_thumbnail(stream_url: Optional[str]) -> Optional[Image.Image]:
+    if not stream_url:
+        return None
+    url = stream_url.strip()
+    lower = url.lower()
+    remote_image: Optional[Image.Image] = None
+    if 'youtube.com' in lower or 'youtu.be/' in lower:
+        video_id = None
+        if 'watch?v=' in url:
+            video_id = url.split('watch?v=')[1].split('&')[0].split('#')[0]
+        elif 'youtu.be/' in url:
+            video_id = url.split('youtu.be/')[1].split('?')[0].split('&')[0]
+        if video_id:
+            remote_image = _load_remote_image(f'https://img.youtube.com/vi/{video_id}/hqdefault.jpg')
+    elif 'twitch.tv' in lower:
+        try:
+            channel = url.split('twitch.tv/')[1].split('/')[0]
+        except Exception:
+            channel = ''
+        if channel:
+            remote_image = _load_remote_image(f'https://static-cdn.jtvnw.net/previews-ttv/live_user_{channel}-192x108.jpg')
+    if remote_image is None:
+        remote_image = _load_remote_image(url)
+    if remote_image is None:
+        return None
+    try:
+        return _compose_thumbnail(remote_image)
+    except Exception as exc:
+        logger.debug('Livestream thumbnail compose failed for %s: %s', stream_url, exc)
+        return None
 
 
 def _thumbnail_image_to_bytes(image: Image.Image) -> io.BytesIO:
@@ -1421,7 +1490,6 @@ def _thumbnail_image_to_bytes(image: Image.Image) -> io.BytesIO:
     image.convert('RGB').save(buffer, format='JPEG', quality=THUMBNAIL_JPEG_QUALITY, optimize=True)
     buffer.seek(0)
     return buffer
-
 
 def _compute_thumbnail_snapshot(stream_id: str) -> Optional[Dict[str, Any]]:
     conf = settings.get(stream_id)
@@ -1455,7 +1523,7 @@ def _compute_thumbnail_snapshot(stream_id: str) -> Optional[Dict[str, Any]]:
     else:
         kind = kind or 'image'
     placeholder = False
-    if media_mode in (MEDIA_MODE_LIVESTREAM, MEDIA_MODE_VIDEO) or not path:
+    if not path and media_mode != MEDIA_MODE_LIVESTREAM:
         placeholder = True
     badge_map = {
         MEDIA_MODE_LIVESTREAM: 'Live',
@@ -1595,8 +1663,6 @@ def list_images(folder="all", hide_nsfw: bool = False):
     images = refresh_image_cache(folder)
     return _filter_nsfw_images(images, hide_nsfw)
 
-
-
 def list_media(folder="all", hide_nsfw: bool = False) -> List[Dict[str, Any]]:
     """Return cached media entries (images and videos) for the folder."""
     folder_key = _normalize_folder_key(folder)
@@ -1610,8 +1676,6 @@ def list_media(folder="all", hide_nsfw: bool = False) -> List[Dict[str, Any]]:
     if hide_nsfw:
         media = [item for item in media if not _path_contains_nsfw(item.get("path"))]
     return media
-
-
 
 def try_get_hls(original_url):
     if not original_url:
@@ -1960,8 +2024,6 @@ def update_ai_defaults():
 
     save_settings(settings)
     return jsonify({"status": "success", "defaults": new_defaults})
-
-
 
 @app.route("/ai/presets", methods=["GET"])
 def list_ai_presets():
@@ -2750,8 +2812,6 @@ def groups_delete(name):
     return jsonify({"error": "not found"}), 404
 
 
-
-
 @app.route("/stream/live")
 def stream_live():
     stream_id = request.args.get("stream_id", "").strip()
@@ -3139,24 +3199,6 @@ def handle_video_control(payload):
 
 if __name__ == "__main__":
     socketio.run(app, host="0.0.0.0", port=5000, debug=True)
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 
