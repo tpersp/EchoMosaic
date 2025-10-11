@@ -43,6 +43,13 @@ SETTINGS_FILE = "settings.json"
 CONFIG_FILE = "config.json"
 IMAGE_DIR = "/mnt/viewers"  # Adjust if needed
 
+BACKUP_DIRNAME = "backups"
+RESTORE_POINT_DIRNAME = "restorepoints"
+RESTORE_POINT_METADATA_FILE = "metadata.json"
+RESTORE_POINT_SETTINGS_FILE = "settings.json"
+RESTORE_POINT_CONFIG_FILE = "config.json"
+MAX_RESTORE_POINTS = 50
+
 # Bounding boxes for optional thumbnail sizes requested via ?size=.
 THUMBNAIL_SUBDIR = "_thumbnails"
 THUMBNAIL_SIZE_PRESETS = {
@@ -2569,6 +2576,280 @@ def app_settings():
     )
 
 
+
+def _repo_path_from_config(cfg: Optional[Dict[str, Any]] = None) -> str:
+    cfg = cfg or load_config()
+    return cfg.get("INSTALL_DIR") or os.getcwd()
+
+
+def _restore_points_root(repo_path: str) -> str:
+    return os.path.join(repo_path, BACKUP_DIRNAME, RESTORE_POINT_DIRNAME)
+
+
+def _slugify_restore_label(label: str) -> str:
+    cleaned = re.sub(r"[^a-zA-Z0-9_-]+", "-", label.strip())
+    cleaned = re.sub(r"-{2,}", "-", cleaned).strip("-_")
+    if not cleaned:
+        cleaned = f"restore-{secrets.token_hex(3)}"
+    return cleaned.lower()[:60]
+
+
+def _load_restore_point_metadata(point_path: str) -> Optional[Dict[str, Any]]:
+    metadata_path = os.path.join(point_path, RESTORE_POINT_METADATA_FILE)
+    try:
+        with open(metadata_path, "r") as mp:
+            return json.load(mp)
+    except Exception:
+        return None
+
+
+def _serialize_restore_point(point_id: str, metadata: Dict[str, Any]) -> Dict[str, Any]:
+    commit = metadata.get("commit")
+    return {
+        "id": point_id,
+        "label": metadata.get("label") or point_id,
+        "commit": commit,
+        "short_commit": (commit[:7] if isinstance(commit, str) else None),
+        "created_at": metadata.get("created_at"),
+        "last_restored_at": metadata.get("last_restored_at"),
+        "branch": metadata.get("branch"),
+    }
+
+
+def _list_restore_points(repo_path: str) -> List[Dict[str, Any]]:
+    root = _restore_points_root(repo_path)
+    items: List[Dict[str, Any]] = []
+    if not os.path.isdir(root):
+        return items
+    for entry in os.scandir(root):
+        if not entry.is_dir():
+            continue
+        metadata = _load_restore_point_metadata(entry.path)
+        if not metadata:
+            continue
+        items.append(_serialize_restore_point(entry.name, metadata))
+    items.sort(key=lambda item: item.get("created_at") or "", reverse=True)
+    return items
+
+
+def _prune_restore_points(root: str) -> None:
+    if MAX_RESTORE_POINTS <= 0 or not os.path.isdir(root):
+        return
+    entries: List[Tuple[str, str]] = []
+    for item in os.scandir(root):
+        if not item.is_dir():
+            continue
+        metadata = _load_restore_point_metadata(item.path)
+        if not metadata:
+            continue
+        created = metadata.get("created_at") or ""
+        entries.append((item.path, created))
+    if len(entries) <= MAX_RESTORE_POINTS:
+        return
+    entries.sort(key=lambda pair: pair[1] or "")
+    for path_to_remove, _ in entries[:-MAX_RESTORE_POINTS]:
+        try:
+            shutil.rmtree(path_to_remove)
+        except Exception as exc:
+            logger.warning("Failed to prune restore point %s: %s", path_to_remove, exc)
+
+
+def _allocate_restore_point_dir(repo_path: str, label: str) -> Tuple[str, str]:
+    root = _restore_points_root(repo_path)
+    os.makedirs(root, exist_ok=True)
+    slug = _slugify_restore_label(label)
+    now = datetime.utcnow()
+    dir_stamp = now.strftime("%Y%m%d-%H%M%S")
+    candidate = f"{dir_stamp}-{slug}"
+    while os.path.exists(os.path.join(root, candidate)):
+        candidate = f"{dir_stamp}-{slug}-{secrets.token_hex(2)}"
+    point_path = os.path.join(root, candidate)
+    os.makedirs(point_path, exist_ok=True)
+    return candidate, point_path
+
+
+def _save_restore_point_metadata(point_path: str, metadata: Dict[str, Any]) -> None:
+    metadata_path = os.path.join(point_path, RESTORE_POINT_METADATA_FILE)
+    with open(metadata_path, "w") as mp:
+        json.dump(metadata, mp, indent=2)
+
+
+def _create_restore_point(repo_path: str, label: str) -> Dict[str, Any]:
+    now = datetime.utcnow().replace(microsecond=0)
+    timestamp = now.isoformat() + "Z"
+    try:
+        commit = subprocess.check_output(
+            ["git", "rev-parse", "HEAD"],
+            cwd=repo_path,
+            stderr=subprocess.STDOUT,
+        ).decode().strip()
+    except FileNotFoundError as exc:
+        raise RuntimeError("Git executable not found") from exc
+    except subprocess.CalledProcessError as exc:
+        raise RuntimeError(f"Unable to determine current commit: {exc}") from exc
+    try:
+        branch = subprocess.check_output(
+            ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+            cwd=repo_path,
+            stderr=subprocess.STDOUT,
+        ).decode().strip()
+    except Exception:
+        branch = None
+    point_id, point_path = _allocate_restore_point_dir(repo_path, label)
+    files: List[Dict[str, str]] = []
+    for source_name in (SETTINGS_FILE, CONFIG_FILE):
+        source_path = os.path.join(repo_path, source_name)
+        if not os.path.isfile(source_path):
+            continue
+        dest_name = os.path.basename(source_name)
+        dest_path = os.path.join(point_path, dest_name)
+        try:
+            shutil.copy2(source_path, dest_path)
+            files.append({"filename": dest_name, "destination": source_name})
+        except OSError as exc:
+            logger.warning(
+                "Failed to copy %s into restore point %s: %s",
+                source_name,
+                point_id,
+                exc,
+            )
+    metadata = {
+        "label": label,
+        "commit": commit,
+        "branch": branch,
+        "created_at": timestamp,
+        "files": files,
+    }
+    _save_restore_point_metadata(point_path, metadata)
+    _prune_restore_points(_restore_points_root(repo_path))
+    return _serialize_restore_point(point_id, metadata)
+
+
+def _load_restore_point(repo_path: str, point_id: str) -> Tuple[str, Dict[str, Any]]:
+    safe_id = os.path.basename(point_id.strip())
+    if not safe_id:
+        raise FileNotFoundError(point_id)
+    point_path = os.path.join(_restore_points_root(repo_path), safe_id)
+    if not os.path.isdir(point_path):
+        raise FileNotFoundError(point_id)
+    metadata = _load_restore_point_metadata(point_path)
+    if not metadata:
+        raise FileNotFoundError(point_id)
+    metadata["id"] = safe_id
+    return point_path, metadata
+
+
+def _restore_files_from_metadata(repo_path: str, point_path: str, metadata: Dict[str, Any]) -> None:
+    for entry in metadata.get("files") or []:
+        if isinstance(entry, dict):
+            filename = entry.get("filename")
+            destination = entry.get("destination") or filename
+        else:
+            filename = str(entry)
+            destination = filename
+        if not filename or not destination:
+            continue
+        source = os.path.join(point_path, filename)
+        if not os.path.isfile(source):
+            continue
+        dest = os.path.join(repo_path, destination)
+        dest_dir = os.path.dirname(dest)
+        if dest_dir and not os.path.isdir(dest_dir):
+            os.makedirs(dest_dir, exist_ok=True)
+        try:
+            shutil.copy2(source, dest)
+        except OSError as exc:
+            logger.warning(
+                "Failed to restore %s from restore point %s: %s",
+                destination,
+                metadata.get("id"),
+                exc,
+            )
+
+
+def _delete_restore_point(repo_path: str, point_id: str) -> bool:
+    safe_id = os.path.basename(point_id.strip())
+    if not safe_id:
+        return False
+    point_path = os.path.join(_restore_points_root(repo_path), safe_id)
+    if not os.path.isdir(point_path):
+        return False
+    shutil.rmtree(point_path)
+    return True
+
+
+@app.route("/restore_points", methods=["GET", "POST"])
+def restore_points_collection():
+    cfg = load_config()
+    api_key = cfg.get("API_KEY")
+    if api_key and request.headers.get("X-API-Key") != api_key:
+        return jsonify({"error": "Unauthorized"}), 401
+    repo_path = _repo_path_from_config(cfg)
+    if request.method == "GET":
+        return jsonify({"restore_points": _list_restore_points(repo_path)})
+    data = request.get_json(silent=True) or {}
+    label = (data.get("label") or "").strip()
+    if not label:
+        return jsonify({"error": "Label required"}), 400
+    try:
+        point = _create_restore_point(repo_path, label)
+    except RuntimeError as exc:
+        return jsonify({"error": str(exc)}), 500
+    except Exception:
+        logger.exception("Failed to create restore point")
+        return jsonify({"error": "Failed to create restore point"}), 500
+    return jsonify({"restore_point": point}), 201
+
+
+@app.route("/restore_points/<point_id>", methods=["DELETE"])
+def restore_points_delete(point_id):
+    cfg = load_config()
+    api_key = cfg.get("API_KEY")
+    if api_key and request.headers.get("X-API-Key") != api_key:
+        return jsonify({"error": "Unauthorized"}), 401
+    repo_path = _repo_path_from_config(cfg)
+    try:
+        deleted = _delete_restore_point(repo_path, point_id)
+    except Exception:
+        logger.exception("Failed to delete restore point %s", point_id)
+        return jsonify({"error": "Failed to delete restore point"}), 500
+    if not deleted:
+        return jsonify({"error": "Restore point not found"}), 404
+    return jsonify({"status": "deleted"})
+
+
+@app.route("/restore_points/<point_id>/restore", methods=["POST"])
+def restore_points_restore(point_id):
+    cfg = load_config()
+    api_key = cfg.get("API_KEY")
+    if api_key and request.headers.get("X-API-Key") != api_key:
+        return jsonify({"error": "Unauthorized"}), 401
+    repo_path = _repo_path_from_config(cfg)
+    service_name = cfg.get("SERVICE_NAME", "echomosaic.service")
+    try:
+        point_path, metadata = _load_restore_point(repo_path, point_id)
+    except FileNotFoundError:
+        return jsonify({"error": "Restore point not found"}), 404
+    commit = metadata.get("commit")
+    if not commit:
+        return jsonify({"error": "Restore point missing commit"}), 400
+    try:
+        subprocess.check_call(["git", "reset", "--hard", commit], cwd=repo_path)
+    except subprocess.CalledProcessError as exc:
+        return jsonify({"error": f"Git rollback failed: {exc}"}), 500
+    _restore_files_from_metadata(repo_path, point_path, metadata)
+    metadata["last_restored_at"] = datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
+    try:
+        _save_restore_point_metadata(point_path, metadata)
+    except Exception:
+        pass
+    try:
+        subprocess.Popen(["sudo", "systemctl", "restart", service_name])
+    except OSError:
+        pass
+    return jsonify({"status": "ok", "restore_point": _serialize_restore_point(metadata["id"], metadata)})
+
+
 @app.route("/update_app", methods=["POST"])
 def update_app():
     cfg = load_config()
@@ -2736,9 +3017,53 @@ def rollback_app():
     api_key = cfg.get("API_KEY")
     if api_key and request.headers.get("X-API-Key") != api_key:
         return "Unauthorized", 401
-    repo_path = cfg.get("INSTALL_DIR") or os.getcwd()
+    repo_path = _repo_path_from_config(cfg)
     service_name = cfg.get("SERVICE_NAME", "echomosaic.service")
-    # decide target: previous commit from history
+    payload = request.get_json(silent=True)
+    restore_point_id = ""
+    if isinstance(payload, dict):
+        restore_point_id = str(payload.get("restore_point_id") or payload.get("restore_point") or "").strip()
+    if not restore_point_id:
+        form_value = request.form.get("restore_point_id") if hasattr(request, "form") else None
+        restore_point_id = str(
+            form_value
+            or request.args.get("restore_point_id")
+            or request.args.get("restore_point")
+            or ""
+        ).strip()
+    if restore_point_id:
+        try:
+            point_path, metadata = _load_restore_point(repo_path, restore_point_id)
+        except FileNotFoundError:
+            return render_template("update_status.html", message="Restore point not found."), 404
+        commit = metadata.get("commit")
+        if not commit:
+            return render_template(
+                "update_status.html",
+                message="Restore point is missing commit information.",
+            ), 400
+        try:
+            subprocess.check_call(["git", "reset", "--hard", commit], cwd=repo_path)
+        except subprocess.CalledProcessError as exc:
+            return render_template("update_status.html", message=f"Rollback failed: {exc}"), 500
+        _restore_files_from_metadata(repo_path, point_path, metadata)
+        metadata["last_restored_at"] = datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
+        try:
+            _save_restore_point_metadata(point_path, metadata)
+        except Exception:
+            pass
+        try:
+            subprocess.Popen(["sudo", "systemctl", "restart", service_name])
+        except OSError:
+            pass
+        label = metadata.get("label") or restore_point_id
+        short_commit = metadata.get("short_commit") or (
+            commit[:7] if isinstance(commit, str) else commit
+        )
+        message = (
+            f"Rolled back to restore point '{label}' ({short_commit}). Restarting service..."
+        )
+        return render_template("update_status.html", message=message)
     history_path = os.path.join(repo_path, "update_history.json")
     try:
         with open(history_path, "r") as hf:
@@ -2752,13 +3077,16 @@ def rollback_app():
         return render_template("update_status.html", message="History does not include a valid commit."), 400
     try:
         subprocess.check_call(["git", "reset", "--hard", target], cwd=repo_path)
-    except subprocess.CalledProcessError as e:
-        return render_template("update_status.html", message=f"Rollback failed: {e}")
+    except subprocess.CalledProcessError as exc:
+        return render_template("update_status.html", message=f"Rollback failed: {exc}")
     try:
         subprocess.Popen(["sudo", "systemctl", "restart", service_name])
     except OSError:
         pass
-    return render_template("update_status.html", message=f"Rolled back to {target[:7]}. Restarting service...")
+    return render_template(
+        "update_status.html",
+        message=f"Rolled back to {target[:7]}. Restarting service...",
+    )
 
 
 @app.route("/update")

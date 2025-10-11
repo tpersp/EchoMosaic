@@ -5,21 +5,23 @@
   <title>EchoMosaic Settings</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
   <script>
+  const SETTINGS_API_KEY = {{ config.get("API_KEY", "")|tojson }};
+
   function triggerUpdate() {
     window.location.href = '/update';
   }
   function triggerRollback() {
-    if (!confirm('Roll back to previous version?')) return;
+    if (!confirm('Roll back to the previous recorded update? This will replace current files.')) return;
     fetch('/rollback_app', {
       method: 'POST',
-      headers: { 'X-API-Key': '{{ config.get("API_KEY", "") }}' }
+      headers: { 'X-API-Key': SETTINGS_API_KEY }
     })
     .then(res => res.text())
     .then(html => { document.body.innerHTML = html; })
     .catch(err => alert('Rollback failed: ' + err));
   }
   function loadUpdateInfo() {
-    fetch('/update_info', { headers: { 'X-API-Key': '{{ config.get("API_KEY", "") }}' }})
+    fetch('/update_info', { headers: { 'X-API-Key': SETTINGS_API_KEY }})
       .then(r => r.json())
       .then(info => {
         const el = (id, v) => document.getElementById(id).textContent = v || '-';
@@ -46,7 +48,7 @@
     if (!list) return;
     list.innerHTML = '<li style="opacity:0.8; padding:6px 8px;">Loading…</li>';
     try {
-      const res = await fetch('/update_history', { headers: { 'X-API-Key': '{{ config.get("API_KEY", "") }}' }});
+      const res = await fetch('/update_history', { headers: { 'X-API-Key': SETTINGS_API_KEY }});
       const data = await res.json();
       const items = (data.history||[]).slice().reverse();
       if (!items.length) { list.innerHTML = '<li style="opacity:0.8; padding:6px 8px;">No updates recorded yet.</li>'; return; }
@@ -66,8 +68,191 @@
       list.innerHTML = '<li style="color:#f66; padding:6px 8px;">Failed to load history</li>';
     }
   }
+
   document.addEventListener('DOMContentLoaded', loadUpdateHistory);
-  </script>
+
+  function setRestorePointStatus(message, ok = true) {
+    const note = document.getElementById('restore-point-note');
+    if (!note) return;
+    if (!message) {
+      note.style.display = 'none';
+      note.textContent = '';
+      return;
+    }
+    note.textContent = message;
+    note.style.display = 'block';
+    note.style.color = ok ? 'inherit' : '#f66';
+    note.style.opacity = ok ? 0.85 : 1;
+  }
+
+  async function loadRestorePoints() {
+    const list = document.getElementById('restore-point-list');
+    if (!list) return;
+    list.innerHTML = '<li style="opacity:0.8; padding:6px 8px;">Loading...</li>';
+    setRestorePointStatus('');
+    try {
+      const res = await fetch('/restore_points', { headers: { 'X-API-Key': SETTINGS_API_KEY }});
+      if (!res.ok) {
+        throw new Error('Request failed');
+      }
+      const data = await res.json();
+      const points = Array.isArray(data.restore_points) ? data.restore_points : [];
+      if (!points.length) {
+        list.innerHTML = '<li style="opacity:0.8; padding:6px 8px;">No restore points yet.</li>';
+        return;
+      }
+      list.innerHTML = '';
+      points.forEach(point => {
+        const li = document.createElement('li');
+        li.style.display = 'flex';
+        li.style.alignItems = 'center';
+        li.style.justifyContent = 'space-between';
+        li.style.gap = '0.75rem';
+        li.style.padding = '8px 10px';
+        li.style.borderBottom = '1px solid var(--border)';
+
+        const info = document.createElement('div');
+        info.style.flex = '1';
+        const title = document.createElement('div');
+        title.textContent = point.label || point.id;
+        title.style.fontWeight = '600';
+        info.appendChild(title);
+
+        const meta = document.createElement('div');
+        meta.style.fontSize = '0.85rem';
+        meta.style.opacity = '0.85';
+        const shortCommit = point.short_commit || (point.commit ? point.commit.slice(0, 7) : '--');
+        let commitInfo = 'Commit ' + shortCommit;
+        if (point.branch) {
+          commitInfo += ' [' + point.branch + ']';
+        }
+        const createdDate = point.created_at ? new Date(point.created_at) : null;
+        const createdValid = createdDate && !Number.isNaN(createdDate.valueOf());
+        const createdText = createdValid ? createdDate.toLocaleString() : 'Unknown';
+        meta.textContent = commitInfo + ' - Saved ' + createdText;
+        info.appendChild(meta);
+
+        if (point.last_restored_at) {
+          const restoredDate = new Date(point.last_restored_at);
+          if (!Number.isNaN(restoredDate.valueOf())) {
+            const restored = document.createElement('div');
+            restored.style.fontSize = '0.8rem';
+            restored.style.opacity = '0.7';
+            restored.textContent = 'Last restored ' + restoredDate.toLocaleString();
+            info.appendChild(restored);
+          }
+        }
+
+        li.appendChild(info);
+
+        const actions = document.createElement('div');
+        actions.style.display = 'flex';
+        actions.style.gap = '0.5rem';
+
+        const restoreBtn = document.createElement('button');
+        restoreBtn.type = 'button';
+        restoreBtn.textContent = 'Restore';
+        restoreBtn.addEventListener('click', () => restoreNamedPoint(point.id, point.label || point.id, restoreBtn));
+        actions.appendChild(restoreBtn);
+
+        const deleteBtn = document.createElement('button');
+        deleteBtn.type = 'button';
+        deleteBtn.textContent = 'Delete';
+        deleteBtn.addEventListener('click', () => deleteRestorePoint(point.id, point.label || point.id, deleteBtn));
+        actions.appendChild(deleteBtn);
+
+        li.appendChild(actions);
+        list.appendChild(li);
+      });
+    } catch (err) {
+      list.innerHTML = '<li style="color:#f66; padding:6px 8px;">Failed to load restore points</li>';
+      setRestorePointStatus('Unable to load restore points.', false);
+    }
+  }
+
+  async function promptRestorePoint() {
+    const label = prompt('Enter a name for this restore point:');
+    if (label === null) return;
+    const trimmed = label.trim();
+    if (!trimmed) {
+      alert('Please provide a name for the restore point.');
+      return;
+    }
+    const btn = document.getElementById('create-restore-btn');
+    if (btn) btn.disabled = true;
+    setRestorePointStatus('Creating restore point...');
+    try {
+      const res = await fetch('/restore_points', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-API-Key': SETTINGS_API_KEY
+        },
+        body: JSON.stringify({ label: trimmed })
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        const msg = data && data.error ? data.error : 'Failed to create restore point';
+        setRestorePointStatus(msg, false);
+        return;
+      }
+      setRestorePointStatus('Restore point created.');
+      await loadRestorePoints();
+    } catch (err) {
+      setRestorePointStatus('Failed to create restore point.', false);
+    } finally {
+      if (btn) btn.disabled = false;
+    }
+  }
+
+  async function restoreNamedPoint(id, label, sourceButton) {
+    const name = label || id;
+    if (!confirm('Are you sure you want to roll back to "' + name + '"? This will replace current files.')) return;
+    if (sourceButton) sourceButton.disabled = true;
+    setRestorePointStatus('Restoring "' + name + '"...');
+    try {
+      const res = await fetch('/rollback_app', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-API-Key': SETTINGS_API_KEY
+        },
+        body: JSON.stringify({ restore_point_id: id })
+      });
+      const html = await res.text();
+      document.body.innerHTML = html;
+    } catch (err) {
+      setRestorePointStatus('Restore failed. Please try again.', false);
+      if (sourceButton) sourceButton.disabled = false;
+    }
+  }
+
+  async function deleteRestorePoint(id, label, sourceButton) {
+    const name = label || id;
+    if (!confirm('Delete restore point "' + name + '"?')) return;
+    if (sourceButton) sourceButton.disabled = true;
+    setRestorePointStatus('Deleting "' + name + '"...');
+    try {
+      const res = await fetch('/restore_points/' + encodeURIComponent(id), {
+        method: 'DELETE',
+        headers: { 'X-API-Key': SETTINGS_API_KEY }
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        const msg = data && data.error ? data.error : 'Failed to delete restore point';
+        setRestorePointStatus(msg, false);
+        if (sourceButton) sourceButton.disabled = false;
+        return;
+      }
+      setRestorePointStatus('Deleted "' + name + '".');
+      await loadRestorePoints();
+    } catch (err) {
+      setRestorePointStatus('Failed to delete restore point.', false);
+      if (sourceButton) sourceButton.disabled = false;
+    }
+  }
+  document.addEventListener('DOMContentLoaded', loadRestorePoints);
+</script>
 </head>
 <body>
   <header class="top-bar">
@@ -91,7 +276,17 @@
       <div style="display:flex; gap:0.5rem; flex-wrap:wrap;">
         <button id="update-btn" onclick="triggerUpdate()" disabled>Update Now</button>
         <button id="rollback-btn" onclick="triggerRollback()" disabled>Rollback</button>
+        <button id="create-restore-btn" type="button" onclick="promptRestorePoint()">Create Restore Point</button>
       </div>
+    </div>
+
+    <div style="margin: 1rem 0; padding: 0.75rem; border:1px solid var(--border); border-radius:4px; background: var(--surface-alt);">
+      <h3 style="margin-top:0;">Restore Points</h3>
+      <p style="margin-top:0; opacity:0.9;">Save a known good state so you can roll back even after additional updates.</p>
+      <div style="max-height: 260px; overflow-y: auto; border:1px solid var(--border); border-radius:4px; background: var(--surface);">
+        <ul id="restore-point-list" style="list-style:none; margin:0; padding:0;"></ul>
+      </div>
+      <p id="restore-point-note" style="display:none; margin:0.5rem 0 0; font-size:0.9rem;"></p>
     </div>
 
     <div style="margin: 1rem 0; padding: 0.75rem; border:1px solid var(--border); border-radius:4px; background: var(--surface-alt);">

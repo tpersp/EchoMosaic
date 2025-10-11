@@ -8,7 +8,7 @@ A running list of ideas and future improvements. Add new items anywhere below.
 - [ ] Low-bandwidth mode: automatically reduce image resolution and caching behaviour for remote access.
 - [ ] Add server-side rendering as an option so everyone who opens the site sees the same frame at the same time. This should be controlled at the group level (a single-stream group covers the one-off case).
 - [ ] Add system monitoring to surface CPU usage, memory usage (used/max), GPU usage (if available), storage available for media, and other useful info.
-- [ ] Implement a better rollback feature that lets admins mark a restore point so the server can always roll back to a known good state on demand.
+- [x] Implement a better rollback feature that lets admins mark a restore point so the server can always roll back to a known good state on demand.
 
 ## Suggestions from a friend
 - [ ] [2025-09-08] Add optional authentication or simple login with a session cache so casual users are not blocked but the dashboard and update endpoints are protected from anyone on the network.
