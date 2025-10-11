@@ -1426,23 +1426,39 @@ def _create_video_thumbnail(media_path: Path) -> Optional[Image.Image]:
     capture = cv2.VideoCapture(str(media_path))
     if not capture.isOpened():
         return None
-    success, frame = capture.read()
-    capture.release()
+    try:
+        frame_count = capture.get(cv2.CAP_PROP_FRAME_COUNT) or 0
+        if frame_count and frame_count > 30:
+            try:
+                capture.set(cv2.CAP_PROP_POS_FRAMES, min(30, frame_count - 1))
+            except Exception:
+                pass
+        success, frame = capture.read()
+    finally:
+        capture.release()
     if not success or frame is None:
         return None
     try:
         rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
     except Exception:
         rgb_frame = frame[:, :, ::-1]
-    return _compose_thumbnail(Image.fromarray(rgb_frame))
+    image = Image.fromarray(rgb_frame)
+    return _compose_thumbnail(image)
 
 
 def _load_remote_image(url: str) -> Optional[Image.Image]:
     if not url or requests is None:
         return None
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
+                      '(KHTML, like Gecko) Chrome/120.0 Safari/537.36'
+    }
     try:
-        resp = requests.get(url, timeout=5)
+        resp = requests.get(url, headers=headers, timeout=6)
         if resp.status_code != 200:
+            return None
+        content_type = resp.headers.get('Content-Type', '').lower()
+        if content_type and 'image' not in content_type:
             return None
         buffer = io.BytesIO(resp.content)
         image = Image.open(buffer)
@@ -1457,6 +1473,8 @@ def _create_livestream_thumbnail(stream_url: Optional[str]) -> Optional[Image.Im
     if not stream_url:
         return None
     url = stream_url.strip()
+    if not url:
+        return None
     lower = url.lower()
     remote_image: Optional[Image.Image] = None
     if 'youtube.com' in lower or 'youtu.be/' in lower:
@@ -1466,7 +1484,10 @@ def _create_livestream_thumbnail(stream_url: Optional[str]) -> Optional[Image.Im
         elif 'youtu.be/' in url:
             video_id = url.split('youtu.be/')[1].split('?')[0].split('&')[0]
         if video_id:
-            remote_image = _load_remote_image(f'https://img.youtube.com/vi/{video_id}/hqdefault.jpg')
+            for variant in ('maxresdefault', 'sddefault', 'hqdefault', 'mqdefault', 'default'):
+                remote_image = _load_remote_image(f'https://img.youtube.com/vi/{video_id}/{variant}.jpg')
+                if remote_image:
+                    break
     elif 'twitch.tv' in lower:
         try:
             channel = url.split('twitch.tv/')[1].split('/')[0]
@@ -1486,6 +1507,10 @@ def _create_livestream_thumbnail(stream_url: Optional[str]) -> Optional[Image.Im
 
 
 def _thumbnail_image_to_bytes(image: Image.Image) -> io.BytesIO:
+    buffer = io.BytesIO()
+    image.convert('RGB').save(buffer, format='JPEG', quality=THUMBNAIL_JPEG_QUALITY, optimize=True)
+    buffer.seek(0)
+    return buffer
     buffer = io.BytesIO()
     image.convert('RGB').save(buffer, format='JPEG', quality=THUMBNAIL_JPEG_QUALITY, optimize=True)
     buffer.seek(0)
@@ -3129,10 +3154,16 @@ def stream_thumbnail_image(stream_id):
     kind = info.get('kind')
     path = info.get('path')
     image_obj = None
-    if kind == 'image' and path:
+    if kind == "image" and path:
         media_path = _resolve_media_path(path)
         if media_path is not None:
             image_obj = _create_thumbnail_image(media_path)
+    elif kind == "video" and path:
+        media_path = _resolve_media_path(path)
+        if media_path is not None:
+            image_obj = _create_video_thumbnail(media_path)
+    elif kind == "livestream":
+        image_obj = _create_livestream_thumbnail(info.get("stream_url"))
     if image_obj is None:
         badge = info.get('badge') or 'No Preview'
         if kind == 'video':
@@ -3199,6 +3230,8 @@ def handle_video_control(payload):
 
 if __name__ == "__main__":
     socketio.run(app, host="0.0.0.0", port=5000, debug=True)
+
+
 
 
 

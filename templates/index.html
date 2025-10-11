@@ -670,6 +670,20 @@
     return parsed.toLocaleDateString() + ' ' + parsed.toLocaleTimeString();
   }
 
+  function setThumbnailPlaceholder(placeholder, visible, text) {
+    if (!placeholder) return;
+    if (visible) {
+      placeholder.hidden = false;
+      placeholder.style.display = 'flex';
+      if (typeof text === 'string') {
+        placeholder.textContent = text;
+      }
+    } else {
+      placeholder.hidden = true;
+      placeholder.style.display = 'none';
+    }
+  }
+
   function updateThumbnailUI(card, payload) {
     const area = card.querySelector('[data-thumbnail]');
     if (!area) return;
@@ -677,33 +691,22 @@
     const placeholder = area.querySelector('.thumbnail-placeholder');
     const badge = area.querySelector('.thumbnail-badge');
     const updated = area.querySelector('.thumbnail-updated');
-    area.classList.remove('is-loading', 'is-error');
-    if (!payload) {
+
+    const showError = (message) => {
       area.classList.add('is-error');
-      if (placeholder) {
-        placeholder.hidden = false;
-        placeholder.textContent = 'Preview unavailable';
-      }
-      if (img) {
-        img.hidden = true;
-      }
+      if (img) img.hidden = true;
+      setThumbnailPlaceholder(placeholder, true, message || 'Preview unavailable');
       if (badge) badge.hidden = true;
       if (updated) updated.hidden = true;
+    };
+
+    if (!payload) {
+      showError('Preview unavailable');
       return;
     }
-    if (img) {
-      const link = card.querySelector('.stream-link');
-      if (link && !img.dataset.altSet) {
-        const name = (link.textContent || '').trim() || card.dataset.stream || 'stream';
-        img.alt = `Preview for ${name}`;
-        img.dataset.altSet = 'true';
-      }
-      img.hidden = false;
-      img.src = payload.image_url;
-    }
-    if (placeholder) {
-      placeholder.hidden = true;
-    }
+
+    area.classList.remove('is-error');
+
     if (badge) {
       if (payload.badge) {
         badge.hidden = false;
@@ -712,6 +715,7 @@
         badge.hidden = true;
       }
     }
+
     if (updated) {
       const formatted = formatThumbnailTimestamp(payload.updated_at);
       if (formatted) {
@@ -720,6 +724,54 @@
       } else {
         updated.hidden = true;
       }
+    }
+
+    const finishLoading = () => {
+      area.classList.remove('is-loading');
+      setThumbnailPlaceholder(placeholder, false);
+      if (img) {
+        img.hidden = false;
+      }
+    };
+
+    if (!img) {
+      finishLoading();
+      return;
+    }
+
+    const link = card.querySelector('.stream-link');
+    if (link && !img.dataset.altSet) {
+      const name = (link.textContent || '').trim() || card.dataset.stream || 'stream';
+      img.alt = `Preview for ${name}`;
+      img.dataset.altSet = 'true';
+    }
+
+    const onLoad = () => {
+      img.removeEventListener('load', onLoad);
+      img.removeEventListener('error', onError);
+      finishLoading();
+    };
+
+    const onError = () => {
+      img.removeEventListener('load', onLoad);
+      img.removeEventListener('error', onError);
+      showError('Preview unavailable');
+    };
+
+    img.addEventListener('load', onLoad, { once: true });
+    img.addEventListener('error', onError, { once: true });
+
+    img.hidden = true;
+    area.classList.add('is-loading');
+    setThumbnailPlaceholder(placeholder, true, 'Loading preview...');
+
+    const sourceUrl = payload.image_url.includes('?')
+      ? `${payload.image_url}&cb=${Date.now()}`
+      : `${payload.image_url}?cb=${Date.now()}`;
+    img.src = sourceUrl;
+
+    if (img.complete && img.naturalWidth > 0) {
+      onLoad();
     }
   }
 
@@ -736,7 +788,7 @@
     thumbnailTimers.set(streamId, timer);
   }
 
-  function refreshThumbnail(card, streamId, options = {}) {
+  function refreshThumbnail(card, streamId) {
     if (!card || !streamId) return;
     if (thumbnailTimers.has(streamId)) {
       clearTimeout(thumbnailTimers.get(streamId));
@@ -744,14 +796,10 @@
     }
     const area = card.querySelector('[data-thumbnail]');
     if (!area) return;
-    if (options.showSpinner) {
-      area.classList.add('is-loading');
-      const placeholder = area.querySelector('.thumbnail-placeholder');
-      if (placeholder) {
-        placeholder.hidden = false;
-        placeholder.textContent = 'Loading preview...';
-      }
-    }
+    const placeholder = area.querySelector('.thumbnail-placeholder');
+    area.classList.add('is-loading');
+    setThumbnailPlaceholder(placeholder, true, 'Loading preview...');
+
     fetch(`/stream/thumbnail/${encodeURIComponent(streamId)}`)
       .then(res => {
         if (!res.ok) throw new Error(`Thumbnail response ${res.status}`);
@@ -776,10 +824,7 @@
     if (!area) return;
     area.classList.add('is-loading');
     const placeholder = area.querySelector('.thumbnail-placeholder');
-    if (placeholder) {
-      placeholder.hidden = false;
-      placeholder.textContent = 'Loading preview...';
-    }
+    setThumbnailPlaceholder(placeholder, true, 'Loading preview...');
     refreshThumbnail(card, streamId);
   }
 
