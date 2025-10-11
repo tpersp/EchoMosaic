@@ -830,6 +830,261 @@
     }
   }
 
+
+  function updateTagDatalist() {
+    if (!tagDatalist) {
+      return;
+    }
+    tagDatalist.innerHTML = '';
+    globalTagState.list.forEach(tag => {
+      if (typeof tag !== 'string') {
+        return;
+      }
+      const opt = document.createElement('option');
+      opt.value = tag;
+      tagDatalist.appendChild(opt);
+    });
+  }
+
+  function renderTagManager() {
+    if (!tagManagerList) {
+      return;
+    }
+    tagManagerList.innerHTML = '';
+    if (!globalTagState.list.length) {
+      const empty = document.createElement('p');
+      empty.className = 'tag-manager-empty';
+      empty.textContent = 'No tags defined yet.';
+      tagManagerList.appendChild(empty);
+      return;
+    }
+    const usage = new Map();
+    cardTagsMap.forEach(tags => {
+      tags.forEach(tag => {
+        const key = tag.toLowerCase();
+        usage.set(key, (usage.get(key) || 0) + 1);
+      });
+    });
+    globalTagState.list.forEach(tag => {
+      const key = tag.toLowerCase();
+      const count = usage.get(key) || 0;
+      const row = document.createElement('div');
+      row.className = 'tag-manager-item';
+      const chip = document.createElement('span');
+      chip.className = 'tag-chip';
+      const label = document.createElement('span');
+      label.className = 'tag-label';
+      label.textContent = tag;
+      chip.appendChild(label);
+      const countEl = document.createElement('span');
+      countEl.className = 'tag-usage';
+      countEl.textContent = `${count} stream${count === 1 ? '' : 's'}`;
+      const removeBtn = document.createElement('button');
+      removeBtn.type = 'button';
+      removeBtn.className = 'tag-remove-btn';
+      removeBtn.textContent = 'Remove';
+      if (count > 0) {
+        removeBtn.disabled = true;
+        removeBtn.title = 'Tag is in use';
+      } else {
+        removeBtn.addEventListener('click', () => removeGlobalTag(tag));
+      }
+      row.appendChild(chip);
+      row.appendChild(countEl);
+      row.appendChild(removeBtn);
+      tagManagerList.appendChild(row);
+    });
+  }
+
+  function removeGlobalTag(tag) {
+    const encoded = encodeURIComponent(tag);
+    fetch(`/tags/${encoded}`, { method: 'DELETE' })
+      .then(res => res.json().then(data => ({ ok: res.ok, data })))
+      .then(result => {
+        if (result.ok) {
+          const tags = Array.isArray(result.data.tags) ? result.data.tags : [];
+          syncGlobalTags(tags);
+          showNotification('Tag removed');
+        } else {
+          showNotification(result.data.error || 'Unable to remove tag');
+        }
+      })
+      .catch(() => showNotification('Unable to remove tag'));
+  }
+
+  function syncGlobalTags(tags) {
+    if (!Array.isArray(tags)) {
+      return;
+    }
+    globalTagState.list = tags.slice();
+    globalTagState.map.clear();
+    globalTagState.list.forEach(tag => {
+      if (typeof tag === 'string') {
+        globalTagState.map.set(tag.toLowerCase(), tag);
+      }
+    });
+    updateTagDatalist();
+    reconcileFilterTags();
+    renderTagManager();
+  }
+
+  function reconcileFilterTags() {
+    if (!activeTagFilters.length) {
+      return;
+    }
+    const next = [];
+    activeTagFilters.forEach(tag => {
+      const canonical = globalTagState.map.get(tag.toLowerCase());
+      if (canonical) {
+        if (!next.some(existing => existing.toLowerCase() === canonical.toLowerCase())) {
+          next.push(canonical);
+        }
+      }
+    });
+    const changed = next.length !== activeTagFilters.length || next.some((tag, idx) => tag !== activeTagFilters[idx]);
+    if (changed) {
+      activeTagFilters.length = 0;
+      next.forEach(tag => activeTagFilters.push(tag));
+      renderFilterChips();
+      applyFiltersAndSorting();
+    }
+  }
+
+  function renderFilterChips() {
+    if (!tagFilterChips) {
+      return;
+    }
+    const input = tagFilterInput || null;
+    tagFilterChips.querySelectorAll('.filter-tag-chip').forEach(chip => chip.remove());
+    activeTagFilters.forEach(tag => {
+      const chip = document.createElement('span');
+      chip.className = 'tag-chip filter-tag-chip';
+      chip.dataset.tag = tag;
+      const label = document.createElement('span');
+      label.className = 'tag-label';
+      label.textContent = tag;
+      const removeBtn = document.createElement('button');
+      removeBtn.type = 'button';
+      removeBtn.className = 'tag-remove';
+      removeBtn.setAttribute('aria-label', `Remove ${tag}`);
+      removeBtn.innerHTML = '&times;';
+      removeBtn.addEventListener('click', () => removeFilterTag(tag));
+      chip.appendChild(label);
+      chip.appendChild(removeBtn);
+      if (input) {
+        tagFilterChips.insertBefore(chip, input);
+      } else {
+        tagFilterChips.appendChild(chip);
+      }
+    });
+  }
+
+  function addFilterTag(tag) {
+    const normalized = normalizeTagInput(tag);
+    if (!normalized) {
+      return;
+    }
+    const lower = normalized.toLowerCase();
+    if (activeTagFilters.some(existing => existing.toLowerCase() === lower)) {
+      return;
+    }
+    const canonical = globalTagState.map.get(lower) || normalized;
+    activeTagFilters.push(canonical);
+    renderFilterChips();
+    applyFiltersAndSorting();
+  }
+
+  function removeFilterTag(tag) {
+    const lower = tag.toLowerCase();
+    const filtered = activeTagFilters.filter(existing => existing.toLowerCase() !== lower);
+    if (filtered.length === activeTagFilters.length) {
+      return;
+    }
+    activeTagFilters.length = 0;
+    filtered.forEach(item => activeTagFilters.push(item));
+    renderFilterChips();
+    applyFiltersAndSorting();
+  }
+
+  let originalCardOrder = [];
+
+  function applyFiltersAndSorting() {
+    if (!dashboardGrid) {
+      return;
+    }
+    const filterSet = new Set(activeTagFilters.map(tag => tag.toLowerCase()));
+    cardTagsMap.forEach((tags, card) => {
+      const matches = filterSet.size === 0 || tags.some(tag => filterSet.has(tag.toLowerCase()));
+      card.dataset.matchesFilter = matches ? 'true' : 'false';
+      card.style.display = matches ? '' : 'none';
+    });
+    while (dashboardGrid.firstChild) {
+      dashboardGrid.removeChild(dashboardGrid.firstChild);
+    }
+    if (currentSortMode === 'group') {
+      renderGroupedCards();
+    } else {
+      originalCardOrder.forEach(card => {
+        dashboardGrid.appendChild(card);
+      });
+    }
+  }
+
+  function renderGroupedCards() {
+    if (!dashboardGrid) {
+      return;
+    }
+    const tagBuckets = new Map();
+    const untagged = [];
+    originalCardOrder.forEach(card => {
+      const tags = cardTagsMap.get(card) || [];
+      if (tags.length) {
+        const primary = tags[0];
+        const canonical = globalTagState.map.get(primary.toLowerCase()) || primary;
+        if (!tagBuckets.has(canonical)) {
+          tagBuckets.set(canonical, []);
+        }
+        tagBuckets.get(canonical).push(card);
+      } else {
+        untagged.push(card);
+      }
+    });
+    const orderedKeys = [];
+    globalTagState.list.forEach(tag => {
+      if (tagBuckets.has(tag)) {
+        orderedKeys.push(tag);
+      }
+    });
+    tagBuckets.forEach((_, key) => {
+      if (!orderedKeys.includes(key)) {
+        orderedKeys.push(key);
+      }
+    });
+    orderedKeys.forEach(key => {
+      const header = document.createElement('div');
+      header.className = 'tag-group-header';
+      header.textContent = key;
+      const cards = tagBuckets.get(key) || [];
+      const anyVisible = cards.some(card => card.dataset.matchesFilter === 'true');
+      header.hidden = !anyVisible;
+      dashboardGrid.appendChild(header);
+      cards.forEach(card => {
+        dashboardGrid.appendChild(card);
+      });
+    });
+    if (untagged.length) {
+      const header = document.createElement('div');
+      header.className = 'tag-group-header';
+      header.textContent = 'Untagged';
+      const anyVisible = untagged.some(card => card.dataset.matchesFilter === 'true');
+      header.hidden = !anyVisible;
+      dashboardGrid.appendChild(header);
+      untagged.forEach(card => {
+        dashboardGrid.appendChild(card);
+      });
+    }
+  }
+
   // Group manager logic
   function makeEl(tag, attrs = {}, children = []) {
     const e = document.createElement(tag);
@@ -3326,6 +3581,7 @@
     if (!card) return;
     const grid = card.querySelector('.image-picker .image-grid');
     if (!grid) return;
+    const mediaMode = (card.dataset.mediaMode || 'image').toLowerCase();
     const hideNsfw = card.dataset.hideNsfw === 'true';
     const params = new URLSearchParams({ folder });
     if (hideNsfw) {
