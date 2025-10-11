@@ -6,7 +6,6 @@ A running list of ideas and future improvements. Add new items anywhere below.
 - [ ] Stream real-time update logs via Socket.IO instead of the current client-side animation.
 - [ ] "Slideshow sync": sync transitions across all streams (for example, they all change every 10 seconds together) to prevent random offsets when multiple screens are visible at once.
 - [ ] Low-bandwidth mode: automatically reduce image resolution and caching behaviour for remote access.
-- [ ] Show a live thumbnail preview for each stream's current content directly on the dashboard so you can see all streams at a glance before opening them.
 - [ ] Add server-side rendering as an option so everyone who opens the site sees the same frame at the same time. This should be controlled at the group level (a single-stream group covers the one-off case).
 - [ ] Add system monitoring to surface CPU usage, memory usage (used/max), GPU usage (if available), storage available for media, and other useful info.
 - [ ] Implement a better rollback feature that lets admins mark a restore point so the server can always roll back to a known good state on demand.
@@ -40,6 +39,7 @@ A running list of ideas and future improvements. Add new items anywhere below.
 - [x] [2025-09-08] Add a light/dark theme toggle.
 - [x] [2025-09-21] Expand Stable Horde controls with LoRA stacks, post-processing chains, and worker preference toggles directly in the dashboard.
 - [x] [2025-09-21] Move AI generator controls into a modal window and surface per-stream summaries on the dashboard.
+- [x] Show a live thumbnail preview for each stream's current content directly on the dashboard so you can see all streams at a glance before opening them.
 
 Notes
 - Use checkboxes to track status (unchecked = planned, checked = done).

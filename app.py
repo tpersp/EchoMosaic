@@ -11,13 +11,14 @@ import threading
 import time
 import secrets
 import random
+import io
 from copy import deepcopy
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
 from urllib.parse import urlparse
 
-from PIL import Image
+from PIL import Image, ImageDraw, ImageFont
 from werkzeug.http import generate_etag
 
 try:
@@ -43,6 +44,8 @@ THUMBNAIL_SIZE_PRESETS = {
     "medium": (1024, 1024),
     "full": None,  # Alias for the original size
 }
+DASHBOARD_THUMBNAIL_SIZE = (320, 180)
+THUMBNAIL_JPEG_QUALITY = 70
 IMAGE_CACHE_TIMEOUT = 60 * 60 * 24 * 7  # One week default for conditional responses
 IMAGE_CACHE_CONTROL_MAX_AGE = 31536000  # One year for browser Cache-Control headers
 
@@ -142,6 +145,8 @@ NSFW_KEYWORD = "nsfw"
 # Cache image paths per folder so we can serve repeated requests without rescanning the disk.
 IMAGE_CACHE: Dict[str, Dict[str, Any]] = {}
 IMAGE_CACHE_LOCK = threading.Lock()
+STREAM_RUNTIME_STATE: Dict[str, Dict[str, Any]] = {}
+STREAM_RUNTIME_LOCK = threading.Lock()
 
 
 def _normalize_folder_key(folder: Optional[str]) -> str:
@@ -1233,6 +1238,13 @@ def _run_ai_generation(stream_id: str, options: Dict[str, Any], cancel_event: Op
             conf['selected_image'] = images[0]['path']
         conf['mode'] = AI_MODE
         conf['media_mode'] = MEDIA_MODE_AI
+        _update_stream_runtime_state(
+            stream_id,
+            path=conf.get('selected_image'),
+            kind='image',
+            media_mode=MEDIA_MODE_AI,
+            source='ai_generation',
+        )
         save_settings(settings)
         _emit_ai_update(stream_id, conf[AI_STATE_KEY])
         try:
@@ -1298,6 +1310,170 @@ def _infer_media_mode(conf: Dict[str, Any]) -> str:
     return MEDIA_MODE_IMAGE
 
 
+
+
+def _get_stream_runtime_state(stream_id: str) -> Dict[str, Any]:
+    with STREAM_RUNTIME_LOCK:
+        entry = STREAM_RUNTIME_STATE.get(stream_id)
+        return dict(entry) if entry else {}
+
+
+def _update_stream_runtime_state(
+    stream_id: str,
+    *,
+    path: Optional[str] = None,
+    kind: Optional[str] = None,
+    media_mode: Optional[str] = None,
+    stream_url: Optional[str] = None,
+    source: str = "unknown",
+) -> None:
+    if not stream_id or stream_id.startswith("_"):
+        return
+    normalized_mode = media_mode.strip().lower() if isinstance(media_mode, str) else None
+    normalized_kind = kind.strip().lower() if isinstance(kind, str) else None
+    resolved_path = path if path not in ("", None) else None
+    if resolved_path and not normalized_kind:
+        normalized_kind = _detect_media_kind(resolved_path)
+    with STREAM_RUNTIME_LOCK:
+        entry = STREAM_RUNTIME_STATE.setdefault(stream_id, {})
+        if media_mode is not None:
+            entry["media_mode"] = normalized_mode
+        if path is not None:
+            entry["path"] = resolved_path
+            if resolved_path is None:
+                entry.pop("kind", None)
+            elif normalized_kind:
+                entry["kind"] = normalized_kind
+        elif normalized_kind:
+            entry["kind"] = normalized_kind
+        if stream_url is not None:
+            entry["stream_url"] = stream_url or None
+        entry["timestamp"] = time.time()
+        entry["source"] = source
+
+
+
+def _runtime_timestamp_to_iso(ts: Optional[float]) -> Optional[str]:
+    if not ts:
+        return None
+    try:
+        return datetime.utcfromtimestamp(ts).replace(microsecond=0).isoformat() + 'Z'
+    except (ValueError, OSError, OverflowError):
+        return None
+
+
+def _resolve_media_path(rel_path: Optional[str]) -> Optional[Path]:
+    if not rel_path:
+        return None
+    base_root = IMAGE_DIR_PATH.resolve()
+    try:
+        target = (base_root / rel_path).resolve()
+        target.relative_to(base_root)
+    except (ValueError, RuntimeError):
+        return None
+    except FileNotFoundError:
+        return None
+    if not target.exists():
+        return None
+    return target
+
+
+def _generate_placeholder_thumbnail(label: str) -> Image.Image:
+    background = Image.new('RGB', DASHBOARD_THUMBNAIL_SIZE, (32, 34, 46))
+    draw = ImageDraw.Draw(background)
+    font = ImageFont.load_default()
+    text = (label or '').strip() or 'No Preview'
+    text = text.upper()
+    try:
+        bbox = draw.textbbox((0, 0), text, font=font)
+        text_width = bbox[2] - bbox[0]
+        text_height = bbox[3] - bbox[1]
+    except AttributeError:
+        text_width, text_height = draw.textsize(text, font=font)
+    x = max((DASHBOARD_THUMBNAIL_SIZE[0] - text_width) // 2, 4)
+    y = max((DASHBOARD_THUMBNAIL_SIZE[1] - text_height) // 2, 4)
+    draw.text((x, y), text, fill=(210, 210, 210), font=font)
+    return background
+
+
+def _create_thumbnail_image(media_path: Path) -> Image.Image:
+    background = Image.new('RGB', DASHBOARD_THUMBNAIL_SIZE, (20, 20, 24))
+    try:
+        with Image.open(media_path) as src:
+            if getattr(src, 'is_animated', False):
+                try:
+                    src.seek(0)
+                except EOFError:
+                    pass
+            frame = src.convert('RGB')
+            frame.thumbnail(DASHBOARD_THUMBNAIL_SIZE, IMAGE_THUMBNAIL_FILTER)
+            offset_x = max((DASHBOARD_THUMBNAIL_SIZE[0] - frame.width) // 2, 0)
+            offset_y = max((DASHBOARD_THUMBNAIL_SIZE[1] - frame.height) // 2, 0)
+            background.paste(frame, (offset_x, offset_y))
+            return background
+    except Exception as exc:  # pragma: no cover - defensive, thumbnail best-effort
+        logger.debug('Failed to render thumbnail for %s: %s', media_path, exc)
+    return _generate_placeholder_thumbnail('Image')
+
+
+def _thumbnail_image_to_bytes(image: Image.Image) -> io.BytesIO:
+    buffer = io.BytesIO()
+    image.convert('RGB').save(buffer, format='JPEG', quality=THUMBNAIL_JPEG_QUALITY, optimize=True)
+    buffer.seek(0)
+    return buffer
+
+
+def _compute_thumbnail_snapshot(stream_id: str) -> Optional[Dict[str, Any]]:
+    conf = settings.get(stream_id)
+    if not isinstance(conf, dict):
+        return None
+    runtime = _get_stream_runtime_state(stream_id)
+    media_mode = runtime.get('media_mode')
+    if media_mode not in MEDIA_MODE_CHOICES:
+        media_mode_value = conf.get('media_mode')
+        if isinstance(media_mode_value, str):
+            candidate = media_mode_value.strip().lower()
+            media_mode = candidate if candidate in MEDIA_MODE_CHOICES else None
+        if media_mode not in MEDIA_MODE_CHOICES:
+            media_mode = _infer_media_mode(conf)
+    path = runtime.get('path')
+    if path is None:
+        path = conf.get('selected_image')
+    stream_url = runtime.get('stream_url')
+    if stream_url is None:
+        stream_url = conf.get('stream_url')
+    timestamp = runtime.get('timestamp') or time.time()
+    kind = runtime.get('kind')
+    if not kind and path:
+        kind = _detect_media_kind(path)
+    if media_mode == MEDIA_MODE_LIVESTREAM:
+        kind = 'livestream'
+    elif media_mode == MEDIA_MODE_VIDEO:
+        kind = 'video'
+    elif media_mode == MEDIA_MODE_AI:
+        kind = 'image'
+    else:
+        kind = kind or 'image'
+    placeholder = False
+    if media_mode in (MEDIA_MODE_LIVESTREAM, MEDIA_MODE_VIDEO) or not path:
+        placeholder = True
+    badge_map = {
+        MEDIA_MODE_LIVESTREAM: 'Live',
+        MEDIA_MODE_VIDEO: 'Video',
+        MEDIA_MODE_AI: 'AI',
+    }
+    badge = badge_map.get(media_mode, 'Image')
+    return {
+        'stream_id': stream_id,
+        'media_mode': media_mode,
+        'path': path,
+        'kind': kind,
+        'stream_url': stream_url,
+        'timestamp': timestamp,
+        'badge': badge,
+        'placeholder': placeholder,
+        'source': runtime.get('source'),
+    }
 ensure_ai_presets_storage()
 # Backfill defaults for existing stream entries
 for k, v in list(settings.items()):
@@ -1348,6 +1524,14 @@ for k, v in list(settings.items()):
         v["mode"] = desired_mode
         if media_mode == MEDIA_MODE_VIDEO and desired_mode == "specific":
             v["video_playback_mode"] = "loop"
+        _update_stream_runtime_state(
+            k,
+            path=v.get("selected_image"),
+            kind=v.get("selected_media_kind"),
+            media_mode=v.get("media_mode"),
+            stream_url=v.get("stream_url"),
+            source="startup",
+        )
 
 # Ensure notes key exists
 settings.setdefault("_notes", "")
@@ -1550,6 +1734,14 @@ def add_stream():
         if new_id not in settings:
             settings[new_id] = default_stream_config()
             settings[new_id]["label"] = new_id.capitalize()
+            _update_stream_runtime_state(
+                new_id,
+                path=settings[new_id].get("selected_image"),
+                kind=settings[new_id].get("selected_media_kind"),
+                media_mode=settings[new_id].get("media_mode"),
+                stream_url=settings[new_id].get("stream_url"),
+                source="stream_created",
+            )
             save_settings(settings)
             if auto_scheduler is not None:
                 auto_scheduler.reschedule(new_id)
@@ -1566,6 +1758,8 @@ def delete_stream(stream_id):
             ai_job_controls.pop(stream_id, None)
         _cleanup_temp_outputs(stream_id)
         settings.pop(stream_id)
+        with STREAM_RUNTIME_LOCK:
+            STREAM_RUNTIME_STATE.pop(stream_id, None)
         save_settings(settings)
         if auto_scheduler is not None:
             auto_scheduler.remove(stream_id)
@@ -1712,6 +1906,14 @@ def update_stream_settings(stream_id):
 
     ensure_background_defaults(conf)
     ensure_tag_defaults(conf)
+    _update_stream_runtime_state(
+        stream_id,
+        path=conf.get("selected_image"),
+        kind=conf.get("selected_media_kind"),
+        media_mode=conf.get("media_mode"),
+        stream_url=conf.get("stream_url"),
+        source="settings_update",
+    )
     save_settings(settings)
     if auto_scheduler is not None:
         auto_scheduler.reschedule(stream_id)
@@ -2742,12 +2944,26 @@ def get_random_media():
     folder = request.args.get("folder", "all")
     hide_nsfw = _parse_truthy(request.args.get("hide_nsfw"))
     kind_filter = (request.args.get("kind") or "").strip().lower()
+    stream_id = (request.args.get("stream_id") or "").strip()
     entries = list_media(folder, hide_nsfw=hide_nsfw)
     if kind_filter in ("image", "video"):
         entries = [item for item in entries if item.get("kind") == kind_filter]
     if not entries:
         return jsonify({"error": "No media found"}), 404
     choice = dict(random.choice(entries))
+    if stream_id and stream_id in settings and isinstance(settings.get(stream_id), dict):
+        conf = settings.get(stream_id) or {}
+        media_mode_value = conf.get("media_mode")
+        normalized_mode = media_mode_value.strip().lower() if isinstance(media_mode_value, str) else None
+        if not normalized_mode and isinstance(conf, dict):
+            normalized_mode = _infer_media_mode(conf)
+        _update_stream_runtime_state(
+            stream_id,
+            path=choice.get("path"),
+            kind=choice.get("kind"),
+            media_mode=normalized_mode,
+            source="random_media",
+        )
     return jsonify(choice)
 
 
@@ -2811,6 +3027,63 @@ def serve_video(video_path):
     if target_path.suffix.lower() not in VIDEO_EXTENSIONS:
         return "Unsupported media type", 415
     return _send_video_response(target_path)
+
+
+@app.route("/stream/thumbnail/<stream_id>", methods=["GET"])
+def stream_thumbnail_metadata(stream_id):
+    info = _compute_thumbnail_snapshot(stream_id)
+    if info is None:
+        return jsonify({"error": f"No stream '{stream_id}' found"}), 404
+    timestamp = info.get('timestamp')
+    cache_key = None
+    if isinstance(timestamp, (int, float)):
+        try:
+            cache_key = str(int(timestamp))
+        except (TypeError, ValueError):
+            cache_key = None
+    image_url = url_for('stream_thumbnail_image', stream_id=stream_id)
+    if cache_key:
+        image_url = f"{image_url}?v={cache_key}"
+    payload = {
+        'stream_id': stream_id,
+        'media_mode': info.get('media_mode'),
+        'kind': info.get('kind'),
+        'path': info.get('path'),
+        'image_url': image_url,
+        'placeholder': bool(info.get('placeholder')),
+        'badge': info.get('badge'),
+        'updated_at': _runtime_timestamp_to_iso(info.get('timestamp')),
+        'source': info.get('source'),
+    }
+    stream_url = info.get('stream_url')
+    if stream_url:
+        payload['stream_url'] = stream_url
+    return jsonify(payload)
+
+
+@app.route("/stream/thumbnail/<stream_id>/image", methods=["GET"])
+def stream_thumbnail_image(stream_id):
+    info = _compute_thumbnail_snapshot(stream_id)
+    if info is None:
+        return 'Not found', 404
+    kind = info.get('kind')
+    path = info.get('path')
+    image_obj = None
+    if kind == 'image' and path:
+        media_path = _resolve_media_path(path)
+        if media_path is not None:
+            image_obj = _create_thumbnail_image(media_path)
+    if image_obj is None:
+        badge = info.get('badge') or 'No Preview'
+        if kind == 'video':
+            badge = 'Video'
+        elif kind == 'livestream':
+            badge = 'Live'
+        image_obj = _generate_placeholder_thumbnail(badge)
+    buffer = _thumbnail_image_to_bytes(image_obj)
+    response = send_file(buffer, mimetype='image/jpeg')
+    response.headers['Cache-Control'] = 'no-store, max-age=0'
+    return response
 
 
 @app.route("/stream/group/<name>")

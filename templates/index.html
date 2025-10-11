@@ -95,6 +95,15 @@
         </div>
       </div>
 
+      <div class="thumbnail-wrapper">
+        <div class="thumbnail-area is-loading" data-thumbnail>
+          <img class="thumbnail-image" alt="Preview for {{ conf.label if conf.label else stream_id|capitalize }}" loading="lazy" decoding="async" hidden>
+          <div class="thumbnail-placeholder">Loading preview...</div>
+          <div class="thumbnail-badge" hidden></div>
+          <div class="thumbnail-updated" hidden></div>
+        </div>
+      </div>
+
       <div class="form-grid">
         <!-- Mode Selection (moved to top) -->
         {% set media_mode = conf.media_mode|default('image') %}
@@ -542,6 +551,9 @@
   })();
 
   const socket = io();
+  const THUMBNAIL_REFRESH_MS = 15000;
+  const THUMBNAIL_RETRY_MS = 30000;
+  const thumbnailTimers = new Map();
   let openAiCard = null;
   const aiSummaryUpdaters = new WeakMap();
 
@@ -643,6 +655,132 @@
     setTimeout(() => {
       notification.classList.remove('show');
     }, 3000);
+  }
+
+  function formatThumbnailTimestamp(isoString) {
+    if (!isoString) return '';
+    const parsed = new Date(isoString);
+    if (Number.isNaN(parsed.getTime())) return '';
+    const diffMs = Date.now() - parsed.getTime();
+    if (!Number.isFinite(diffMs)) return '';
+    const diffSec = Math.max(diffMs / 1000, 0);
+    if (diffSec < 60) return 'Just now';
+    if (diffSec < 3600) return Math.round(diffSec / 60) + 'm ago';
+    if (diffSec < 86400) return Math.round(diffSec / 3600) + 'h ago';
+    return parsed.toLocaleDateString() + ' ' + parsed.toLocaleTimeString();
+  }
+
+  function updateThumbnailUI(card, payload) {
+    const area = card.querySelector('[data-thumbnail]');
+    if (!area) return;
+    const img = area.querySelector('.thumbnail-image');
+    const placeholder = area.querySelector('.thumbnail-placeholder');
+    const badge = area.querySelector('.thumbnail-badge');
+    const updated = area.querySelector('.thumbnail-updated');
+    area.classList.remove('is-loading', 'is-error');
+    if (!payload) {
+      area.classList.add('is-error');
+      if (placeholder) {
+        placeholder.hidden = false;
+        placeholder.textContent = 'Preview unavailable';
+      }
+      if (img) {
+        img.hidden = true;
+      }
+      if (badge) badge.hidden = true;
+      if (updated) updated.hidden = true;
+      return;
+    }
+    if (img) {
+      const link = card.querySelector('.stream-link');
+      if (link && !img.dataset.altSet) {
+        const name = (link.textContent || '').trim() || card.dataset.stream || 'stream';
+        img.alt = `Preview for ${name}`;
+        img.dataset.altSet = 'true';
+      }
+      img.hidden = false;
+      img.src = payload.image_url;
+    }
+    if (placeholder) {
+      placeholder.hidden = true;
+    }
+    if (badge) {
+      if (payload.badge) {
+        badge.hidden = false;
+        badge.textContent = payload.badge;
+      } else {
+        badge.hidden = true;
+      }
+    }
+    if (updated) {
+      const formatted = formatThumbnailTimestamp(payload.updated_at);
+      if (formatted) {
+        updated.hidden = false;
+        updated.textContent = formatted;
+      } else {
+        updated.hidden = true;
+      }
+    }
+  }
+
+  function scheduleThumbnailRefresh(streamId, card, delay = THUMBNAIL_REFRESH_MS) {
+    if (!streamId) return;
+    if (thumbnailTimers.has(streamId)) {
+      clearTimeout(thumbnailTimers.get(streamId));
+    }
+    if (!document.body.contains(card)) {
+      thumbnailTimers.delete(streamId);
+      return;
+    }
+    const timer = setTimeout(() => refreshThumbnail(card, streamId), delay);
+    thumbnailTimers.set(streamId, timer);
+  }
+
+  function refreshThumbnail(card, streamId, options = {}) {
+    if (!card || !streamId) return;
+    if (thumbnailTimers.has(streamId)) {
+      clearTimeout(thumbnailTimers.get(streamId));
+      thumbnailTimers.delete(streamId);
+    }
+    const area = card.querySelector('[data-thumbnail]');
+    if (!area) return;
+    if (options.showSpinner) {
+      area.classList.add('is-loading');
+      const placeholder = area.querySelector('.thumbnail-placeholder');
+      if (placeholder) {
+        placeholder.hidden = false;
+        placeholder.textContent = 'Loading preview...';
+      }
+    }
+    fetch(`/stream/thumbnail/${encodeURIComponent(streamId)}`)
+      .then(res => {
+        if (!res.ok) throw new Error(`Thumbnail response ${res.status}`);
+        return res.json();
+      })
+      .then(data => {
+        updateThumbnailUI(card, data);
+        scheduleThumbnailRefresh(streamId, card, THUMBNAIL_REFRESH_MS);
+      })
+      .catch(err => {
+        console.warn('Thumbnail refresh failed for', streamId, err);
+        updateThumbnailUI(card, null);
+        scheduleThumbnailRefresh(streamId, card, THUMBNAIL_RETRY_MS);
+      });
+  }
+
+  function initThumbnail(card) {
+    if (!card) return;
+    const streamId = card.dataset.stream;
+    if (!streamId) return;
+    const area = card.querySelector('[data-thumbnail]');
+    if (!area) return;
+    area.classList.add('is-loading');
+    const placeholder = area.querySelector('.thumbnail-placeholder');
+    if (placeholder) {
+      placeholder.hidden = false;
+      placeholder.textContent = 'Loading preview...';
+    }
+    refreshThumbnail(card, streamId);
   }
 
   // No layout settings for global /stream; it adapts dynamically
@@ -1749,6 +1887,7 @@
     if (!streamId || !conf) return;
     const card = document.querySelector(`.stream-card[data-stream="${streamId}"]`);
     if (!card) return;
+    refreshThumbnail(card, streamId);
     if (Array.isArray(conf.tags)) {
       setCardTags(card, conf.tags);
       applyFiltersAndSorting();
@@ -3713,6 +3852,7 @@
   document.addEventListener('DOMContentLoaded', () => {
     document.querySelectorAll('.stream-card').forEach(card => {
       const streamId = card.dataset.stream;
+      initThumbnail(card);
       if (streamId) {
         attachTagEditor(card);
       }
