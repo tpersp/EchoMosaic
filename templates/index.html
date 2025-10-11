@@ -994,6 +994,45 @@
     applyFiltersAndSorting();
   }
 
+  function createGlobalTag() {
+    if (!newTagInput) {
+      return;
+    }
+    const value = normalizeTagInput(newTagInput.value);
+    if (!value) {
+      newTagInput.value = '';
+      return;
+    }
+    if (createTagBtn) {
+      createTagBtn.disabled = true;
+    }
+    fetch('/tags', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: value })
+    })
+      .then(res => res.json().then(data => ({ ok: res.ok, data })))
+      .then(result => {
+        if (result.ok) {
+          const tags = Array.isArray(result.data.tags) ? result.data.tags : [];
+          syncGlobalTags(tags);
+          if (newTagInput) {
+            newTagInput.value = '';
+          }
+          const created = typeof result.data.tag === 'string' ? result.data.tag : value;
+          showNotification(`Tag '${created}' saved`);
+        } else {
+          showNotification(result.data.error || 'Unable to create tag');
+        }
+      })
+      .catch(() => showNotification('Unable to create tag'))
+      .finally(() => {
+        if (createTagBtn) {
+          createTagBtn.disabled = false;
+        }
+      });
+  }
+
   function removeFilterTag(tag) {
     const lower = tag.toLowerCase();
     const filtered = activeTagFilters.filter(existing => existing.toLowerCase() !== lower);
@@ -1004,6 +1043,18 @@
     filtered.forEach(item => activeTagFilters.push(item));
     renderFilterChips();
     applyFiltersAndSorting();
+  }
+
+  function commitFilterInput() {
+    if (!tagFilterInput) {
+      return;
+    }
+    const normalized = normalizeTagInput(tagFilterInput.value);
+    tagFilterInput.value = '';
+    if (!normalized) {
+      return;
+    }
+    addFilterTag(normalized);
   }
 
   let originalCardOrder = [];
