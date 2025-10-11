@@ -50,7 +50,7 @@ THUMBNAIL_SIZE_PRESETS = {
     "medium": (1024, 1024),
     "full": None,  # Alias for the original size
 }
-DASHBOARD_THUMBNAIL_SIZE = (192, 108)
+DASHBOARD_THUMBNAIL_SIZE = (128, 72)
 THUMBNAIL_JPEG_QUALITY = 60
 IMAGE_CACHE_TIMEOUT = 60 * 60 * 24 * 7  # One week default for conditional responses
 IMAGE_CACHE_CONTROL_MAX_AGE = 31536000  # One year for browser Cache-Control headers
