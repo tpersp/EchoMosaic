@@ -745,6 +745,29 @@ def save_settings(data):
         json.dump(data, f, indent=4)
 
 
+@app.route("/settings/export", methods=["GET"])
+def export_settings_download():
+    """Return current settings as a downloadable JSON attachment."""
+    snapshot = deepcopy(settings)
+    buffer = io.BytesIO()
+    buffer.write(json.dumps(snapshot, indent=2, sort_keys=True).encode("utf-8"))
+    buffer.seek(0)
+    timestamp = datetime.utcnow().strftime("%Y%m%d-%H%M%S")
+    filename = f"echo-settings-{timestamp}.json"
+    response = send_file(
+        buffer,
+        mimetype="application/json",
+        as_attachment=True,
+        download_name=filename,
+        max_age=0,
+    )
+    response.headers["Cache-Control"] = "no-store, max-age=0"
+    response.headers["Pragma"] = "no-cache"
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Export-Filename"] = filename
+    return response
+
+
 def load_config():
     if os.path.exists(CONFIG_FILE):
         with open(CONFIG_FILE, "r") as f:

@@ -435,9 +435,8 @@
       <h3 style="margin-top:0;">Backup / Restore</h3>
       <p style="margin-top:0;">Export or import your dashboard streams, groups, layout and notes.</p>
       <div style="display:flex; gap:.5rem; align-items:center; flex-wrap:wrap;">
-        <a href="/settings/export" download>
-          <button type="button">Export Settings</button>
-        </a>
+        <button type="button" id="export-btn">Export Settings</button>
+        <span id="export-status" style="opacity:0;"></span>
         <input type="file" id="import-file" accept="application/json">
         <button type="button" id="import-btn">Import</button>
         <span id="import-status" style="opacity:.9;"></span>
@@ -967,32 +966,80 @@
     }
   })();
   </script>
-  <script>
-  // Backup/Restore import handler
-  (function(){
-    const btn = document.getElementById('import-btn');
-    const inp = document.getElementById('import-file');
-    const status = document.getElementById('import-status');
-    if (!btn || !inp) return;
-    btn.addEventListener('click', async () => {
-      if (status) status.textContent = '';
-      if (!inp.files || !inp.files[0]) { alert('Pick a JSON file to import'); return; }
+
+<script>
+// Backup/Restore import/export handlers
+(function(){
+  const exportBtn = document.getElementById('export-btn');
+  const exportStatus = document.getElementById('export-status');
+  const setExportStatus = (message, isError) => {
+    if (!exportStatus) return;
+    exportStatus.textContent = message || '';
+    exportStatus.style.opacity = message ? '0.9' : '0';
+    exportStatus.style.color = isError ? '#f66' : 'inherit';
+  };
+  if (exportBtn) {
+    exportBtn.addEventListener('click', async () => {
+      let exportSucceeded = false;
+      setExportStatus('', false);
+      exportBtn.disabled = true;
+      try {
+        setExportStatus('Preparing download...');
+        const res = await fetch('/settings/export', { credentials: 'same-origin' });
+        if (!res.ok) {
+          throw new Error(`Export failed: ${res.status}`);
+        }
+        const blob = await res.blob();
+        const suggested = res.headers.get('X-Export-Filename');
+        const filename = suggested || `echo-settings-${Date.now()}.json`;
+        const url = window.URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = filename;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        window.URL.revokeObjectURL(url);
+        exportSucceeded = true;
+        setExportStatus('Download ready');
+      } catch (err) {
+        console.error('Settings export failed', err);
+        setExportStatus('Export failed', true);
+        alert('Failed to export settings. Check console for details.');
+      } finally {
+        exportBtn.disabled = false;
+        if (exportStatus && exportSucceeded) {
+          setTimeout(() => setExportStatus('', false), 2500);
+        }
+      }
+    });
+  }
+
+  const importBtn = document.getElementById('import-btn');
+  const importInput = document.getElementById('import-file');
+  const importStatus = document.getElementById('import-status');
+  if (importBtn && importInput) {
+    importBtn.addEventListener('click', async () => {
+      if (importStatus) importStatus.textContent = '';
+      if (!importInput.files || !importInput.files[0]) { alert('Pick a JSON file to import'); return; }
       const fd = new FormData();
-      fd.append('file', inp.files[0]);
+      fd.append('file', importInput.files[0]);
       try {
         const res = await fetch('/settings/import', { method:'POST', body: fd });
         if (res.ok) {
-          if (status) status.textContent = 'Imported. Reloading…';
-          setTimeout(()=> location.href = '/', 600);
+          if (importStatus) importStatus.textContent = 'Imported. Reloading...';
+          setTimeout(() => { location.href = '/'; }, 600);
         } else {
-          const j = await res.json().catch(()=>({}));
-          if (status) status.textContent = (j && j.error) ? j.error : 'Import failed';
+          const j = await res.json().catch(() => ({}));
+          if (importStatus) importStatus.textContent = (j && j.error) ? j.error : 'Import failed';
         }
       } catch (e) {
-        if (status) status.textContent = 'Import failed';
+        if (importStatus) importStatus.textContent = 'Import failed';
       }
     });
-  })();
-  </script>
+  }
+})();
+</script>
+
 </body>
 </html>
