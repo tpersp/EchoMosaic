@@ -34,16 +34,6 @@
   <div class="controls">
     <button id="add-stream">Add Stream</button>
     <button id="open-mosaic">View Streams</button>
-    <label for="mosaic-layout-select" style="margin-left: .5rem;">Layout</label>
-    <select id="mosaic-layout-select">
-      <option value="grid" {% if mosaic_settings.layout == 'grid' %}selected{% endif %}>Grid</option>
-      <option value="horizontal" {% if mosaic_settings.layout == 'horizontal' %}selected{% endif %}>Horizontal</option>
-      <option value="vertical" {% if mosaic_settings.layout == 'vertical' %}selected{% endif %}>Vertical</option>
-      <option value="focus" {% if mosaic_settings.layout == 'focus' %}selected{% endif %}>Focus</option>
-      <option value="pip" {% if mosaic_settings.layout == 'pip' %}selected{% endif %}>PiP</option>
-    </select>
-    <label for="mosaic-cols-input" id="mosaic-cols-label" style="display: {% if mosaic_settings.layout == 'grid' %}inline{% else %}none{% endif %};">Cols</label>
-    <input id="mosaic-cols-input" type="number" min="1" max="6" value="{{ mosaic_settings.cols }}" style="width: 4.5rem; display: {% if mosaic_settings.layout == 'grid' %}inline-block{% else %}none{% endif %};" />
   </div>
 
   <div class="filter-bar" id="filter-bar">
@@ -615,8 +605,6 @@
   const notification = document.getElementById('notification');
   const addStreamBtn = document.getElementById('add-stream');
   const openMosaicBtn = document.getElementById('open-mosaic');
-  const mosaicLayoutSel = document.getElementById('mosaic-layout-select');
-  const mosaicColsInput = document.getElementById('mosaic-cols-input');
   
   // Group Manager elements
   const groupTiles = document.getElementById('group-tiles');
@@ -862,41 +850,11 @@
     refreshThumbnail(card, streamId, { showSpinner: true });
   }
 
-  // No layout settings for global /stream; it adapts dynamically
-
   if (openMosaicBtn) {
     openMosaicBtn.addEventListener('click', () => {
       window.open('/stream', '_blank');
     });
   }
-
-  // Mosaic controls
-  function updateMosaicControlsVisibility() {
-    if (!mosaicLayoutSel || !mosaicColsInput) return;
-    const layout = mosaicLayoutSel.value;
-    const colsLabel = document.getElementById('mosaic-cols-label');
-    const showCols = layout === 'grid';
-    mosaicColsInput.style.display = showCols ? 'inline-block' : 'none';
-    if (colsLabel) colsLabel.style.display = showCols ? 'inline' : 'none';
-  }
-  function saveMosaic() {
-    if (!mosaicLayoutSel) return;
-    const payload = { layout: mosaicLayoutSel.value };
-    if (payload.layout === 'grid' && mosaicColsInput) {
-      payload.cols = parseInt(mosaicColsInput.value || '2', 10);
-    }
-    fetch('/mosaic-settings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) })
-      .then(r => r.json())
-      .then(() => showNotification('Mosaic updated'))
-      .catch(() => showNotification('Failed to update mosaic'));
-  }
-  if (mosaicLayoutSel) {
-    mosaicLayoutSel.addEventListener('change', () => { updateMosaicControlsVisibility(); saveMosaic(); });
-  }
-  if (mosaicColsInput) {
-    mosaicColsInput.addEventListener('change', saveMosaic);
-  }
-  updateMosaicControlsVisibility();
 
   function normalizeTagInput(value) {
     if (typeof value !== 'string') {

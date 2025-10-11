@@ -697,21 +697,6 @@ def _ai_settings_match_defaults(candidate: Dict[str, Any], defaults: Optional[Di
     return True
 
 
-def default_mosaic_config():
-    """Return the default configuration for the mosaic /stream page."""
-    # ``layout`` controls how streams are arranged. ``grid`` uses the
-    # classic column based approach while other values enable custom
-    # layouts (e.g. horizontal or vertical stacking).
-    return {
-        "cols": 2,
-        "rows": None,
-        "layout": "grid",
-        "pip_main": None,
-        "pip_pip": None,
-        "pip_corner": "bottom-right",
-        "pip_size": 25,
-    }
-
 
 def default_stream_config():
     """Return the default configuration for a new stream."""
@@ -1265,17 +1250,6 @@ def _run_ai_generation(stream_id: str, options: Dict[str, Any], cancel_event: Op
 settings = load_settings()
 if ensure_settings_integrity(settings):
     save_settings(settings)
-if "_mosaic" not in settings:
-    settings["_mosaic"] = default_mosaic_config()
-else:
-    # Backwards compatibility for older settings files
-    settings["_mosaic"].setdefault("layout", "grid")
-    settings["_mosaic"].setdefault("cols", 2)
-    settings["_mosaic"].setdefault("pip_main", None)
-    settings["_mosaic"].setdefault("pip_pip", None)
-    settings["_mosaic"].setdefault("pip_corner", "bottom-right")
-    settings["_mosaic"].setdefault("pip_size", 25)
-
 # Ensure global AI defaults exist and are sanitized
 raw_ai_defaults = settings.get("_ai_defaults") if isinstance(settings.get("_ai_defaults"), dict) else None
 settings["_ai_defaults"] = _sanitize_ai_settings(
@@ -1752,14 +1726,12 @@ def dashboard():
                 conf["image_quality"] = quality.strip().lower()
             ensure_background_defaults(conf)
             ensure_tag_defaults(conf)
-    mosaic = settings.get("_mosaic", default_mosaic_config())
     groups = sorted(list(settings.get("_groups", {}).keys()))
     return render_template(
         "index.html",
         subfolders=subfolders,
         folder_inventory=folder_inventory,
         stream_settings=streams,
-        mosaic_settings=mosaic,
         groups=groups,
         global_tags=get_global_tags(),
         post_processors=STABLE_HORDE_POST_PROCESSORS,
@@ -1778,8 +1750,7 @@ def mosaic_streams():
         if isinstance(conf, dict):
             ensure_background_defaults(conf)
             ensure_tag_defaults(conf)
-    mosaic = settings.get("_mosaic", default_mosaic_config())
-    return render_template("streams.html", stream_settings=streams, mosaic_settings=mosaic)
+    return render_template("streams.html", stream_settings=streams)
 
 def _slugify(name: str) -> str:
     name = (name or "").strip().lower()
@@ -3208,19 +3179,10 @@ def stream_group(name):
     # Support both legacy list and new object
     if isinstance(group_def, dict):
         members = group_def.get("streams", [])
-        g_layout = group_def.get("layout") or {}
     else:
         members = list(group_def)
-        g_layout = {}
     streams = {k: settings[k] for k in members if k in settings}
-    # Build mosaic from group layout if provided, else default
-    mosaic = default_mosaic_config()
-    if g_layout:
-        # safe merge
-        for k in ["layout", "cols", "rows", "pip_main", "pip_pip", "pip_corner", "pip_size", "focus_mode", "focus_pos"]:
-            if k in g_layout:
-                mosaic[k] = g_layout[k]
-    return render_template("streams.html", stream_settings=streams, mosaic_settings=mosaic)
+    return render_template("streams.html", stream_settings=streams)
 
 @socketio.on('video_control')
 def handle_video_control(payload):

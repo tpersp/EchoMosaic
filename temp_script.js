@@ -78,8 +78,6 @@
   const notification = document.getElementById('notification');
   const addStreamBtn = document.getElementById('add-stream');
   const openMosaicBtn = document.getElementById('open-mosaic');
-  const mosaicLayoutSel = document.getElementById('mosaic-layout-select');
-  const mosaicColsInput = document.getElementById('mosaic-cols-input');
   
   // Group Manager elements
   const groupTiles = document.getElementById('group-tiles');
@@ -121,41 +119,11 @@
     }, 3000);
   }
 
-  // No layout settings for global /stream; it adapts dynamically
-
   if (openMosaicBtn) {
     openMosaicBtn.addEventListener('click', () => {
       window.open('/stream', '_blank');
     });
   }
-
-  // Mosaic controls
-  function updateMosaicControlsVisibility() {
-    if (!mosaicLayoutSel || !mosaicColsInput) return;
-    const layout = mosaicLayoutSel.value;
-    const colsLabel = document.getElementById('mosaic-cols-label');
-    const showCols = layout === 'grid';
-    mosaicColsInput.style.display = showCols ? 'inline-block' : 'none';
-    if (colsLabel) colsLabel.style.display = showCols ? 'inline' : 'none';
-  }
-  function saveMosaic() {
-    if (!mosaicLayoutSel) return;
-    const payload = { layout: mosaicLayoutSel.value };
-    if (payload.layout === 'grid' && mosaicColsInput) {
-      payload.cols = parseInt(mosaicColsInput.value || '2', 10);
-    }
-    fetch('/mosaic-settings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) })
-      .then(r => r.json())
-      .then(() => showNotification('Mosaic updated'))
-      .catch(() => showNotification('Failed to update mosaic'));
-  }
-  if (mosaicLayoutSel) {
-    mosaicLayoutSel.addEventListener('change', () => { updateMosaicControlsVisibility(); saveMosaic(); });
-  }
-  if (mosaicColsInput) {
-    mosaicColsInput.addEventListener('change', saveMosaic);
-  }
-  updateMosaicControlsVisibility();
 
   function normalizeTagInput(value) {
     if (typeof value !== 'string') {

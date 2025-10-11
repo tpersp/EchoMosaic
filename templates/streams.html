@@ -8,104 +8,18 @@
 </head>
 <body>
 <!-- NOTE: Do not add headers/toolbars here; keep the streams view UI-free. -->
-{% set style_parts = [] %}
-{% if mosaic_settings.layout == 'pip' %}
-  {% set _ = style_parts.append('--pip-size: ' ~ (mosaic_settings.pip_size|default(25)) ~ '%') %}
-{% endif %}
-{% if mosaic_settings.layout == 'grid' %}
-  {% if mosaic_settings.cols %}{% set _ = style_parts.append('grid-template-columns: repeat(' ~ mosaic_settings.cols ~ ', 1fr)') %}{% endif %}
-  {% if mosaic_settings.rows %}{% set _ = style_parts.append('grid-template-rows: repeat(' ~ mosaic_settings.rows ~ ', 1fr)') %}{% endif %}
-  {% if mosaic_settings.rows == 1 %}{% set _ = style_parts.append('grid-auto-flow: column; grid-auto-columns: 1fr') %}{% endif %}
-{% endif %}
-<div id="mosaic" class="mosaic-grid layout-{{ mosaic_settings.layout }} cols-{{ mosaic_settings.cols }} stream-count-{{ stream_settings|length }}{% if mosaic_settings.layout == 'pip' %} corner-{{ mosaic_settings.pip_corner }}{% endif %}"{% if style_parts %} style="{{ style_parts|join('; ') }}"{% endif %}>
-  {% if mosaic_settings.layout == 'pip' %}
-    {% if mosaic_settings.pip_main %}
-    <div class="mosaic-cell main">
-      <iframe src="{{ url_for('render_stream', name=mosaic_settings.pip_main) }}" allow="autoplay" loading="lazy" scrolling="no"></iframe>
+{% set stream_items = stream_settings.items()|list %}
+<div id="mosaic" class="mosaic-grid stream-count-{{ stream_items|length }}" data-stream-count="{{ stream_items|length }}">
+  {% if stream_items %}
+    {% for stream_id, conf in stream_items %}
+    <div class="mosaic-cell">
+      <iframe src="{{ url_for('render_stream', name=(conf.label if conf.label else stream_id)|slugify) }}" allow="autoplay" loading="lazy" scrolling="no"></iframe>
     </div>
-    {% endif %}
-    {% if mosaic_settings.pip_pip %}
-    <div class="mosaic-cell pip">
-      <iframe src="{{ url_for('render_stream', name=mosaic_settings.pip_pip) }}" allow="autoplay" loading="lazy" scrolling="no"></iframe>
-    </div>
-    {% endif %}
+    {% endfor %}
   {% else %}
-    {% if mosaic_settings.layout == 'focus' %}
-      {% set mode = mosaic_settings.focus_mode or '1-5' %}
-      {% set pos = mosaic_settings.focus_pos or 'bottom-right' %}
-      {% set focus_main = mosaic_settings.focus_main %}
-      {# Build grid definition (#cols/#rows and named areas) for the chosen mode #}
-      {% if mode == '1-2' %}
-        {% if pos == 'right' %}
-          {% set gcols = 2 %}{% set grows = 2 %}
-          {% set areas = [['a','main'],['b','main']] %}
-        {% else %}
-          {% set gcols = 2 %}{% set grows = 2 %}
-          {% set areas = [['main','a'],['main','b']] %}
-        {% endif %}
-      {% elif mode == '1-3' %}
-        {% set gcols = 3 %}{% set grows = 2 %}
-        {% if pos == 'top' %}
-          {% set areas = [['main','main','main'],['a','b','c']] %}
-        {% else %}
-          {% set areas = [['a','b','c'],['main','main','main']] %}
-        {% endif %}
-      {% else %}{# default 1-5 #}
-        {% set gcols = 3 %}{% set grows = 3 %}
-        {% if pos == 'top-left' %}
-          {% set areas = [['main','main','a'],['main','main','b'],['c','d','e']] %}
-        {% elif pos == 'top-right' %}
-          {% set areas = [['a','main','main'],['b','main','main'],['c','d','e']] %}
-        {% elif pos == 'bottom-left' %}
-          {% set areas = [['a','b','c'],['main','main','d'],['main','main','e']] %}
-        {% else %}{# bottom-right #}
-          {% set areas = [['a','b','c'],['d','main','main'],['e','main','main']] %}
-        {% endif %}
-      {% endif %}
-      {# Determine slot names for this mode, in order #}
-      {% if mode == '1-2' %}
-        {% set slots = ['main','a','b'] %}
-      {% elif mode == '1-3' %}
-        {% set slots = ['main','a','b','c'] %}
-      {% else %}
-        {% set slots = ['main','a','b','c','d','e'] %}
-      {% endif %}
-      {# Choose stream order: focused first (if present), then the rest #}
-      {% set ids = stream_settings.keys()|list %}
-      {% if focus_main and focus_main in ids %}
-        {% set ordered_ids = [focus_main] + (ids|reject('equalto', focus_main)|list) %}
-      {% else %}
-        {% set ordered_ids = ids %}
-      {% endif %}
-      {% set count = [slots|length, ordered_ids|length]|min %}
-      <div class="focus-grid" style="display:grid;grid-template-columns:repeat({{gcols}},1fr);grid-template-rows:repeat({{grows}},1fr);grid-template-areas:{% for row in areas %}'{{ row|join(' ') }}'{% if not loop.last %} {% endif %}{% endfor %}; gap: 6px; width:100%; height:100%;">
-      {% for i in range(count) %}
-        {% set stream_id = ordered_ids[i] %}
-        {% set conf = stream_settings[stream_id] %}
-        {% set area = slots[i] %}
-        <div class="mosaic-cell" style="grid-area: {{ area }};">
-          <iframe src="{{ url_for('render_stream', name=(conf.label if conf.label else stream_id)|slugify) }}" allow="autoplay" loading="lazy" scrolling="no"></iframe>
-        </div>
-      {% endfor %}
-      </div>
-    {% else %}
-      {% if mosaic_settings.layout == 'grid' %}
-        {% set items = stream_settings.items()|list %}
-        {% set limit = mosaic_settings.rows and mosaic_settings.cols and (mosaic_settings.rows * mosaic_settings.cols) or None %}
-        {% set items = items[:limit] if limit else items %}
-        {% for stream_id, conf in items %}
-        <div class="mosaic-cell">
-          <iframe src="{{ url_for('render_stream', name=(conf.label if conf.label else stream_id)|slugify) }}" allow="autoplay" loading="lazy" scrolling="no"></iframe>
-        </div>
-        {% endfor %}
-      {% else %}
-        {% for stream_id, conf in stream_settings.items() %}
-        <div class="mosaic-cell">
-          <iframe src="{{ url_for('render_stream', name=(conf.label if conf.label else stream_id)|slugify) }}" allow="autoplay" loading="lazy" scrolling="no"></iframe>
-        </div>
-        {% endfor %}
-      {% endif %}
-    {% endif %}
+    <div class="mosaic-empty">
+      <p>No active streams configured.</p>
+    </div>
   {% endif %}
 </div>
 <script src="https://cdn.socket.io/4.0.1/socket.io.min.js"></script>
