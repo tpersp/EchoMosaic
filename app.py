@@ -1428,12 +1428,31 @@ def _create_video_thumbnail(media_path: Path) -> Optional[Image.Image]:
         return None
     try:
         frame_count = capture.get(cv2.CAP_PROP_FRAME_COUNT) or 0
-        if frame_count and frame_count > 30:
+        target_frame: Optional[int] = None
+        if frame_count and frame_count > 0:
+            start = int(max(0, frame_count * 0.15))
+            end = int(max(start + 1, frame_count * 0.85))
+            if end <= start:
+                end = start + 1
             try:
-                capture.set(cv2.CAP_PROP_POS_FRAMES, min(30, frame_count - 1))
+                target_frame = random.randint(start, max(start + 1, end - 1))
+                capture.set(cv2.CAP_PROP_POS_FRAMES, float(target_frame))
+            except Exception:
+                target_frame = None
+        if target_frame is None:
+            try:
+                duration_ms = capture.get(cv2.CAP_PROP_POS_MSEC) or 0
+                if duration_ms > 0:
+                    capture.set(cv2.CAP_PROP_POS_MSEC, duration_ms * 0.5)
             except Exception:
                 pass
         success, frame = capture.read()
+        if (not success or frame is None) and frame_count and frame_count > 0:
+            try:
+                capture.set(cv2.CAP_PROP_POS_FRAMES, max(0.0, float(frame_count) * 0.5))
+                success, frame = capture.read()
+            except Exception:
+                pass
     finally:
         capture.release()
     if not success or frame is None:
