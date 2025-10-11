@@ -9,19 +9,139 @@
 <body>
 <!-- NOTE: Do not add headers/toolbars here; keep the streams view UI-free. -->
 {% set stream_items = stream_settings.items()|list %}
-<div id="mosaic" class="mosaic-grid stream-count-{{ stream_items|length }}" data-stream-count="{{ stream_items|length }}">
-  {% if stream_items %}
-    {% for stream_id, conf in stream_items %}
-    <div class="mosaic-cell">
-      <iframe src="{{ url_for('render_stream', name=(conf.label if conf.label else stream_id)|slugify) }}" allow="autoplay" loading="lazy" scrolling="no"></iframe>
-    </div>
-    {% endfor %}
-  {% else %}
+{% set stream_count = stream_items|length %}
+{% if mosaic_settings is defined and mosaic_settings %}
+  {% set layout = mosaic_settings %}
+{% else %}
+  {% set layout = None %}
+{% endif %}
+{% if layout %}
+  {% set layout_type = layout.layout or 'grid' %}
+  {% set style_parts = [] %}
+  {% if layout_type == 'pip' %}
+    {% set _ = style_parts.append('--pip-size: ' ~ (layout.pip_size|default(25)) ~ '%') %}
+  {% elif layout_type == 'grid' %}
+    {% if layout.cols %}{% set _ = style_parts.append('grid-template-columns: repeat(' ~ layout.cols ~ ', 1fr)') %}{% endif %}
+    {% if layout.rows %}{% set _ = style_parts.append('grid-template-rows: repeat(' ~ layout.rows ~ ', 1fr)') %}{% endif %}
+    {% if layout.rows == 1 %}{% set _ = style_parts.append('grid-auto-flow: column; grid-auto-columns: 1fr') %}{% endif %}
+  {% endif %}
+  <div id="mosaic" class="mosaic-grid layout-{{ layout_type }}{% if layout_type == 'pip' %} corner-{{ layout.pip_corner|default('bottom-right') }}{% endif %}" data-stream-count="{{ stream_count }}"{% if style_parts %} style="{{ style_parts|join('; ') }}"{% endif %}>
+    {% if stream_items %}
+      {% if layout_type == 'pip' %}
+        {% set ids = stream_settings.keys()|list %}
+        {% set main_id = layout.pip_main if layout.pip_main in ids else (ids[0] if ids else None) %}
+        {% set alt_ids = ids|reject('equalto', main_id)|list %}
+        {% set pip_id = layout.pip_pip if layout.pip_pip in ids and layout.pip_pip != main_id else (alt_ids[0] if alt_ids else None) %}
+        {% if main_id %}
+        <div class="mosaic-cell main">
+          {% set conf = stream_settings[main_id] %}
+          <iframe src="{{ url_for('render_stream', name=(conf.label if conf.label else main_id)|slugify) }}" allow="autoplay" loading="lazy" scrolling="no"></iframe>
+        </div>
+          {% if pip_id %}
+          <div class="mosaic-cell pip">
+            {% set pip_conf = stream_settings[pip_id] %}
+            <iframe src="{{ url_for('render_stream', name=(pip_conf.label if pip_conf.label else pip_id)|slugify) }}" allow="autoplay" loading="lazy" scrolling="no"></iframe>
+          </div>
+          {% endif %}
+        {% else %}
+          {% for stream_id, conf in stream_items %}
+          <div class="mosaic-cell">
+            <iframe src="{{ url_for('render_stream', name=(conf.label if conf.label else stream_id)|slugify) }}" allow="autoplay" loading="lazy" scrolling="no"></iframe>
+          </div>
+          {% endfor %}
+        {% endif %}
+      {% elif layout_type == 'focus' %}
+        {% set mode = layout.focus_mode or '1-5' %}
+        {% if mode not in ['1-2', '1-3', '1-5'] %}{% set mode = '1-5' %}{% endif %}
+        {% set pos = layout.focus_pos or ('right' if mode == '1-2' else ('bottom' if mode == '1-3' else 'bottom-right')) %}
+        {% set ids = stream_settings.keys()|list %}
+        {% set focus_candidate = layout.focus_main if layout.focus_main in ids else (ids[0] if ids else None) %}
+        {% if mode == '1-2' %}
+          {% set gcols = 2 %}{% set grows = 2 %}
+          {% if pos == 'right' %}
+            {% set areas = [['a','main'],['b','main']] %}
+          {% else %}
+            {% set areas = [['main','a'],['main','b']] %}
+          {% endif %}
+          {% set slots = ['main','a','b'] %}
+        {% elif mode == '1-3' %}
+          {% set gcols = 3 %}{% set grows = 2 %}
+          {% if pos == 'top' %}
+            {% set areas = [['main','main','main'],['a','b','c']] %}
+          {% else %}
+            {% set areas = [['a','b','c'],['main','main','main']] %}
+          {% endif %}
+          {% set slots = ['main','a','b','c'] %}
+        {% else %}
+          {% set gcols = 3 %}{% set grows = 3 %}
+          {% if pos == 'top-left' %}
+            {% set areas = [['main','main','a'],['main','main','b'],['c','d','e']] %}
+          {% elif pos == 'top-right' %}
+            {% set areas = [['a','main','main'],['b','main','main'],['c','d','e']] %}
+          {% elif pos == 'bottom-left' %}
+            {% set areas = [['a','b','c'],['main','main','d'],['main','main','e']] %}
+          {% else %}
+            {% set areas = [['a','b','c'],['d','main','main'],['e','main','main']] %}
+          {% endif %}
+          {% set slots = ['main','a','b','c','d','e'] %}
+        {% endif %}
+        {% if focus_candidate %}
+          {% set ordered_ids = [focus_candidate] + (ids|reject('equalto', focus_candidate)|list) %}
+        {% else %}
+          {% set ordered_ids = ids %}
+        {% endif %}
+        {% set count = [slots|length, ordered_ids|length]|min %}
+        {% if count %}
+        <div class="focus-grid" style="grid-template-columns:repeat({{gcols}},1fr);grid-template-rows:repeat({{grows}},1fr);grid-template-areas:{% for row in areas %}'{{ row|join(' ') }}'{% if not loop.last %} {% endif %}{% endfor %};">
+          {% for i in range(count) %}
+            {% set stream_id = ordered_ids[i] %}
+            {% set area = slots[i] %}
+            {% if stream_id in stream_settings %}
+            {% set conf = stream_settings[stream_id] %}
+            <div class="mosaic-cell" style="grid-area: {{ area }};">
+              <iframe src="{{ url_for('render_stream', name=(conf.label if conf.label else stream_id)|slugify) }}" allow="autoplay" loading="lazy" scrolling="no"></iframe>
+            </div>
+            {% endif %}
+          {% endfor %}
+        </div>
+        {% else %}
+          {% for stream_id, conf in stream_items %}
+          <div class="mosaic-cell">
+            <iframe src="{{ url_for('render_stream', name=(conf.label if conf.label else stream_id)|slugify) }}" allow="autoplay" loading="lazy" scrolling="no"></iframe>
+          </div>
+          {% endfor %}
+        {% endif %}
+      {% else %}
+        {% set items = stream_items %}
+        {% set limit = layout.rows and layout.cols and (layout.rows * layout.cols) or None %}
+        {% if limit %}{% set items = items[:limit] %}{% endif %}
+        {% for stream_id, conf in items %}
+        <div class="mosaic-cell">
+          <iframe src="{{ url_for('render_stream', name=(conf.label if conf.label else stream_id)|slugify) }}" allow="autoplay" loading="lazy" scrolling="no"></iframe>
+        </div>
+        {% endfor %}
+      {% endif %}
+    {% else %}
     <div class="mosaic-empty">
       <p>No active streams configured.</p>
     </div>
-  {% endif %}
-</div>
+    {% endif %}
+  </div>
+{% else %}
+  <div id="mosaic" class="mosaic-grid stream-count-{{ stream_count }}" data-stream-count="{{ stream_count }}">
+    {% if stream_items %}
+      {% for stream_id, conf in stream_items %}
+      <div class="mosaic-cell">
+        <iframe src="{{ url_for('render_stream', name=(conf.label if conf.label else stream_id)|slugify) }}" allow="autoplay" loading="lazy" scrolling="no"></iframe>
+      </div>
+      {% endfor %}
+    {% else %}
+    <div class="mosaic-empty">
+      <p>No active streams configured.</p>
+    </div>
+    {% endif %}
+  </div>
+{% endif %}
 <script src="https://cdn.socket.io/4.0.1/socket.io.min.js"></script>
 <script>
 // Apply saved theme silently (no UI elements on streams page)

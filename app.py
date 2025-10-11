@@ -3495,6 +3495,58 @@ def stream_thumbnail_image(stream_id):
     return response
 
 
+
+
+def _normalize_group_layout(layout: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """Return a sanitized layout configuration for group mosaics."""
+    if not isinstance(layout, dict):
+        return None
+    allowed_layouts = {"grid", "focus", "pip"}
+    layout_value_raw = layout.get("layout", "grid")
+    layout_value = str(layout_value_raw).strip().lower() if isinstance(layout_value_raw, str) else "grid"
+    if layout_value not in allowed_layouts:
+        layout_value = "grid"
+
+    def _bounded_int(value: Any, lower: int, upper: int) -> Optional[int]:
+        maybe = _maybe_int(value)
+        if maybe is None:
+            return None
+        bounded = int(_clamp(maybe, lower, upper))
+        return bounded
+
+    sanitized: Dict[str, Any] = {"layout": layout_value}
+
+    cols = _bounded_int(layout.get("cols"), 1, 8)
+    rows = _bounded_int(layout.get("rows"), 1, 8)
+    sanitized["cols"] = cols
+    sanitized["rows"] = rows
+
+    focus_mode = layout.get("focus_mode") if isinstance(layout.get("focus_mode"), str) else None
+    if focus_mode not in {"1-2", "1-3", "1-5"}:
+        focus_mode = "1-5"
+    focus_pos = layout.get("focus_pos") if isinstance(layout.get("focus_pos"), str) else None
+    allowed_focus_pos = {"left", "right", "top", "bottom", "top-left", "top-right", "bottom-left", "bottom-right"}
+    if focus_pos not in allowed_focus_pos:
+        focus_pos = "bottom-right" if focus_mode == "1-5" else ("right" if focus_mode == "1-2" else "bottom")
+    focus_main = layout.get("focus_main") if isinstance(layout.get("focus_main"), str) else None
+    sanitized["focus_mode"] = focus_mode
+    sanitized["focus_pos"] = focus_pos
+    sanitized["focus_main"] = focus_main
+
+    pip_main = layout.get("pip_main") if isinstance(layout.get("pip_main"), str) else None
+    pip_pip = layout.get("pip_pip") if isinstance(layout.get("pip_pip"), str) else None
+    pip_corner = layout.get("pip_corner") if isinstance(layout.get("pip_corner"), str) else None
+    if pip_corner not in {"top-left", "top-right", "bottom-left", "bottom-right"}:
+        pip_corner = "bottom-right"
+    pip_size = _bounded_int(layout.get("pip_size"), 10, 50) or 25
+
+    sanitized["pip_main"] = pip_main
+    sanitized["pip_pip"] = pip_pip
+    sanitized["pip_corner"] = pip_corner
+    sanitized["pip_size"] = pip_size
+
+    return sanitized
+
 @app.route("/stream/group/<name>")
 def stream_group(name):
     groups = settings.get("_groups", {})
@@ -3505,12 +3557,14 @@ def stream_group(name):
     if not group_def:
         return f"No group '{name}'", 404
     # Support both legacy list and new object
+    layout_conf: Optional[Dict[str, Any]] = None
     if isinstance(group_def, dict):
         members = group_def.get("streams", [])
+        layout_conf = _normalize_group_layout(group_def.get("layout"))
     else:
         members = list(group_def)
     streams = {k: settings[k] for k in members if k in settings}
-    return render_template("streams.html", stream_settings=streams)
+    return render_template("streams.html", stream_settings=streams, mosaic_settings=layout_conf)
 
 @socketio.on('video_control')
 def handle_video_control(payload):
