@@ -794,6 +794,42 @@
     });
   }
 
+  function attachTagEditor(card) {
+    if (!card || !card.dataset.stream) {
+      return;
+    }
+    const editor = card.querySelector('.tag-editor');
+    if (!editor) {
+      return;
+    }
+    const input = editor.querySelector('.tag-entry');
+    const initial = getCardTags(card);
+    setCardTags(card, initial);
+    if (input) {
+      const commit = () => {
+        const normalized = normalizeTagInput(input.value);
+        input.value = '';
+        if (!normalized) {
+          return;
+        }
+        const current = getCardTags(card);
+        if (current.some(tag => tag.toLowerCase() === normalized.toLowerCase())) {
+          return;
+        }
+        requestTagUpdate(card, current.concat([normalized]));
+      };
+      input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' || e.key === ',') {
+          e.preventDefault();
+          commit();
+        }
+      });
+      input.addEventListener('blur', () => {
+        commit();
+      });
+    }
+  }
+
   // Group manager logic
   function makeEl(tag, attrs = {}, children = []) {
     const e = document.createElement(tag);
