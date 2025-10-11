@@ -33,6 +33,7 @@ except Exception:
     requests = None
 
 from stablehorde import StableHorde, StableHordeError, StableHordeCancelled
+from update_helpers import backup_user_state, restore_user_state
 
 app = Flask(__name__, static_folder="static", static_url_path="/static")
 socketio = SocketIO(app)
@@ -2891,20 +2892,36 @@ def update_app():
     def git_cmd(args, cwd=repo_path):
         return subprocess.check_output(["git", *args], cwd=cwd, stderr=subprocess.STDOUT).decode().strip()
     try:
-        current_commit = git_cmd(["rev-parse", "HEAD"]) 
+        current_commit = git_cmd(["rev-parse", "HEAD"])
     except Exception:
         current_commit = None
+    try:
+        backup_dir = backup_user_state(repo_path)
+    except Exception:
+        logger.exception("Failed to back up user data before update")
+        return render_template(
+            "update_status.html",
+            message="Unable to back up user data; update aborted.",
+        )
+    restore_error = None
     try:
         subprocess.check_call(["git", "fetch"], cwd=repo_path)
         subprocess.check_call(["git", "checkout", branch], cwd=repo_path)
         subprocess.check_call(["git", "reset", "--hard", f"origin/{branch}"], cwd=repo_path)
     except FileNotFoundError:
-        return render_template(
-            "update_status.html",
-            message="Git executable not found. Please install Git to update the application.",
-        )
+        update_error = "Git executable not found. Please install Git to update the application."
+        return render_template("update_status.html", message=update_error)
     except subprocess.CalledProcessError as e:
-        return render_template("update_status.html", message=f"Git update failed: {e}")
+        update_error = f"Git update failed: {e}"
+        return render_template("update_status.html", message=update_error)
+    finally:
+        try:
+            restore_user_state(repo_path, backup_dir, cleanup=True)
+        except Exception:
+            restore_error = "Failed to restore user data after update."
+            logger.exception("Failed to restore user data after update")
+    if restore_error:
+        return render_template("update_status.html", message=restore_error)
     # record update history
     try:
         new_commit = git_cmd(["rev-parse", "HEAD"]) if 'git_cmd' in locals() else None

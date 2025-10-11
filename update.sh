@@ -25,12 +25,49 @@ fi
 
 cd "$INSTALL_DIR"
 
+PYTHON_BIN="$INSTALL_DIR/venv/bin/python"
+if [ ! -x "$PYTHON_BIN" ]; then
+  if command -v python3 >/dev/null 2>&1; then
+    PYTHON_BIN="$(command -v python3)"
+  elif command -v python >/dev/null 2>&1; then
+    PYTHON_BIN="$(command -v python)"
+  else
+    echo "Python interpreter not found."
+    exit 1
+  fi
+fi
+
+BACKUP_DIR="$("$PYTHON_BIN" - "$INSTALL_DIR" <<'PY'
+import sys
+from update_helpers import backup_user_state
+
+print(backup_user_state(sys.argv[1]), end="")
+PY
+)"
+
+restore_and_cleanup() {
+  if [ -n "${BACKUP_DIR:-}" ]; then
+    "$PYTHON_BIN" - "$INSTALL_DIR" "$BACKUP_DIR" <<'PY'
+import sys
+from update_helpers import restore_user_state
+
+restore_user_state(sys.argv[1], sys.argv[2], cleanup=True)
+PY
+    BACKUP_DIR=""
+  fi
+}
+
+trap restore_and_cleanup EXIT
+
 echo -e "\nFetching latest changes from origin..."
 # Reset any local changes and sync with the remote branch
 git fetch origin
 git checkout "$BRANCH"
 git reset --hard "origin/${BRANCH}"
 git clean -fd
+
+restore_and_cleanup
+trap - EXIT
 
 echo -e "\nUpdating Python dependencies..."
 "$INSTALL_DIR/venv/bin/pip" install --upgrade -r requirements.txt
