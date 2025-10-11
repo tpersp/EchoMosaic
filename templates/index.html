@@ -99,6 +99,7 @@
         <div class="thumbnail-area is-loading" data-thumbnail>
           <img class="thumbnail-image" alt="Preview for {{ conf.label if conf.label else stream_id|capitalize }}" loading="lazy" decoding="async" hidden>
           <div class="thumbnail-placeholder">Loading preview...</div>
+          <button type="button" class="thumbnail-refresh-btn" aria-label="Refresh preview" title="Refresh preview">&#10227;</button>
           <div class="thumbnail-badge" hidden></div>
           <div class="thumbnail-updated" hidden></div>
         </div>
@@ -691,6 +692,7 @@
     const placeholder = area.querySelector('.thumbnail-placeholder');
     const badge = area.querySelector('.thumbnail-badge');
     const updated = area.querySelector('.thumbnail-updated');
+    const refreshBtn = area.querySelector('.thumbnail-refresh-btn');
 
     const showError = (message) => {
       area.classList.add('is-error');
@@ -698,6 +700,10 @@
       setThumbnailPlaceholder(placeholder, true, message || 'Preview unavailable');
       if (badge) badge.hidden = true;
       if (updated) updated.hidden = true;
+      if (refreshBtn) {
+        refreshBtn.disabled = false;
+        refreshBtn.classList.remove('is-active');
+      }
     };
 
     if (!payload) {
@@ -731,6 +737,10 @@
       setThumbnailPlaceholder(placeholder, false);
       if (img) {
         img.hidden = false;
+      }
+      if (refreshBtn) {
+        refreshBtn.disabled = false;
+        refreshBtn.classList.remove('is-active');
       }
     };
 
@@ -788,19 +798,27 @@
     thumbnailTimers.set(streamId, timer);
   }
 
-  function refreshThumbnail(card, streamId) {
-    if (!card || !streamId) return;
+  function refreshThumbnail(card, streamId, options = {}) {
+    if (!card || !streamId) return Promise.resolve();
+    const { showSpinner = true } = options;
     if (thumbnailTimers.has(streamId)) {
       clearTimeout(thumbnailTimers.get(streamId));
       thumbnailTimers.delete(streamId);
     }
     const area = card.querySelector('[data-thumbnail]');
-    if (!area) return;
+    if (!area) return Promise.resolve();
     const placeholder = area.querySelector('.thumbnail-placeholder');
-    area.classList.add('is-loading');
-    setThumbnailPlaceholder(placeholder, true, 'Loading preview...');
+    const refreshBtn = area.querySelector('.thumbnail-refresh-btn');
+    if (refreshBtn) {
+      refreshBtn.disabled = true;
+      refreshBtn.classList.add('is-active');
+    }
+    if (showSpinner) {
+      area.classList.add('is-loading');
+      setThumbnailPlaceholder(placeholder, true, 'Loading preview...');
+    }
 
-    fetch(`/stream/thumbnail/${encodeURIComponent(streamId)}`)
+    const request = fetch(`/stream/thumbnail/${encodeURIComponent(streamId)}`)
       .then(res => {
         if (!res.ok) throw new Error(`Thumbnail response ${res.status}`);
         return res.json();
@@ -813,7 +831,15 @@
         console.warn('Thumbnail refresh failed for', streamId, err);
         updateThumbnailUI(card, null);
         scheduleThumbnailRefresh(streamId, card, THUMBNAIL_RETRY_MS);
+      })
+      .finally(() => {
+        if (refreshBtn) {
+          refreshBtn.disabled = false;
+          refreshBtn.classList.remove('is-active');
+        }
       });
+
+    return request;
   }
 
   function initThumbnail(card) {
@@ -825,7 +851,15 @@
     area.classList.add('is-loading');
     const placeholder = area.querySelector('.thumbnail-placeholder');
     setThumbnailPlaceholder(placeholder, true, 'Loading preview...');
-    refreshThumbnail(card, streamId);
+    const refreshBtn = area.querySelector('.thumbnail-refresh-btn');
+    if (refreshBtn) {
+      refreshBtn.addEventListener('click', (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        refreshThumbnail(card, streamId, { showSpinner: true });
+      });
+    }
+    refreshThumbnail(card, streamId, { showSpinner: true });
   }
 
   // No layout settings for global /stream; it adapts dynamically
