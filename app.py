@@ -1,5 +1,5 @@
 from flask import Flask, jsonify, send_file, request, render_template, redirect, url_for
-from flask_socketio import SocketIO
+from flask_socketio import SocketIO, join_room, leave_room
 import json
 import atexit
 import logging
@@ -161,6 +161,12 @@ IMAGE_CACHE: Dict[str, Dict[str, Any]] = {}
 IMAGE_CACHE_LOCK = threading.Lock()
 STREAM_RUNTIME_STATE: Dict[str, Dict[str, Any]] = {}
 STREAM_RUNTIME_LOCK = threading.Lock()
+
+STREAM_PLAYBACK_HISTORY_LIMIT = 50
+STREAM_UPDATE_EVENT = "stream_update"
+STREAM_STATE_EVENT = "stream_state"
+
+playback_manager: Optional["StreamPlaybackManager"] = None
 
 
 def _normalize_folder_key(folder: Optional[str]) -> str:
@@ -1011,6 +1017,8 @@ def import_settings():
             STREAM_RUNTIME_STATE.pop(stream_id, None)
         if auto_scheduler is not None:
             auto_scheduler.remove(stream_id)
+        if playback_manager is not None:
+            playback_manager.remove_stream(stream_id)
 
     tags_snapshot = get_global_tags()
     for stream_id in new_streams:
@@ -1025,6 +1033,8 @@ def import_settings():
             stream_url=conf.get("stream_url"),
             source="settings_import",
         )
+        if playback_manager is not None:
+            playback_manager.update_stream_config(stream_id, conf)
         if auto_scheduler is not None:
             auto_scheduler.reschedule(stream_id)
 
@@ -1675,6 +1685,541 @@ def _resolve_media_path(rel_path: Optional[str]) -> Optional[Path]:
     return target
 
 
+class StreamPlaybackState:
+    """Track shared playback data for a single stream."""
+
+    def __init__(self, stream_id: str):
+        self.stream_id = stream_id
+        self.mode: str = "random"
+        self.media_mode: str = MEDIA_MODE_IMAGE
+        self.folder: str = "all"
+        self.hide_nsfw: bool = False
+        self.shuffle: bool = True
+        self.duration_setting: float = 5.0
+        self.video_playback_mode: str = "duration"
+        self.video_volume: float = 1.0
+        self.current_media: Optional[Dict[str, Any]] = None
+        self.started_at: Optional[float] = None
+        self.position: float = 0.0
+        self.duration: Optional[float] = None
+        self.is_paused: bool = False
+        self.next_auto_event: Optional[float] = None
+        self.sequence_index: int = 0
+        self.history: List[Dict[str, Any]] = []
+        self.history_index: int = -1
+        self.last_reason: str = "init"
+        self.error: Optional[str] = None
+        self.updated_at: float = time.time()
+        self._source_signature: Optional[Tuple[Any, ...]] = None
+        self._duration_signature: Optional[Tuple[Any, ...]] = None
+
+    def apply_config(self, conf: Dict[str, Any]) -> Dict[str, bool]:
+        previous_should_run = self.should_run()
+        previous_source_signature = self._source_signature
+        previous_duration_signature = self._duration_signature
+
+        mode_raw = conf.get("mode")
+        new_mode = mode_raw.strip().lower() if isinstance(mode_raw, str) else "random"
+
+        media_mode_raw = conf.get("media_mode")
+        new_media_mode = media_mode_raw.strip().lower() if isinstance(media_mode_raw, str) else ""
+        if new_media_mode not in (MEDIA_MODE_IMAGE, MEDIA_MODE_VIDEO):
+            inferred = _infer_media_mode(conf)
+            if inferred in (MEDIA_MODE_IMAGE, MEDIA_MODE_VIDEO):
+                new_media_mode = inferred
+            else:
+                new_media_mode = MEDIA_MODE_IMAGE
+
+        folder_raw = conf.get("folder")
+        new_folder = folder_raw.strip() if isinstance(folder_raw, str) and folder_raw.strip() else "all"
+
+        new_hide_nsfw = bool(conf.get("hide_nsfw"))
+        shuffle_value = conf.get("shuffle")
+        new_shuffle = False if shuffle_value is False else True
+
+        duration_raw = conf.get("duration")
+        try:
+            new_duration = float(duration_raw)
+        except (TypeError, ValueError):
+            new_duration = self.duration_setting
+        if not (new_duration and new_duration > 0):
+            new_duration = 5.0
+
+        playback_raw = conf.get("video_playback_mode")
+        new_playback_mode = playback_raw.strip().lower() if isinstance(playback_raw, str) else "duration"
+        if new_playback_mode not in VIDEO_PLAYBACK_MODES:
+            new_playback_mode = "duration"
+
+        volume_raw = conf.get("video_volume")
+        try:
+            new_volume = float(volume_raw)
+        except (TypeError, ValueError):
+            new_volume = self.video_volume
+        new_volume = max(0.0, min(1.0, new_volume))
+
+        self.mode = new_mode
+        self.media_mode = new_media_mode
+        self.folder = new_folder
+        self.hide_nsfw = new_hide_nsfw
+        self.shuffle = new_shuffle
+        self.duration_setting = new_duration
+        self.video_playback_mode = new_playback_mode
+        self.video_volume = new_volume
+
+        new_source_signature = (self.mode, self.media_mode, self.folder, self.hide_nsfw, self.shuffle)
+        new_duration_signature = (self.duration_setting, self.video_playback_mode)
+
+        self._source_signature = new_source_signature
+        self._duration_signature = new_duration_signature
+
+        enabled_changed = previous_should_run != self.should_run()
+        sources_changed = new_source_signature != previous_source_signature
+        duration_changed = new_duration_signature != previous_duration_signature
+        return {
+            "enabled_changed": enabled_changed,
+            "sources_changed": sources_changed,
+            "duration_changed": duration_changed,
+        }
+
+    def should_run(self) -> bool:
+        return self.mode == "random" and self.media_mode in (MEDIA_MODE_IMAGE, MEDIA_MODE_VIDEO)
+
+    def reset_state(self) -> None:
+        self.current_media = None
+        self.started_at = None
+        self.position = 0.0
+        self.duration = None
+        self.is_paused = False
+        self.next_auto_event = None
+        self.sequence_index = 0
+        self.history = []
+        self.history_index = -1
+        self.error = None
+        self.last_reason = "reset"
+        self.updated_at = time.time()
+
+    def set_error(self, code: str) -> None:
+        self.current_media = None
+        self.started_at = None
+        self.position = 0.0
+        self.duration = None
+        self.is_paused = False
+        self.next_auto_event = None
+        self.error = code
+        self.last_reason = code
+        self.updated_at = time.time()
+
+    def get_position(self, now: Optional[float] = None) -> float:
+        if now is None:
+            now = time.time()
+        if self.current_media is None:
+            return 0.0
+        if self.is_paused or self.started_at is None:
+            return max(0.0, self.position)
+        return max(0.0, self.position + (now - self.started_at))
+
+    def pause(self) -> bool:
+        if self.is_paused or not self.current_media:
+            return False
+        now = time.time()
+        self.position = self.get_position(now)
+        self.is_paused = True
+        self.started_at = now
+        self.next_auto_event = None
+        self.updated_at = now
+        return True
+
+    def resume(self) -> bool:
+        if not self.current_media or not self.is_paused:
+            return False
+        now = time.time()
+        self.is_paused = False
+        self.started_at = now
+        if self.duration is not None:
+            remaining = max(0.0, self.duration - self.position)
+            if remaining > 0:
+                self.next_auto_event = now + remaining
+            else:
+                self.next_auto_event = now
+        self.updated_at = now
+        return True
+
+    def _append_history_entry(self, media: Dict[str, Any], playback_mode: Optional[str]) -> None:
+        entry = {
+            "media": dict(media),
+            "duration": self.duration,
+            "playback_mode": playback_mode,
+        }
+        self.history.append(entry)
+        if len(self.history) > STREAM_PLAYBACK_HISTORY_LIMIT:
+            overflow = len(self.history) - STREAM_PLAYBACK_HISTORY_LIMIT
+            self.history = self.history[overflow:]
+        self.history_index = len(self.history) - 1
+
+    def set_media(
+        self,
+        media: Dict[str, Any],
+        *,
+        duration: Optional[float],
+        source: str,
+        playback_mode: Optional[str],
+        history_index: Optional[int] = None,
+        add_to_history: bool = True,
+    ) -> None:
+        now = time.time()
+        actual_duration = duration if duration is None or duration > 0 else None
+        self.current_media = dict(media)
+        self.duration = actual_duration
+        self.started_at = now
+        self.position = 0.0
+        self.is_paused = False
+        self.error = None
+        self.last_reason = source
+        self.updated_at = now
+        if actual_duration is not None:
+            self.next_auto_event = now + actual_duration
+        else:
+            self.next_auto_event = None
+
+        if add_to_history:
+            if self.history_index < len(self.history) - 1:
+                self.history = self.history[: self.history_index + 1]
+            self._append_history_entry(media, playback_mode)
+        elif history_index is not None:
+            self.history_index = history_index
+
+    def get_history_entry(self, index: int) -> Optional[Dict[str, Any]]:
+        if 0 <= index < len(self.history):
+            return self.history[index]
+        return None
+
+    def status(self) -> str:
+        if self.error:
+            return "error"
+        if not self.current_media:
+            return "idle"
+        if self.is_paused:
+            return "paused"
+        return "playing"
+
+    def to_payload(self) -> Dict[str, Any]:
+        now = time.time()
+        position = self.get_position(now)
+        if self.duration is not None:
+            position = min(self.duration, position)
+        payload = {
+            "stream_id": self.stream_id,
+            "mode": self.mode,
+            "media_mode": self.media_mode,
+            "status": self.status(),
+            "media": dict(self.current_media) if self.current_media else None,
+            "duration": self.duration,
+            "position": position,
+            "started_at": self.started_at,
+            "is_paused": self.is_paused,
+            "next_update_at": self.next_auto_event,
+            "history_index": self.history_index,
+            "history_length": len(self.history),
+            "video_playback_mode": self.video_playback_mode if self.media_mode == MEDIA_MODE_VIDEO else None,
+            "video_volume": self.video_volume,
+            "error": self.error,
+            "source": self.last_reason,
+            "server_time": now,
+        }
+        return payload
+
+
+def _compute_video_duration_seconds(rel_path: Optional[str]) -> Optional[float]:
+    if not rel_path:
+        return None
+    absolute = _resolve_media_path(rel_path)
+    if not absolute:
+        return None
+    if cv2 is None:
+        return None
+    capture = cv2.VideoCapture(str(absolute))
+    if not capture.isOpened():
+        capture.release()
+        return None
+    duration = None
+    try:
+        fps = capture.get(cv2.CAP_PROP_FPS) or 0.0
+        frame_count = capture.get(cv2.CAP_PROP_FRAME_COUNT) or 0.0
+        if fps > 0 and frame_count > 0:
+            duration = frame_count / fps
+        else:
+            milliseconds = capture.get(cv2.CAP_PROP_POS_MSEC) or 0.0
+            if milliseconds > 0:
+                duration = milliseconds / 1000.0
+    except Exception:  # pragma: no cover - best effort metadata
+        duration = None
+    finally:
+        capture.release()
+    if duration is None or duration <= 0:
+        return None
+    return float(duration)
+
+
+class StreamPlaybackManager:
+    """Coordinate synchronized playback across connected viewers."""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._states: Dict[str, StreamPlaybackState] = {}
+        self._stop = threading.Event()
+        self._thread = threading.Thread(
+            target=self._loop,
+            name="StreamPlaybackManager",
+            daemon=True,
+        )
+        self._thread.start()
+
+    def stop(self) -> None:
+        self._stop.set()
+        if self._thread.is_alive():
+            self._thread.join(timeout=2.0)
+
+    def bootstrap(self, stream_settings: Dict[str, Any]) -> None:
+        for stream_id, conf in stream_settings.items():
+            if stream_id.startswith("_"):
+                continue
+            if isinstance(conf, dict):
+                self.update_stream_config(stream_id, conf)
+
+    def update_stream_config(self, stream_id: str, conf: Dict[str, Any]) -> None:
+        payload_to_emit: Optional[Dict[str, Any]] = None
+        needs_refresh = False
+        with self._lock:
+            state = self._states.get(stream_id)
+            if state is None:
+                state = StreamPlaybackState(stream_id)
+                self._states[stream_id] = state
+            apply_result = state.apply_config(conf)
+            if not state.should_run():
+                if state.current_media or state.error:
+                    state.reset_state()
+                    payload_to_emit = state.to_payload()
+                return
+            if state.current_media is None:
+                needs_refresh = True
+            elif apply_result.get("enabled_changed") or apply_result.get("sources_changed") or apply_result.get("duration_changed"):
+                state.reset_state()
+                needs_refresh = True
+        if payload_to_emit:
+            self._emit_state(payload_to_emit, room=stream_id)
+        if needs_refresh:
+            payload = self._advance_stream(stream_id, reason="config")
+            if payload:
+                self._emit_state(payload, room=stream_id)
+
+    def remove_stream(self, stream_id: str) -> None:
+        with self._lock:
+            self._states.pop(stream_id, None)
+
+    def get_state(self, stream_id: str) -> Optional[Dict[str, Any]]:
+        with self._lock:
+            state = self._states.get(stream_id)
+            if not state:
+                return None
+            return state.to_payload()
+
+    def ensure_started(self, stream_id: str) -> Optional[Dict[str, Any]]:
+        payload = self.get_state(stream_id)
+        if payload and payload.get("status") != "idle":
+            return payload
+        payload = self._advance_stream(stream_id, reason="initial")
+        if payload:
+            self._emit_state(payload, room=stream_id)
+        return payload
+
+    def skip_previous(self, stream_id: str) -> Optional[Dict[str, Any]]:
+        with self._lock:
+            state = self._states.get(stream_id)
+            if not state or not state.should_run():
+                return None
+            target_index = state.history_index - 1
+            entry = state.get_history_entry(target_index)
+            if entry is None:
+                return None
+            media = entry.get("media")
+            duration = entry.get("duration")
+            playback_mode = entry.get("playback_mode")
+            if not media:
+                return None
+            state.set_media(media, duration=duration, source="history_prev", playback_mode=playback_mode, history_index=target_index, add_to_history=False)
+            payload = state.to_payload()
+        self._emit_state(payload, room=stream_id)
+        return payload
+
+    def skip_next(self, stream_id: str) -> Optional[Dict[str, Any]]:
+        with self._lock:
+            state = self._states.get(stream_id)
+            if not state or not state.should_run():
+                state_to_emit = state.to_payload() if state else None
+            else:
+                target_index = state.history_index + 1
+                entry = state.get_history_entry(target_index)
+                if entry:
+                    media = entry.get("media")
+                    duration = entry.get("duration")
+                    playback_mode = entry.get("playback_mode")
+                    if media:
+                        state.set_media(media, duration=duration, source="history_next", playback_mode=playback_mode, history_index=target_index, add_to_history=False)
+                        state_to_emit = state.to_payload()
+                    else:
+                        state_to_emit = None
+                else:
+                    state_to_emit = None
+        if state_to_emit:
+            self._emit_state(state_to_emit, room=stream_id)
+            return state_to_emit
+        payload = self._advance_stream(stream_id, reason="manual")
+        if payload:
+            self._emit_state(payload, room=stream_id)
+        return payload
+
+    def pause(self, stream_id: str) -> Optional[Dict[str, Any]]:
+        with self._lock:
+            state = self._states.get(stream_id)
+            if not state or not state.pause():
+                return None
+            payload = state.to_payload()
+        self._emit_state(payload, room=stream_id)
+        return payload
+
+    def resume(self, stream_id: str) -> Optional[Dict[str, Any]]:
+        payload: Optional[Dict[str, Any]] = None
+        need_new_media = False
+        with self._lock:
+            state = self._states.get(stream_id)
+            if not state:
+                return None
+            if state.current_media is None:
+                need_new_media = True
+            else:
+                if not state.resume():
+                    return None
+                payload = state.to_payload()
+        if need_new_media:
+            payload = self._advance_stream(stream_id, reason="resume")
+            if payload:
+                self._emit_state(payload, room=stream_id)
+            return payload
+        if payload:
+            self._emit_state(payload, room=stream_id)
+        return payload
+
+    def set_volume(self, stream_id: str, volume: float) -> Optional[Dict[str, Any]]:
+        clamped = max(0.0, min(1.0, float(volume)))
+        with self._lock:
+            state = self._states.get(stream_id)
+            if not state:
+                return None
+            state.video_volume = clamped
+            payload = state.to_payload()
+        self._emit_state(payload, room=stream_id)
+        return payload
+
+    def toggle(self, stream_id: str) -> Optional[Dict[str, Any]]:
+        with self._lock:
+            state = self._states.get(stream_id)
+            if not state:
+                return None
+            paused = state.is_paused
+        if paused:
+            return self.resume(stream_id)
+        return self.pause(stream_id)
+
+    def _emit_state(self, payload: Dict[str, Any], *, room: Optional[str] = None) -> None:
+        target_room = room or payload.get("stream_id")
+        if not target_room:
+            return
+        try:
+            socketio.emit(STREAM_UPDATE_EVENT, payload, to=target_room)
+        except Exception as exc:  # pragma: no cover - socket broadcast best effort
+            logger.debug("Stream update emit failed for %s: %s", target_room, exc)
+
+    def _next_media(self, state: StreamPlaybackState) -> Optional[Dict[str, Any]]:
+        entries = list_media(state.folder, hide_nsfw=state.hide_nsfw)
+        if state.media_mode == MEDIA_MODE_IMAGE:
+            entries = [item for item in entries if item.get("kind") == "image"]
+        elif state.media_mode == MEDIA_MODE_VIDEO:
+            entries = [item for item in entries if item.get("kind") == "video"]
+        if not entries:
+            return None
+        if state.shuffle:
+            pool = entries
+            if state.current_media and len(entries) > 1:
+                current_path = state.current_media.get("path")
+                filtered = [item for item in entries if item.get("path") != current_path]
+                if filtered:
+                    pool = filtered
+            choice = random.choice(pool)
+        else:
+            index = state.sequence_index % len(entries)
+            choice = entries[index]
+            state.sequence_index = (index + 1) % len(entries)
+        return dict(choice)
+
+    def _compute_duration(self, state: StreamPlaybackState, media: Dict[str, Any]) -> Optional[float]:
+        kind = media.get("kind")
+        if kind == "image":
+            return max(1.0, float(state.duration_setting))
+        if kind == "video":
+            playback_mode = state.video_playback_mode
+            if playback_mode == "loop":
+                return None
+            if playback_mode == "duration":
+                return max(1.0, float(state.duration_setting))
+            if playback_mode == "until_end":
+                duration = _compute_video_duration_seconds(media.get("path"))
+                if duration is None:
+                    return max(1.0, float(state.duration_setting))
+                return duration
+        return max(1.0, float(state.duration_setting))
+
+    def _advance_stream(self, stream_id: str, *, reason: str) -> Optional[Dict[str, Any]]:
+        with self._lock:
+            state = self._states.get(stream_id)
+            if not state or not state.should_run():
+                return None
+            media = self._next_media(state)
+            if media is None:
+                state.set_error("no_media")
+                return state.to_payload()
+            duration = self._compute_duration(state, media)
+            playback_mode = state.video_playback_mode if media.get("kind") == "video" else None
+            state.set_media(media, duration=duration, source=reason, playback_mode=playback_mode)
+            payload = state.to_payload()
+        return payload
+
+    def _loop(self) -> None:
+        while not self._stop.is_set():
+            now = time.time()
+            next_deadline: Optional[float] = None
+            due_streams: List[str] = []
+            with self._lock:
+                for stream_id, state in self._states.items():
+                    if not state.should_run() or state.is_paused:
+                        continue
+                    deadline = state.next_auto_event
+                    if deadline is None:
+                        continue
+                    if deadline <= now:
+                        due_streams.append(stream_id)
+                    else:
+                        if next_deadline is None or deadline < next_deadline:
+                            next_deadline = deadline
+            for stream_id in due_streams:
+                payload = self._advance_stream(stream_id, reason="auto")
+                if payload:
+                    self._emit_state(payload, room=stream_id)
+            if next_deadline is None:
+                sleep_for = 1.0
+            else:
+                sleep_for = max(0.1, min(1.0, next_deadline - time.time()))
+            self._stop.wait(sleep_for)
+
 def _generate_placeholder_thumbnail(label: str) -> Image.Image:
     background = Image.new('RGB', DASHBOARD_THUMBNAIL_SIZE, (32, 34, 46))
     draw = ImageDraw.Draw(background)
@@ -2018,6 +2563,12 @@ def list_media(folder="all", hide_nsfw: bool = False) -> List[Dict[str, Any]]:
         media = [item for item in media if not _path_contains_nsfw(item.get("path"))]
     return media
 
+if playback_manager is None:
+    playback_manager = StreamPlaybackManager()
+    playback_manager.bootstrap(settings)
+    atexit.register(playback_manager.stop)
+
+
 def try_get_hls(original_url):
     if not original_url:
         return None
@@ -2144,6 +2695,8 @@ def add_stream():
                 stream_url=settings[new_id].get("stream_url"),
                 source="stream_created",
             )
+            if playback_manager is not None:
+                playback_manager.update_stream_config(new_id, settings[new_id])
             save_settings(settings)
             if auto_scheduler is not None:
                 auto_scheduler.reschedule(new_id)
@@ -2162,6 +2715,8 @@ def delete_stream(stream_id):
         settings.pop(stream_id)
         with STREAM_RUNTIME_LOCK:
             STREAM_RUNTIME_STATE.pop(stream_id, None)
+        if playback_manager is not None:
+            playback_manager.remove_stream(stream_id)
         save_settings(settings)
         if auto_scheduler is not None:
             auto_scheduler.remove(stream_id)
@@ -2178,6 +2733,23 @@ def get_stream_settings(stream_id):
     ensure_background_defaults(conf)
     ensure_tag_defaults(conf)
     return jsonify(conf)
+
+
+@app.route("/stream/state/<stream_id>", methods=["GET"])
+def get_stream_playback_state(stream_id):
+    if playback_manager is None:
+        return jsonify({"error": "Playback manager unavailable"}), 503
+    conf = settings.get(stream_id)
+    if conf is None or not isinstance(conf, dict):
+        return jsonify({"error": f"No stream '{stream_id}' found"}), 404
+    state = playback_manager.get_state(stream_id)
+    if state is None:
+        playback_manager.update_stream_config(stream_id, conf)
+        state = playback_manager.ensure_started(stream_id)
+    if state is None:
+        return jsonify({"error": "No playback state"}), 404
+    return jsonify(state)
+
 
 @app.route("/settings/<stream_id>", methods=["POST"])
 def update_stream_settings(stream_id):
@@ -2316,6 +2888,8 @@ def update_stream_settings(stream_id):
         stream_url=conf.get("stream_url"),
         source="settings_update",
     )
+    if playback_manager is not None:
+        playback_manager.update_stream_config(stream_id, conf)
     save_settings(settings)
     if auto_scheduler is not None:
         auto_scheduler.reschedule(stream_id)
@@ -3898,6 +4472,37 @@ def stream_group(name):
     streams = {k: settings[k] for k in members if k in settings}
     return render_template("streams.html", stream_settings=streams, mosaic_settings=layout_conf)
 
+@socketio.on("stream_subscribe")
+def handle_stream_subscribe(payload):
+    stream_id = ""
+    if isinstance(payload, dict):
+        stream_id = str(payload.get("stream_id") or "").strip()
+    elif isinstance(payload, str):
+        stream_id = payload.strip()
+    if not stream_id:
+        return
+    join_room(stream_id)
+    if playback_manager is None:
+        return
+    state = playback_manager.ensure_started(stream_id)
+    if not state:
+        state = playback_manager.get_state(stream_id)
+    if state:
+        socketio.emit(STREAM_UPDATE_EVENT, state, to=request.sid)
+
+
+@socketio.on("stream_unsubscribe")
+def handle_stream_unsubscribe(payload):
+    stream_id = ""
+    if isinstance(payload, dict):
+        stream_id = str(payload.get("stream_id") or "").strip()
+    elif isinstance(payload, str):
+        stream_id = payload.strip()
+    if not stream_id:
+        return
+    leave_room(stream_id)
+
+
 @socketio.on('video_control')
 def handle_video_control(payload):
     if not isinstance(payload, dict):
@@ -3909,17 +4514,36 @@ def handle_video_control(payload):
     allowed_actions = {"play", "pause", "toggle", "skip_next", "skip_prev", "set_volume"}
     if action not in allowed_actions:
         return
+    volume_value: Optional[float] = None
+    if action == 'set_volume':
+        try:
+            volume_value = float(payload.get('volume'))
+        except (TypeError, ValueError):
+            return
+    if playback_manager is not None:
+        if action == 'skip_next':
+            playback_manager.skip_next(stream_id)
+        elif action == 'skip_prev':
+            playback_manager.skip_previous(stream_id)
+        elif action == 'pause':
+            playback_manager.pause(stream_id)
+        elif action == 'play':
+            state = playback_manager.get_state(stream_id)
+            if state and state.get("status") == "paused":
+                playback_manager.resume(stream_id)
+            else:
+                playback_manager.ensure_started(stream_id)
+        elif action == 'toggle':
+            playback_manager.toggle(stream_id)
+        elif action == 'set_volume' and volume_value is not None:
+            playback_manager.set_volume(stream_id, volume_value)
     message: Dict[str, Any] = {
         "stream_id": stream_id,
         "action": action,
         "timestamp": time.time(),
     }
-    if action == 'set_volume':
-        try:
-            volume = float(payload.get('volume'))
-        except (TypeError, ValueError):
-            return
-        message['volume'] = max(0.0, min(1.0, volume))
+    if volume_value is not None:
+        message['volume'] = max(0.0, min(1.0, volume_value))
     socketio.emit('video_control', message)
 
 

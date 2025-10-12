@@ -41,10 +41,19 @@ let currentConfig = null;
 let activeVideoElement = null;
 let activeVideoHandlers = null;
 let playbackTimer = null;
-let mediaHistory = [];
-let mediaHistoryIndex = -1;
 let currentMediaController = null;
+let serverPlaybackState = null;
+let activeMediaPath = null;
+let usingSynchronizedPlayback = false;
 const VIDEO_PLAYBACK_MODES = new Set(['duration', 'until_end', 'loop']);
+
+socket.on('connect', () => {
+  socket.emit('stream_subscribe', { stream_id: streamId });
+});
+
+socket.on('disconnect', () => {
+  serverPlaybackState = null;
+});
 
 const VIDEO_EXTENSIONS = new Set(['.mp4', '.mkv', '.webm', '.mov', '.avi', '.m4v', '.mpg', '.mpeg']);
 
@@ -186,6 +195,82 @@ function updateVideoVolume(volume) {
     currentConfig.video_volume = clamped;
   }
   return clamped;
+}
+
+function computeServerPlaybackPosition(state) {
+  if (!state || typeof state !== 'object') {
+    return 0;
+  }
+  const base = Number(state.position);
+  const startedAt = Number(state.started_at);
+  const duration = Number(state.duration);
+  let position = Number.isFinite(base) ? base : 0;
+  if (!state.is_paused && Number.isFinite(startedAt)) {
+    const nowSeconds = Date.now() / 1000;
+    position += Math.max(0, nowSeconds - startedAt);
+  }
+  if (Number.isFinite(duration) && duration > 0) {
+    position = Math.min(position, duration);
+  }
+  return Math.max(0, position);
+}
+
+function computeDesiredVolume(state) {
+  if (state && state.video_volume !== undefined) {
+    return clampVolume(state.video_volume);
+  }
+  if (currentConfig && currentConfig.video_volume !== undefined) {
+    return clampVolume(currentConfig.video_volume);
+  }
+  return 1.0;
+}
+
+function syncVideoCurrentTime(video, state) {
+  if (!video || !state) {
+    return;
+  }
+  const target = computeServerPlaybackPosition(state);
+  const seek = () => {
+    if (!Number.isFinite(target)) {
+      return;
+    }
+    if (Math.abs(video.currentTime - target) > 0.35) {
+      try {
+        video.currentTime = target;
+      } catch (err) {
+        console.debug('Failed to adjust video position', err);
+      }
+    }
+  };
+  if (video.readyState >= 1) {
+    seek();
+  } else {
+    const handler = () => {
+      video.removeEventListener('loadedmetadata', handler);
+      seek();
+    };
+    video.addEventListener('loadedmetadata', handler, { once: true });
+  }
+}
+
+function applyVideoPlaybackState(video, state) {
+  if (!video) {
+    return;
+  }
+  const desiredVolume = computeDesiredVolume(state);
+  updateVideoVolume(desiredVolume);
+  if (!state || state.is_paused) {
+    video.pause();
+    return;
+  }
+  const playPromise = video.play();
+  if (playPromise && typeof playPromise.catch === 'function') {
+    playPromise.catch(err => {
+      console.warn('Muted autoplay fallback', err);
+      video.muted = true;
+      video.play().catch(() => {});
+    });
+  }
 }
 
 setMediaController(createNoopMediaController());
@@ -412,275 +497,125 @@ async function displaySingleMedia(config, container) {
   }
 }
 
-function startRandomRotation(config, container) {
-  const folder = config.folder || 'all';
-  const hideNsfw = Boolean(config.hide_nsfw);
-  const mediaMode = (config.media_mode || 'image').toLowerCase();
-  const sequential = config.shuffle === false;
-  const playbackMode = normalizePlaybackMode(config.video_playback_mode);
-  const durationSeconds = Math.max(Number(config.duration) || 5, 1);
-  let cancelled = false;
-  let seqIndex = 0;
-  let pendingPreload = null;
-  let isAdvancing = false;
-  mediaHistory = [];
-  mediaHistoryIndex = -1;
+async function renderServerImage(media, state, container) {
+  if (!media || !media.path) {
+    container.textContent = 'No media available';
+    updateBackdropSource('');
+    return;
+  }
+  activeMediaPath = media.path;
+  cancelRotation = () => {};
+  await displaySingleImage(media.path, container);
+}
 
+function renderServerVideo(media, state, container) {
+  if (!media || !media.path) {
+    container.textContent = 'No media available';
+    updateBackdropSource('');
+    teardownActiveVideo();
+    activeMediaPath = null;
+    return;
+  }
+  const path = media.path;
+  if (activeVideoElement && activeMediaPath === path) {
+    syncVideoCurrentTime(activeVideoElement, state);
+    applyVideoPlaybackState(activeVideoElement, state);
+    return;
+  }
+
+  cancelRotation = () => {};
+  activeMediaPath = path;
   clearPlaybackTimer();
   teardownActiveVideo();
-  if (rotationTimer) {
-    clearTimeout(rotationTimer);
-    rotationTimer = null;
-  }
 
-  container.textContent = 'Loading...';
+  const video = document.createElement('video');
+  video.className = 'stream-video';
+  video.playsInline = true;
+  video.autoplay = true;
+  video.controls = false;
+  video.preload = 'auto';
+  video.style.width = '100%';
+  video.style.height = '100%';
 
-  const baseParams = new URLSearchParams({ folder });
-  if (hideNsfw) {
-    baseParams.set('hide_nsfw', '1');
-  }
-  if (mediaMode === 'image') {
-    baseParams.set('kind', 'image');
-  } else if (mediaMode === 'video') {
-    baseParams.set('kind', 'video');
-  }
+  container.replaceChildren(video);
+  updateBackdropSource('');
 
-  function getVolume() {
-    const sourceVol = currentConfig && currentConfig.video_volume !== undefined ? currentConfig.video_volume : config.video_volume;
-    return clampVolume(sourceVol);
-  }
+  const handlers = {
+    error: () => {
+      console.error('Synchronized video playback error for', path);
+    },
+  };
+  video.addEventListener('error', handlers.error);
 
-  function scheduleImageAdvance() {
-    if (cancelled) {
-      return;
-    }
-    clearPlaybackTimer();
-    rotationTimer = setTimeout(() => { advance('timer').catch(err => console.error('Advance failed', err)); }, Math.max(durationSeconds * 1000, 1000));
-  }
+  setActiveVideoElement(video, handlers);
+  setMediaController({
+    skipNext: () => {},
+    skipPrev: () => {},
+    play: () => { if (video.paused) { video.play().catch(() => {}); } },
+    pause: () => { if (!video.paused) { video.pause(); } },
+    toggle: () => {
+      if (video.paused) {
+        video.play().catch(() => {});
+      } else {
+        video.pause();
+      }
+    },
+    setVolume: value => updateVideoVolume(value),
+  });
 
-  function scheduleVideoDuration() {
-    if (cancelled) {
-      return;
-    }
-    clearPlaybackTimer();
-    playbackTimer = setTimeout(() => { advance('timer').catch(err => console.error('Advance failed', err)); }, Math.max(durationSeconds * 1000, 500));
-  }
+  video.src = `/stream/video/${path}`;
+  syncVideoCurrentTime(video, state);
+  applyVideoPlaybackState(video, state);
+}
 
-  function registerController() {
-    setMediaController({
-      skipNext: () => {
-        const useHistoryForward = mediaHistoryIndex < mediaHistory.length - 1;
-        advance('manual', { useHistoryForward }).catch(err => console.error('Skip next failed', err));
-      },
-      skipPrev: () => { showPrevious().catch(err => console.error('Skip prev failed', err)); },
-      play: () => {
-        if (activeVideoElement) {
-          activeVideoElement.play().catch(() => {});
-        }
-      },
-      pause: () => {
-        if (activeVideoElement) {
-          activeVideoElement.pause();
-        }
-      },
-      toggle: () => {
-        if (activeVideoElement) {
-          if (activeVideoElement.paused) {
-            activeVideoElement.play().catch(() => {});
-          } else {
-            activeVideoElement.pause();
-          }
-        } else {
-          advance('manual').catch(err => console.error('Toggle advance failed', err));
-        }
-      },
-      setVolume: value => updateVideoVolume(value),
+function startSynchronizedStream(config, container) {
+  usingSynchronizedPlayback = true;
+  cancelRotation = () => {};
+  clearPlaybackTimer();
+  teardownActiveVideo();
+  activeMediaPath = null;
+  container.textContent = 'Waiting for stream...';
+  updateBackdropSource('');
+  if (config && config.video_volume !== undefined) {
+    currentConfig.video_volume = clampVolume(config.video_volume);
+  }
+  socket.emit('stream_subscribe', { stream_id: streamId });
+  if (serverPlaybackState && serverPlaybackState.stream_id === streamId) {
+    handleStreamUpdate(serverPlaybackState);
+  }
+}
+
+function handleStreamUpdate(payload) {
+  if (!payload || payload.stream_id !== streamId) {
+    return;
+  }
+  serverPlaybackState = payload;
+  if (!usingSynchronizedPlayback) {
+    return;
+  }
+  const container = document.getElementById('container');
+  if (!container) {
+    return;
+  }
+  const media = payload.media;
+  if (!media || !media.path) {
+    activeMediaPath = null;
+    teardownActiveVideo();
+    const message = payload.error === 'no_media' ? 'No media available' : 'Stream idle';
+    container.textContent = message;
+    updateBackdropSource('');
+    return;
+  }
+  const kind = detectMediaKind(media.path, media.kind);
+  if (kind === 'video') {
+    renderServerVideo(media, payload, container);
+  } else {
+    renderServerImage(media, payload, container).catch(err => {
+      console.error('Failed to render synchronized image', err);
+      container.textContent = 'Unable to load media';
+      updateBackdropSource('');
     });
   }
-
-  registerController();
-
-  cancelRotation = () => {
-    cancelled = true;
-    if (rotationTimer) {
-      clearTimeout(rotationTimer);
-      rotationTimer = null;
-    }
-    clearPlaybackTimer();
-    teardownActiveVideo();
-    if (pendingPreload && pendingPreload.parentNode) {
-      pendingPreload.remove();
-    }
-  };
-
-  async function fetchSequentialMedia() {
-    const params = new URLSearchParams(baseParams);
-    params.set('offset', String(seqIndex));
-    params.set('limit', '1');
-    const res = await fetch(`/media?${params.toString()}`);
-    if (!res.ok) {
-      throw new Error(`Media list request failed (${res.status})`);
-    }
-    const payload = await res.json();
-    if (Array.isArray(payload) && payload.length) {
-      seqIndex += 1;
-      return payload[0];
-    }
-    if (seqIndex !== 0) {
-      seqIndex = 0;
-      return fetchSequentialMedia();
-    }
-    return null;
-  }
-
-  async function fetchRandomMedia() {
-    const params = new URLSearchParams(baseParams);
-    params.set('stream_id', streamId);
-    const res = await fetch(`/media/random?${params.toString()}`);
-    if (!res.ok) {
-      if (res.status === 404) {
-        return null;
-      }
-      throw new Error(`Random media request failed (${res.status})`);
-    }
-    return await res.json();
-  }
-
-  async function obtainNextMedia() {
-    return sequential ? fetchSequentialMedia() : fetchRandomMedia();
-  }
-
-  async function renderImageMedia(media) {
-    const sizedUrl = computeSizedImageUrl(media.path, container);
-    const preload = startPreload(sizedUrl);
-    pendingPreload = preload.element;
-    const img = await preload.ready;
-    pendingPreload = null;
-    if (cancelled) {
-      img.remove();
-      return;
-    }
-    prepareImageForDisplay(img);
-    container.replaceChildren(img);
-    updateBackdropSource(img.currentSrc || img.src || sizedUrl);
-    teardownActiveVideo();
-    clearPlaybackTimer();
-    if (rotationTimer) {
-      clearTimeout(rotationTimer);
-      rotationTimer = null;
-    }
-    if (playbackMode === 'duration' || playbackMode === 'until_end') {
-      scheduleImageAdvance();
-    }
-  }
-
-  function renderVideoMedia(media) {
-    const video = document.createElement('video');
-    video.className = 'stream-video';
-    video.playsInline = true;
-    video.autoplay = true;
-    video.controls = false;
-    video.preload = 'auto';
-    const volume = getVolume();
-    video.volume = volume;
-    video.muted = volume <= 0;
-    video.style.width = '100%';
-    video.style.height = '100%';
-    video.src = `/stream/video/${media.path}`;
-    container.replaceChildren(video);
-    updateBackdropSource('');
-    const handlers = {};
-    if (playbackMode === 'until_end') {
-      handlers.ended = () => { advance('ended').catch(err => console.error('Advance after end failed', err)); };
-      video.addEventListener('ended', handlers.ended);
-    } else if (playbackMode === 'loop') {
-      video.loop = true;
-    }
-    handlers.error = () => { advance('error').catch(err => console.error('Advance after error failed', err)); };
-    video.addEventListener('error', handlers.error);
-    setActiveVideoElement(video, handlers);
-    clearPlaybackTimer();
-    if (rotationTimer) {
-      clearTimeout(rotationTimer);
-      rotationTimer = null;
-    }
-    const playPromise = video.play();
-    if (playbackMode === 'duration') {
-      scheduleVideoDuration();
-    }
-    if (playPromise && typeof playPromise.catch === 'function') {
-      playPromise.catch(err => {
-        console.warn('Muted autoplay fallback', err);
-        video.muted = true;
-        video.play().catch(() => {});
-      });
-    }
-  }
-
-  async function showMedia(media, { fromHistory = false } = {}) {
-    if (!media || !media.path) {
-      container.textContent = 'No media available';
-      updateBackdropSource('');
-      return;
-    }
-    const kind = detectMediaKind(media.path, media.kind);
-    if (!fromHistory) {
-      mediaHistory = mediaHistory.slice(0, mediaHistoryIndex + 1);
-      mediaHistory.push({ path: media.path, kind, extension: media.extension || null });
-      mediaHistoryIndex = mediaHistory.length - 1;
-    }
-    if (kind === 'video') {
-      renderVideoMedia(media);
-    } else {
-      await renderImageMedia(media);
-    }
-  }
-
-  async function advance(reason = 'auto', options = {}) {
-    if (cancelled || isAdvancing) {
-      return;
-    }
-    isAdvancing = true;
-    try {
-      if (options.useHistoryForward && mediaHistoryIndex < mediaHistory.length - 1) {
-        mediaHistoryIndex += 1;
-        await showMedia(mediaHistory[mediaHistoryIndex], { fromHistory: true });
-        return;
-      }
-      const media = await obtainNextMedia();
-      if (cancelled) {
-        return;
-      }
-      if (!media) {
-        container.textContent = 'No media available';
-        updateBackdropSource('');
-        cancelRotation();
-        return;
-      }
-      await showMedia(media);
-    } catch (err) {
-      console.error('Media rotation failed', err);
-      if (!cancelled) {
-        container.textContent = 'Unable to load media';
-        updateBackdropSource('');
-      }
-      cancelRotation();
-    } finally {
-      isAdvancing = false;
-    }
-  }
-
-  async function showPrevious() {
-    if (mediaHistoryIndex <= 0) {
-      return;
-    }
-    mediaHistoryIndex -= 1;
-    await showMedia(mediaHistory[mediaHistoryIndex], { fromHistory: true });
-  }
-
-  mediaHistory = [];
-  mediaHistoryIndex = -1;
-  advance('initial').catch(err => console.error('Initial media advance failed', err));
 }
 
 function startAiRotation(paths, config, container) {
@@ -754,6 +689,7 @@ function startAiRotation(paths, config, container) {
 
 async function render(config) {
   currentConfig = config;
+  usingSynchronizedPlayback = false;
   if (!qualityOverride) {
     const fromConfig = (config && typeof config.image_quality === 'string') ? config.image_quality.trim().toLowerCase() : 'auto';
     imageQuality = VALID_QUALITIES.has(fromConfig) ? fromConfig : 'auto';
@@ -848,7 +784,7 @@ async function render(config) {
       return;
     }
     if (modeValue === 'random') {
-      startRandomRotation(config, container);
+      startSynchronizedStream(config, container);
       return;
     }
     container.textContent = 'No video content configured';
@@ -862,7 +798,7 @@ async function render(config) {
   }
 
   if (modeValue === 'random') {
-    startRandomRotation(config, container);
+    startSynchronizedStream(config, container);
     return;
   }
 
@@ -929,6 +865,7 @@ socket.on('refresh', data => {
 });
 
 socket.on('video_control', handleVideoControl);
+socket.on('stream_update', handleStreamUpdate);
 
 load();
 </script>
