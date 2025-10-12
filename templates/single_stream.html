@@ -48,7 +48,9 @@ let usingSynchronizedPlayback = false;
 const VIDEO_PLAYBACK_MODES = new Set(['duration', 'until_end', 'loop']);
 
 socket.on('connect', () => {
-  socket.emit('stream_subscribe', { stream_id: streamId });
+  if (usingSynchronizedPlayback) {
+    socket.emit('stream_subscribe', { stream_id: streamId });
+  }
 });
 
 socket.on('disconnect', () => {
@@ -270,6 +272,18 @@ function applyVideoPlaybackState(video, state) {
       video.muted = true;
       video.play().catch(() => {});
     });
+  }
+}
+
+function disableSynchronizedStream() {
+  if (!usingSynchronizedPlayback) {
+    return;
+  }
+  usingSynchronizedPlayback = false;
+  serverPlaybackState = null;
+  activeMediaPath = null;
+  if (socket.connected) {
+    socket.emit('stream_unsubscribe', { stream_id: streamId });
   }
 }
 
@@ -503,9 +517,17 @@ async function renderServerImage(media, state, container) {
     updateBackdropSource('');
     return;
   }
-  activeMediaPath = media.path;
+  const path = media.path;
+  const alreadyShowing =
+    activeMediaPath === path &&
+    container.firstElementChild &&
+    container.firstElementChild.tagName === 'IMG';
+  activeMediaPath = path;
   cancelRotation = () => {};
-  await displaySingleImage(media.path, container);
+  if (alreadyShowing) {
+    return;
+  }
+  await displaySingleImage(path, container);
 }
 
 function renderServerVideo(media, state, container) {
@@ -522,6 +544,23 @@ function renderServerVideo(media, state, container) {
     applyVideoPlaybackState(activeVideoElement, state);
     return;
   }
+
+  const triggerServerSkip = reason => {
+    if (
+      !usingSynchronizedPlayback ||
+      !socket.connected ||
+      !serverPlaybackState ||
+      !serverPlaybackState.media ||
+      serverPlaybackState.media.path !== path
+    ) {
+      return;
+    }
+    socket.emit('video_control', {
+      stream_id: streamId,
+      action: 'skip_next',
+      reason: reason || 'auto',
+    });
+  };
 
   cancelRotation = () => {};
   activeMediaPath = path;
@@ -541,10 +580,15 @@ function renderServerVideo(media, state, container) {
   updateBackdropSource('');
 
   const handlers = {
+    ended: () => {
+      triggerServerSkip('ended');
+    },
     error: () => {
       console.error('Synchronized video playback error for', path);
+      triggerServerSkip('error');
     },
   };
+  video.addEventListener('ended', handlers.ended);
   video.addEventListener('error', handlers.error);
 
   setActiveVideoElement(video, handlers);
@@ -574,15 +618,31 @@ function startSynchronizedStream(config, container) {
   clearPlaybackTimer();
   teardownActiveVideo();
   activeMediaPath = null;
-  container.textContent = 'Waiting for stream...';
+  if (!container.firstElementChild) {
+    container.textContent = 'Waiting for stream...';
+  }
   updateBackdropSource('');
   if (config && config.video_volume !== undefined) {
     currentConfig.video_volume = clampVolume(config.video_volume);
   }
-  socket.emit('stream_subscribe', { stream_id: streamId });
-  if (serverPlaybackState && serverPlaybackState.stream_id === streamId) {
-    handleStreamUpdate(serverPlaybackState);
+  if (socket.connected) {
+    socket.emit('stream_subscribe', { stream_id: streamId });
+  } else {
+    socket.once('connect', () => {
+      socket.emit('stream_subscribe', { stream_id: streamId });
+    });
   }
+  serverPlaybackState = null;
+  fetch(`/stream/state/${encodeURIComponent(streamId)}`)
+    .then(res => (res.ok ? res.json() : null))
+    .then(state => {
+      if (state && usingSynchronizedPlayback) {
+        handleStreamUpdate(state);
+      }
+    })
+    .catch(err => {
+      console.debug('Failed to fetch synchronized stream state', err);
+    });
 }
 
 function handleStreamUpdate(payload) {
@@ -689,7 +749,7 @@ function startAiRotation(paths, config, container) {
 
 async function render(config) {
   currentConfig = config;
-  usingSynchronizedPlayback = false;
+  disableSynchronizedStream();
   if (!qualityOverride) {
     const fromConfig = (config && typeof config.image_quality === 'string') ? config.image_quality.trim().toLowerCase() : 'auto';
     imageQuality = VALID_QUALITIES.has(fromConfig) ? fromConfig : 'auto';
