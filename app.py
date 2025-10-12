@@ -15,7 +15,7 @@ import io
 from copy import deepcopy
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple, Union, Set
 from urllib.parse import urlparse
 
 from PIL import Image, ImageDraw, ImageFont
@@ -734,6 +734,181 @@ def default_stream_config():
     }
 
 
+def _sanitize_imported_stream_config(stream_id: str, raw_conf: Any) -> Dict[str, Any]:
+    if not isinstance(raw_conf, dict):
+        raise ValueError(f"Stream '{stream_id}' configuration must be an object.")
+    conf = default_stream_config()
+    for key, value in raw_conf.items():
+        conf[key] = deepcopy(value) if isinstance(value, (dict, list)) else value
+    mode_raw = conf.get('mode')
+    mode = mode_raw.strip().lower() if isinstance(mode_raw, str) else conf['mode']
+    if mode not in {'random', 'specific', 'livestream', AI_MODE}:
+        mode = conf['mode']
+    conf['mode'] = mode
+    folder_raw = conf.get('folder')
+    conf['folder'] = folder_raw.strip() if isinstance(folder_raw, str) and folder_raw.strip() else 'all'
+    conf['duration'] = max(1, _coerce_int(conf.get('duration'), 5))
+    conf['shuffle'] = _coerce_bool(conf.get('shuffle'), True)
+    conf['hide_nsfw'] = _coerce_bool(conf.get('hide_nsfw'), False)
+    conf['yt_cc'] = _coerce_bool(conf.get('yt_cc'), False)
+    conf['yt_mute'] = _coerce_bool(conf.get('yt_mute'), True)
+    conf['background_blur_enabled'] = _coerce_bool(conf.get('background_blur_enabled'), False)
+    conf['background_blur_amount'] = max(0, min(100, _coerce_int(conf.get('background_blur_amount'), 50)))
+    quality_raw = conf.get('image_quality')
+    quality = quality_raw.strip().lower() if isinstance(quality_raw, str) else 'auto'
+    if quality not in IMAGE_QUALITY_CHOICES:
+        quality = 'auto'
+    conf['image_quality'] = quality
+    playback_raw = conf.get('video_playback_mode')
+    playback = playback_raw.strip().lower() if isinstance(playback_raw, str) else 'duration'
+    if playback not in VIDEO_PLAYBACK_MODES:
+        playback = 'duration'
+    conf['video_playback_mode'] = playback
+    volume_raw = conf.get('video_volume')
+    try:
+        volume = float(volume_raw)
+    except (TypeError, ValueError):
+        volume = 1.0
+    conf['video_volume'] = max(0.0, min(1.0, volume))
+    stream_url_raw = conf.get('stream_url')
+    if isinstance(stream_url_raw, str):
+        trimmed = stream_url_raw.strip()
+        conf['stream_url'] = trimmed or None
+    else:
+        conf['stream_url'] = None
+    label_raw = conf.get('label')
+    conf['label'] = label_raw.strip() if isinstance(label_raw, str) else ''
+    conf['include_in_global'] = _coerce_bool(conf.get('include_in_global'), True)
+    tags_payload = conf.get(TAG_KEY, [])
+    conf[TAG_KEY] = _sanitize_stream_tags(tags_payload)
+    selected_image = conf.get('selected_image')
+    if isinstance(selected_image, str):
+        selected_image = selected_image.strip() or None
+    else:
+        selected_image = None
+    conf['selected_image'] = selected_image
+    selected_kind_raw = conf.get('selected_media_kind')
+    if isinstance(selected_kind_raw, str):
+        selected_kind = selected_kind_raw.strip().lower()
+    else:
+        selected_kind = None
+    if selected_kind not in {'image', 'video'}:
+        selected_kind = _detect_media_kind(selected_image) if selected_image else None
+    conf['selected_media_kind'] = selected_kind
+    media_mode_raw = conf.get('media_mode')
+    media_mode = media_mode_raw.strip().lower() if isinstance(media_mode_raw, str) else ''
+    if media_mode not in MEDIA_MODE_CHOICES:
+        media_mode = _infer_media_mode(conf)
+    conf['media_mode'] = media_mode
+    if media_mode == MEDIA_MODE_AI:
+        conf['mode'] = AI_MODE
+    elif media_mode == MEDIA_MODE_LIVESTREAM:
+        conf['mode'] = 'livestream'
+    else:
+        allowed = MEDIA_MODE_VARIANTS.get(media_mode, {'random', 'specific'})
+        if conf['mode'] not in allowed:
+            conf['mode'] = 'random' if 'random' in allowed else next(iter(sorted(allowed)))
+        if media_mode == MEDIA_MODE_VIDEO:
+            if conf['mode'] == 'specific':
+                conf['video_playback_mode'] = 'loop'
+            elif conf['mode'] == 'random' and conf['video_playback_mode'] == 'loop':
+                conf['video_playback_mode'] = 'duration'
+    ai_settings_raw = conf.get(AI_SETTINGS_KEY)
+    if isinstance(ai_settings_raw, dict):
+        conf[AI_SETTINGS_KEY] = _sanitize_ai_settings(ai_settings_raw, defaults=AI_FALLBACK_DEFAULTS)
+    else:
+        conf[AI_SETTINGS_KEY] = deepcopy(AI_FALLBACK_DEFAULTS)
+    ai_state_raw = conf.get(AI_STATE_KEY)
+    state_defaults = default_ai_state()
+    if isinstance(ai_state_raw, dict):
+        for key in state_defaults.keys():
+            if key in ai_state_raw:
+                state_defaults[key] = ai_state_raw[key]
+    conf[AI_STATE_KEY] = state_defaults
+    conf['_ai_customized'] = not _ai_settings_match_defaults(conf[AI_SETTINGS_KEY], defaults=AI_FALLBACK_DEFAULTS)
+    ensure_background_defaults(conf)
+    return conf
+
+
+def _sanitize_group_collection_for_import(raw_groups: Any, valid_streams: Set[str]) -> Dict[str, Any]:
+    sanitized: Dict[str, Any] = {}
+    if not isinstance(raw_groups, dict):
+        return sanitized
+    for name, payload in raw_groups.items():
+        if not isinstance(name, str):
+            continue
+        trimmed = name.strip()
+        if not trimmed:
+            continue
+        if isinstance(payload, dict):
+            streams_raw = payload.get('streams')
+            cleaned: List[str] = []
+            if isinstance(streams_raw, (list, tuple)):
+                seen: Set[str] = set()
+                for entry in streams_raw:
+                    if not isinstance(entry, str):
+                        continue
+                    candidate = entry.strip()
+                    if candidate in valid_streams and candidate not in seen:
+                        cleaned.append(candidate)
+                        seen.add(candidate)
+            layout = _normalize_group_layout(payload.get('layout'))
+            entry: Dict[str, Any] = {'streams': cleaned}
+            if layout:
+                entry['layout'] = layout
+            sanitized[trimmed] = entry
+        elif isinstance(payload, (list, tuple)):
+            cleaned = []
+            seen: Set[str] = set()
+            for entry in payload:
+                if not isinstance(entry, str):
+                    continue
+                candidate = entry.strip()
+                if candidate in valid_streams and candidate not in seen:
+                    cleaned.append(candidate)
+                    seen.add(candidate)
+            sanitized[trimmed] = cleaned
+    return sanitized
+
+
+def _prepare_settings_import(data: Dict[str, Any]) -> Tuple[Dict[str, Any], List[str]]:
+    if not isinstance(data, dict):
+        raise ValueError('Import payload must be a JSON object.')
+    sanitized: Dict[str, Any] = {}
+    warnings: List[str] = []
+    stream_ids: List[str] = []
+    for key, value in data.items():
+        if not isinstance(key, str) or key.startswith('_'):
+            continue
+        stream_id = key.strip()
+        if not stream_id:
+            warnings.append('Skipped stream with empty identifier.')
+            continue
+        sanitized[stream_id] = _sanitize_imported_stream_config(stream_id, value)
+        stream_ids.append(stream_id)
+    valid_streams = set(stream_ids)
+    tags_raw = data.get(GLOBAL_TAGS_KEY)
+    sanitized[GLOBAL_TAGS_KEY] = _normalize_tag_collection(tags_raw)
+    notes_raw = data.get('_notes')
+    sanitized['_notes'] = notes_raw if isinstance(notes_raw, str) else ''
+    defaults_raw = data.get('_ai_defaults')
+    if isinstance(defaults_raw, dict):
+        sanitized['_ai_defaults'] = _sanitize_ai_settings(defaults_raw, defaults=AI_FALLBACK_DEFAULTS)
+    else:
+        sanitized['_ai_defaults'] = deepcopy(AI_FALLBACK_DEFAULTS)
+    presets_raw = data.get(AI_PRESETS_KEY)
+    sanitized[AI_PRESETS_KEY] = _sorted_presets(_sanitize_ai_presets(presets_raw))
+    groups_raw = data.get('_groups')
+    sanitized['_groups'] = _sanitize_group_collection_for_import(groups_raw, valid_streams)
+    for key, value in data.items():
+        if not isinstance(key, str) or not key.startswith('_'):
+            continue
+        if key in {GLOBAL_TAGS_KEY, '_notes', '_ai_defaults', '_groups', AI_PRESETS_KEY}:
+            continue
+        sanitized[key] = deepcopy(value)
+    return sanitized, warnings
+
+
 def load_settings():
     if os.path.exists(SETTINGS_FILE):
         with open(SETTINGS_FILE, "r") as f:
@@ -767,6 +942,123 @@ def export_settings_download():
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["X-Export-Filename"] = filename
     return response
+
+
+@app.route("/settings/import", methods=["POST"])
+def import_settings():
+    upload = request.files.get("file")
+    payload: Any
+    if upload:
+        raw_bytes = upload.read()
+        if not raw_bytes:
+            return jsonify({"error": "Uploaded file is empty."}), 400
+        try:
+            payload = json.loads(raw_bytes.decode("utf-8-sig"))
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            return jsonify({"error": "Uploaded file is not valid JSON."}), 400
+    else:
+        payload = request.get_json(silent=True)
+        if payload is None:
+            raw_body = request.get_data(cache=False, as_text=True)
+            if raw_body:
+                try:
+                    payload = json.loads(raw_body)
+                except json.JSONDecodeError:
+                    payload = None
+        if payload is None:
+            return jsonify({"error": "No JSON payload received."}), 400
+
+    try:
+        snapshot, warnings = _prepare_settings_import(payload)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+
+    new_streams = {key for key in snapshot.keys() if isinstance(key, str) and not key.startswith("_")}
+    existing_streams = {key for key in settings.keys() if not key.startswith("_")}
+    added = sorted(new_streams - existing_streams)
+    removed = sorted(existing_streams - new_streams)
+    updated = sorted(new_streams & existing_streams)
+
+    settings.clear()
+    settings.update(snapshot)
+    settings.setdefault(GLOBAL_TAGS_KEY, [])
+    settings.setdefault("_notes", "")
+    settings.setdefault("_groups", {})
+    settings.setdefault("_ai_defaults", deepcopy(AI_FALLBACK_DEFAULTS))
+    settings.setdefault(AI_PRESETS_KEY, {})
+
+    settings["_ai_defaults"] = _sanitize_ai_settings(settings.get("_ai_defaults", {}), defaults=AI_FALLBACK_DEFAULTS)
+    settings[AI_PRESETS_KEY] = _sorted_presets(_sanitize_ai_presets(settings.get(AI_PRESETS_KEY, {})))
+    settings["_groups"] = _sanitize_group_collection_for_import(settings.get("_groups", {}), new_streams)
+
+    for stream_id in new_streams:
+        conf = settings[stream_id]
+        conf.pop('_ai_customized', None)
+        ensure_background_defaults(conf)
+        ensure_ai_defaults(conf)
+
+    ensure_settings_integrity(settings)
+    save_settings(settings)
+
+    with ai_jobs_lock:
+        for stream_id in removed:
+            ai_jobs.pop(stream_id, None)
+            ai_job_controls.pop(stream_id, None)
+
+    for stream_id in removed:
+        _cleanup_temp_outputs(stream_id)
+        with STREAM_RUNTIME_LOCK:
+            STREAM_RUNTIME_STATE.pop(stream_id, None)
+        if auto_scheduler is not None:
+            auto_scheduler.remove(stream_id)
+
+    tags_snapshot = get_global_tags()
+    for stream_id in new_streams:
+        conf = settings[stream_id]
+        if conf.get("selected_image") and not conf.get("selected_media_kind"):
+            conf["selected_media_kind"] = _detect_media_kind(conf.get("selected_image"))
+        _update_stream_runtime_state(
+            stream_id,
+            path=conf.get("selected_image"),
+            kind=conf.get("selected_media_kind"),
+            media_mode=conf.get("media_mode"),
+            stream_url=conf.get("stream_url"),
+            source="settings_import",
+        )
+        if auto_scheduler is not None:
+            auto_scheduler.reschedule(stream_id)
+
+    try:
+        socketio.emit(
+            "streams_changed",
+            {
+                "action": "import",
+                "added": added,
+                "removed": removed,
+                "updated": updated,
+            },
+        )
+        for stream_id in new_streams:
+            socketio.emit(
+                "refresh",
+                {"stream_id": stream_id, "config": settings[stream_id], "tags": tags_snapshot},
+            )
+    except Exception as exc:  # pragma: no cover
+        logger.debug("Socket emit failed during settings import: %s", exc)
+
+    response = {
+        "success": True,
+        "streams": sorted(new_streams),
+        "added": added,
+        "removed": removed,
+        "updated": updated,
+        "warnings": warnings,
+        "tags": tags_snapshot,
+        "ai_defaults": settings.get("_ai_defaults", {}),
+        "groups": settings.get("_groups", {}),
+    }
+    return jsonify(response)
+
 
 
 def load_config():

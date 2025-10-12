@@ -964,6 +964,15 @@
         setStatus('Fallback defaults loaded');
       });
     }
+    document.addEventListener('settings-imported', evt => {
+      const detail = (evt && evt.detail) ? evt.detail : {};
+      if (detail && detail.ai_defaults) {
+        current = detail.ai_defaults;
+        applyDefaults(current);
+        setStatus('Defaults updated from import');
+      }
+    });
+
   })();
   </script>
 
@@ -1018,23 +1027,43 @@
   const importBtn = document.getElementById('import-btn');
   const importInput = document.getElementById('import-file');
   const importStatus = document.getElementById('import-status');
+  const setImportStatus = (message, isError = false) => {
+    if (!importStatus) return;
+    importStatus.textContent = message || '';
+    importStatus.style.opacity = message ? '0.9' : '0';
+    importStatus.style.color = isError ? '#f66' : 'inherit';
+  };
   if (importBtn && importInput) {
     importBtn.addEventListener('click', async () => {
-      if (importStatus) importStatus.textContent = '';
-      if (!importInput.files || !importInput.files[0]) { alert('Pick a JSON file to import'); return; }
+      setImportStatus('');
+      if (!importInput.files || !importInput.files[0]) {
+        alert('Pick a JSON file to import');
+        return;
+      }
       const fd = new FormData();
       fd.append('file', importInput.files[0]);
+      importBtn.disabled = true;
+      setImportStatus('Importing...');
       try {
-        const res = await fetch('/settings/import', { method:'POST', body: fd });
-        if (res.ok) {
-          if (importStatus) importStatus.textContent = 'Imported. Reloading...';
-          setTimeout(() => { location.href = '/'; }, 600);
-        } else {
-          const j = await res.json().catch(() => ({}));
-          if (importStatus) importStatus.textContent = (j && j.error) ? j.error : 'Import failed';
+        const res = await fetch('/settings/import', { method: 'POST', body: fd });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || !data || data.success !== true) {
+          const message = (data && data.error) ? data.error : 'Import failed';
+          setImportStatus(message, true);
+          return;
         }
-      } catch (e) {
-        if (importStatus) importStatus.textContent = 'Import failed';
+        importInput.value = '';
+        setImportStatus('Settings imported successfully.');
+        document.dispatchEvent(new CustomEvent('settings-imported', { detail: data }));
+        if (Array.isArray(data.warnings) && data.warnings.length) {
+          console.warn('Settings import warnings:', data.warnings);
+        }
+        setTimeout(() => setImportStatus('', false), 4000);
+      } catch (err) {
+        console.error('Settings import failed', err);
+        setImportStatus('Import failed', true);
+      } finally {
+        importBtn.disabled = false;
       }
     });
   }
