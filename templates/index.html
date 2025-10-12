@@ -1234,9 +1234,26 @@
 
   let originalCardOrder = [];
 
-  function applyFiltersAndSorting() {
+  function applyFiltersAndSorting(options) {
     if (!dashboardGrid) {
       return;
+    }
+    const opts = (options && typeof options === 'object') ? options : {};
+    const candidate = opts.anchorCard;
+    const anchorCard = (candidate && candidate.nodeType === 1 && dashboardGrid.contains(candidate)) ? candidate : null;
+    let anchorRect = null;
+    let prevScrollY = 0;
+    let prevScrollX = 0;
+    if (anchorCard) {
+      try {
+        anchorRect = anchorCard.getBoundingClientRect();
+      } catch (err) {
+        anchorRect = null;
+      }
+      if (anchorRect) {
+        prevScrollY = typeof window.scrollY === 'number' ? window.scrollY : (window.pageYOffset || document.documentElement.scrollTop || 0);
+        prevScrollX = typeof window.scrollX === 'number' ? window.scrollX : (window.pageXOffset || document.documentElement.scrollLeft || 0);
+      }
     }
     const filterSet = new Set(activeTagFilters.map(tag => tag.toLowerCase()));
     cardTagsMap.forEach((tags, card) => {
@@ -1252,6 +1269,36 @@
     } else {
       originalCardOrder.forEach(card => {
         dashboardGrid.appendChild(card);
+      });
+    }
+    if (anchorCard && anchorRect) {
+      requestAnimationFrame(() => {
+        if (!anchorCard.isConnected) {
+          return;
+        }
+        if (anchorCard.style && anchorCard.style.display === 'none') {
+          return;
+        }
+        let nextRect = null;
+        try {
+          nextRect = anchorCard.getBoundingClientRect();
+        } catch (err) {
+          nextRect = null;
+        }
+        if (!nextRect) {
+          return;
+        }
+        const deltaY = nextRect.top - anchorRect.top;
+        const deltaX = nextRect.left - anchorRect.left;
+        if (Math.abs(deltaY) > 1 || Math.abs(deltaX) > 1) {
+          window.scrollTo(prevScrollX + deltaX, prevScrollY + deltaY);
+        } else {
+          const currentY = typeof window.scrollY === 'number' ? window.scrollY : (window.pageYOffset || 0);
+          const currentX = typeof window.scrollX === 'number' ? window.scrollX : (window.pageXOffset || 0);
+          if (currentX !== prevScrollX || currentY !== prevScrollY) {
+            window.scrollTo(prevScrollX, prevScrollY);
+          }
+        }
       });
     }
   }
@@ -1926,9 +1973,13 @@
     if (!card) return;
     refreshThumbnail(card, streamId);
     if (Array.isArray(conf.tags)) {
-      setCardTags(card, conf.tags);
-      applyFiltersAndSorting();
-      renderTagManager();
+      const previousTags = cardTagsMap.has(card) ? (cardTagsMap.get(card) || []).slice() : [];
+      const nextTags = setCardTags(card, conf.tags);
+      const tagsChanged = !tagsEqual(previousTags, nextTags);
+      if (tagsChanged) {
+        applyFiltersAndSorting({ anchorCard: card });
+        renderTagManager();
+      }
     }
     if (Array.isArray(data.tags)) {
       syncGlobalTags(data.tags);
@@ -3482,9 +3533,13 @@
           }
           if (data.new_config && data.new_config.tags !== undefined) {
             const tagList = Array.isArray(data.new_config.tags) ? data.new_config.tags : [];
-            setCardTags(card, tagList);
-            applyFiltersAndSorting();
-            renderTagManager();
+            const previousTags = cardTagsMap.has(card) ? (cardTagsMap.get(card) || []).slice() : [];
+            const nextTags = setCardTags(card, tagList);
+            const tagsChanged = !tagsEqual(previousTags, nextTags);
+            if (tagsChanged) {
+              applyFiltersAndSorting({ anchorCard: card });
+              renderTagManager();
+            }
           }
           if (Array.isArray(data.tags)) {
             syncGlobalTags(data.tags);
