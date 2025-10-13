@@ -542,9 +542,6 @@
   })();
 
   const socket = io();
-  const THUMBNAIL_REFRESH_MS = 15000;
-  const THUMBNAIL_RETRY_MS = 30000;
-  const thumbnailTimers = new Map();
   let openAiCard = null;
   const aiSummaryUpdaters = new WeakMap();
 
@@ -673,19 +670,53 @@
     }
   }
 
-  function updateThumbnailUI(card, payload) {
+  function normalizeThumbnailPayload(data) {
+    if (!data) return null;
+    if (data.thumbnail && typeof data.thumbnail === 'object') {
+      const t = data.thumbnail;
+      return {
+        imageUrl: t.url || data.image_url || data.url || null,
+        badge: t.badge ?? data.badge ?? null,
+        placeholder: typeof t.placeholder === 'boolean' ? t.placeholder : !!data.placeholder,
+        updatedAt: t.updated_at || data.updated_at || null,
+      };
+    }
+    return {
+      imageUrl: data.image_url || data.url || null,
+      badge: data.badge ?? null,
+      placeholder: !!data.placeholder,
+      updatedAt: data.updated_at || null,
+    };
+  }
+
+  function findStreamCard(streamId) {
+    if (!streamId) return null;
+    const cards = document.querySelectorAll('.stream-card[data-stream]');
+    for (const card of cards) {
+      if (card.dataset.stream === streamId) {
+        return card;
+      }
+    }
+    return null;
+  }
+
+  function updateThumbnailUI(card, payload, options = {}) {
+    if (!card) return;
     const area = card.querySelector('[data-thumbnail]');
     if (!area) return;
     const img = area.querySelector('.thumbnail-image');
-    const placeholder = area.querySelector('.thumbnail-placeholder');
+    const placeholderEl = area.querySelector('.thumbnail-placeholder');
     const badge = area.querySelector('.thumbnail-badge');
     const updated = area.querySelector('.thumbnail-updated');
     const refreshBtn = area.querySelector('.thumbnail-refresh-btn');
+    const { showSpinner = true } = options;
 
     const showError = (message) => {
       area.classList.add('is-error');
-      if (img) img.hidden = true;
-      setThumbnailPlaceholder(placeholder, true, message || 'Preview unavailable');
+      if (img) {
+        img.hidden = true;
+      }
+      setThumbnailPlaceholder(placeholderEl, true, message || 'Preview unavailable');
       if (badge) badge.hidden = true;
       if (updated) updated.hidden = true;
       if (refreshBtn) {
@@ -694,7 +725,8 @@
       }
     };
 
-    if (!payload) {
+    const normalized = normalizeThumbnailPayload(payload);
+    if (!normalized || !normalized.imageUrl) {
       showError('Preview unavailable');
       return;
     }
@@ -702,16 +734,16 @@
     area.classList.remove('is-error');
 
     if (badge) {
-      if (payload.badge) {
+      if (normalized.badge) {
         badge.hidden = false;
-        badge.textContent = payload.badge;
+        badge.textContent = normalized.badge;
       } else {
         badge.hidden = true;
       }
     }
 
     if (updated) {
-      const formatted = formatThumbnailTimestamp(payload.updated_at);
+      const formatted = formatThumbnailTimestamp(normalized.updatedAt);
       if (formatted) {
         updated.hidden = false;
         updated.textContent = formatted;
@@ -722,7 +754,7 @@
 
     const finishLoading = () => {
       area.classList.remove('is-loading');
-      setThumbnailPlaceholder(placeholder, false);
+      setThumbnailPlaceholder(placeholderEl, false);
       if (img) {
         img.hidden = false;
       }
@@ -759,13 +791,19 @@
     img.addEventListener('load', onLoad, { once: true });
     img.addEventListener('error', onError, { once: true });
 
-    img.hidden = true;
-    area.classList.add('is-loading');
-    setThumbnailPlaceholder(placeholder, true, 'Loading preview...');
+    if (showSpinner) {
+      img.hidden = true;
+      area.classList.add('is-loading');
+      setThumbnailPlaceholder(placeholderEl, true, 'Loading preview...');
+    } else {
+      area.classList.remove('is-loading');
+    }
 
-    const sourceUrl = payload.image_url.includes('?')
-      ? `${payload.image_url}&cb=${Date.now()}`
-      : `${payload.image_url}?cb=${Date.now()}`;
+    const baseUrl = normalized.imageUrl;
+    const needsCacheBust = baseUrl && !baseUrl.startsWith('data:');
+    const sourceUrl = needsCacheBust
+      ? (baseUrl.includes('?') ? `${baseUrl}&cb=${Date.now()}` : `${baseUrl}?cb=${Date.now()}`)
+      : baseUrl;
     img.src = sourceUrl;
 
     if (img.complete && img.naturalWidth > 0) {
@@ -773,29 +811,12 @@
     }
   }
 
-  function scheduleThumbnailRefresh(streamId, card, delay = THUMBNAIL_REFRESH_MS) {
-    if (!streamId) return;
-    if (thumbnailTimers.has(streamId)) {
-      clearTimeout(thumbnailTimers.get(streamId));
-    }
-    if (!document.body.contains(card)) {
-      thumbnailTimers.delete(streamId);
-      return;
-    }
-    const timer = setTimeout(() => refreshThumbnail(card, streamId), delay);
-    thumbnailTimers.set(streamId, timer);
-  }
-
   function refreshThumbnail(card, streamId, options = {}) {
     if (!card || !streamId) return Promise.resolve();
-    const { showSpinner = true } = options;
-    if (thumbnailTimers.has(streamId)) {
-      clearTimeout(thumbnailTimers.get(streamId));
-      thumbnailTimers.delete(streamId);
-    }
+    const { showSpinner = true, force = false } = options;
     const area = card.querySelector('[data-thumbnail]');
     if (!area) return Promise.resolve();
-    const placeholder = area.querySelector('.thumbnail-placeholder');
+    const placeholderEl = area.querySelector('.thumbnail-placeholder');
     const refreshBtn = area.querySelector('.thumbnail-refresh-btn');
     if (refreshBtn) {
       refreshBtn.disabled = true;
@@ -803,22 +824,24 @@
     }
     if (showSpinner) {
       area.classList.add('is-loading');
-      setThumbnailPlaceholder(placeholder, true, 'Loading preview...');
+      setThumbnailPlaceholder(placeholderEl, true, 'Loading preview...');
     }
 
-    const request = fetch(`/stream/thumbnail/${encodeURIComponent(streamId)}`)
+    const endpoint = force
+      ? `/stream/thumbnail/${encodeURIComponent(streamId)}?force=1`
+      : `/stream/thumbnail/${encodeURIComponent(streamId)}`;
+
+    return fetch(endpoint)
       .then(res => {
         if (!res.ok) throw new Error(`Thumbnail response ${res.status}`);
         return res.json();
       })
       .then(data => {
-        updateThumbnailUI(card, data);
-        scheduleThumbnailRefresh(streamId, card, THUMBNAIL_REFRESH_MS);
+        updateThumbnailUI(card, data, { showSpinner });
       })
       .catch(err => {
         console.warn('Thumbnail refresh failed for', streamId, err);
-        updateThumbnailUI(card, null);
-        scheduleThumbnailRefresh(streamId, card, THUMBNAIL_RETRY_MS);
+        updateThumbnailUI(card, null, { showSpinner });
       })
       .finally(() => {
         if (refreshBtn) {
@@ -826,9 +849,18 @@
           refreshBtn.classList.remove('is-active');
         }
       });
-
-    return request;
   }
+
+  socket.on('thumbnail_update', (data) => {
+    if (!data || !data.stream || !data.url) {
+      return;
+    }
+    const card = findStreamCard(data.stream);
+    if (!card) {
+      return;
+    }
+    updateThumbnailUI(card, data, { showSpinner: false });
+  });
 
   function initThumbnail(card) {
     if (!card) return;
@@ -836,15 +868,12 @@
     if (!streamId) return;
     const area = card.querySelector('[data-thumbnail]');
     if (!area) return;
-    area.classList.add('is-loading');
-    const placeholder = area.querySelector('.thumbnail-placeholder');
-    setThumbnailPlaceholder(placeholder, true, 'Loading preview...');
     const refreshBtn = area.querySelector('.thumbnail-refresh-btn');
     if (refreshBtn) {
       refreshBtn.addEventListener('click', (event) => {
         event.preventDefault();
         event.stopPropagation();
-        refreshThumbnail(card, streamId, { showSpinner: true });
+        refreshThumbnail(card, streamId, { showSpinner: true, force: true });
       });
     }
     refreshThumbnail(card, streamId, { showSpinner: true });
@@ -1946,7 +1975,7 @@
   socket.on('ai_job_update', (data) => {
     const streamId = data && data.stream_id;
     if (!streamId) return;
-    const card = document.querySelector(`.stream-card[data-stream="${streamId}"]`);
+    const card = findStreamCard(streamId);
     if (!card) return;
     if (data.job) {
       aiActiveJobs.set(streamId, data.job);
@@ -1969,7 +1998,7 @@
     const streamId = data && data.stream_id;
     const conf = data && data.config;
     if (!streamId || !conf) return;
-    const card = document.querySelector(`.stream-card[data-stream="${streamId}"]`);
+    const card = findStreamCard(streamId);
     if (!card) return;
     refreshThumbnail(card, streamId);
     if (Array.isArray(conf.tags)) {

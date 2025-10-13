@@ -1,5 +1,6 @@
 from flask import Flask, jsonify, send_file, request, render_template, redirect, url_for
 from flask_socketio import SocketIO, join_room, leave_room
+import base64
 import json
 import atexit
 import logging
@@ -12,11 +13,12 @@ import time
 import secrets
 import random
 import io
+import hashlib
 from copy import deepcopy
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union, Set
-from urllib.parse import urlparse
+from urllib.parse import quote, urlparse
 
 from PIL import Image, ImageDraw, ImageFont
 
@@ -158,6 +160,33 @@ NSFW_KEYWORD = "nsfw"
 
 # Cache image paths per folder so we can serve repeated requests without rescanning the disk.
 IMAGE_CACHE: Dict[str, Dict[str, Any]] = {}
+
+def _ensure_thumbnail_dir() -> Optional[Path]:
+    """Create the thumbnail cache directory if possible; return the path when ready."""
+    try:
+        THUMBNAIL_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:  # pragma: no cover - filesystem availability varies
+        logger.debug("Unable to prepare thumbnail cache directory: %s", exc)
+        return None
+    return THUMBNAIL_CACHE_DIR
+
+def _thumbnail_disk_path(stream_id: str) -> Path:
+    """Return the filesystem target for a stream's cached thumbnail image."""
+    digest = hashlib.sha1(stream_id.encode("utf-8")).hexdigest()[:10]
+    safe_name = re.sub(r"[^A-Za-z0-9_.-]", "_", stream_id) or "stream"
+    filename = f"{safe_name}-{digest}.jpg"
+    return THUMBNAIL_CACHE_DIR / filename
+
+def _thumbnail_public_url(stream_id: str) -> str:
+    """Return the public URL a client can use to load the cached thumbnail."""
+    return f"/thumbnails/{quote(stream_id, safe='')}.jpg"
+
+def _public_thumbnail_payload(record: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """Strip internal bookkeeping keys before sending thumbnail metadata to clients."""
+    if not isinstance(record, dict):
+        return None
+    payload = {k: v for k, v in record.items() if not k.startswith("_")}
+    return payload or None
 IMAGE_CACHE_LOCK = threading.Lock()
 STREAM_RUNTIME_STATE: Dict[str, Dict[str, Any]] = {}
 STREAM_RUNTIME_LOCK = threading.Lock()
@@ -1628,6 +1657,18 @@ def _get_stream_runtime_state(stream_id: str) -> Dict[str, Any]:
         entry = STREAM_RUNTIME_STATE.get(stream_id)
         return dict(entry) if entry else {}
 
+def _get_runtime_thumbnail_payload(stream_id: str) -> Optional[Dict[str, Any]]:
+    """Return the thumbnail metadata for a stream suitable for client payloads."""
+    with STREAM_RUNTIME_LOCK:
+        entry = STREAM_RUNTIME_STATE.get(stream_id)
+        if not entry:
+            return None
+        record = entry.get("thumbnail")
+        if not isinstance(record, dict):
+            return None
+        payload = {k: v for k, v in record.items() if not k.startswith("_")}
+        return payload or None
+
 
 def _update_stream_runtime_state(
     stream_id: str,
@@ -1637,30 +1678,72 @@ def _update_stream_runtime_state(
     media_mode: Optional[str] = None,
     stream_url: Optional[str] = None,
     source: str = "unknown",
-) -> None:
+    force_thumbnail: bool = False,
+) -> Optional[Dict[str, Any]]:
     if not stream_id or stream_id.startswith("_"):
-        return
+        return None
     normalized_mode = media_mode.strip().lower() if isinstance(media_mode, str) else None
     normalized_kind = kind.strip().lower() if isinstance(kind, str) else None
     resolved_path = path if path not in ("", None) else None
     if resolved_path and not normalized_kind:
         normalized_kind = _detect_media_kind(resolved_path)
+    timestamp = time.time()
+    changed = False
+    existing_thumbnail: Optional[Dict[str, Any]] = None
     with STREAM_RUNTIME_LOCK:
         entry = STREAM_RUNTIME_STATE.setdefault(stream_id, {})
-        if media_mode is not None:
+        previous_mode = entry.get("media_mode")
+        previous_path = entry.get("path")
+        previous_kind = entry.get("kind")
+        previous_url = entry.get("stream_url")
+        existing_thumbnail = dict(entry["thumbnail"]) if isinstance(entry.get("thumbnail"), dict) else None
+
+        if normalized_mode is not None:
+            if previous_mode != normalized_mode:
+                changed = True
             entry["media_mode"] = normalized_mode
+        elif "media_mode" not in entry:
+            entry["media_mode"] = None
+
         if path is not None:
-            entry["path"] = resolved_path
             if resolved_path is None:
-                entry.pop("kind", None)
-            elif normalized_kind:
-                entry["kind"] = normalized_kind
-        elif normalized_kind:
+                if previous_path is not None:
+                    changed = True
+                entry.pop("path", None)
+                if "kind" in entry:
+                    entry.pop("kind", None)
+            else:
+                if previous_path != resolved_path:
+                    changed = True
+                entry["path"] = resolved_path
+                detected_kind = normalized_kind or _detect_media_kind(resolved_path)
+                if previous_kind != detected_kind:
+                    changed = True
+                entry["kind"] = detected_kind
+        elif normalized_kind is not None:
+            if previous_kind != normalized_kind:
+                changed = True
             entry["kind"] = normalized_kind
+
         if stream_url is not None:
-            entry["stream_url"] = stream_url or None
-        entry["timestamp"] = time.time()
+            if isinstance(stream_url, str):
+                candidate = stream_url.strip()
+                normalized_url = candidate or None
+            else:
+                normalized_url = None
+            if previous_url != normalized_url:
+                changed = True
+            entry["stream_url"] = normalized_url
+
+        entry["timestamp"] = timestamp
         entry["source"] = source
+
+    if not changed and not force_thumbnail:
+        return _get_runtime_thumbnail_payload(stream_id)
+    thumbnail_info = _refresh_stream_thumbnail(stream_id, force=force_thumbnail)
+    if thumbnail_info is None and existing_thumbnail:
+        return {k: v for k, v in existing_thumbnail.items() if not k.startswith("_")}
+    return thumbnail_info
 
 def _runtime_timestamp_to_iso(ts: Optional[float]) -> Optional[str]:
     if not ts:
@@ -1930,6 +2013,7 @@ class StreamPlaybackState:
             "error": self.error,
             "source": self.last_reason,
             "server_time": now,
+            "thumbnail": _get_runtime_thumbnail_payload(self.stream_id),
         }
         return payload
 
@@ -2070,16 +2154,31 @@ class StreamPlaybackManager:
             playback_mode = entry.get("playback_mode")
             if not media:
                 return None
-            state.set_media(media, duration=duration, source="history_prev", playback_mode=playback_mode, history_index=target_index, add_to_history=False)
+            media_copy = dict(media)
+            state.set_media(media_copy, duration=duration, source="history_prev", playback_mode=playback_mode, history_index=target_index, add_to_history=False)
             payload = state.to_payload()
+            media_mode = state.media_mode
+        runtime_args = {
+            "path": media_copy.get("path"),
+            "kind": media_copy.get("kind"),
+            "media_mode": media_mode,
+            "stream_url": media_copy.get("stream_url"),
+            "source": "history_prev",
+        }
+        thumbnail_info = _update_stream_runtime_state(stream_id, **runtime_args)
+        if payload and thumbnail_info is not None:
+            payload["thumbnail"] = thumbnail_info
         self._emit_state(payload, room=stream_id)
         return payload
 
     def skip_next(self, stream_id: str) -> Optional[Dict[str, Any]]:
+        media_copy: Optional[Dict[str, Any]] = None
+        media_mode: Optional[str] = None
         with self._lock:
             state = self._states.get(stream_id)
             if not state or not state.should_run():
                 state_to_emit = state.to_payload() if state else None
+                media_mode = state.media_mode if state else None
             else:
                 target_index = state.history_index + 1
                 entry = state.get_history_entry(target_index)
@@ -2088,13 +2187,28 @@ class StreamPlaybackManager:
                     duration = entry.get("duration")
                     playback_mode = entry.get("playback_mode")
                     if media:
-                        state.set_media(media, duration=duration, source="history_next", playback_mode=playback_mode, history_index=target_index, add_to_history=False)
+                        media_copy = dict(media)
+                        state.set_media(media_copy, duration=duration, source="history_next", playback_mode=playback_mode, history_index=target_index, add_to_history=False)
                         state_to_emit = state.to_payload()
                     else:
                         state_to_emit = None
+                        media_copy = None
                 else:
                     state_to_emit = None
+                    media_copy = None
+                media_mode = state.media_mode
         if state_to_emit:
+            if media_copy is not None:
+                runtime_args = {
+                    "path": media_copy.get("path"),
+                    "kind": media_copy.get("kind"),
+                    "media_mode": media_mode,
+                    "stream_url": media_copy.get("stream_url"),
+                    "source": "history_next",
+                }
+                thumbnail_info = _update_stream_runtime_state(stream_id, **runtime_args)
+                if thumbnail_info is not None:
+                    state_to_emit["thumbnail"] = thumbnail_info
             self._emit_state(state_to_emit, room=stream_id)
             return state_to_emit
         payload = self._advance_stream(stream_id, reason="manual")
@@ -2220,18 +2334,40 @@ class StreamPlaybackManager:
         return max(1.0, float(state.duration_setting))
 
     def _advance_stream(self, stream_id: str, *, reason: str) -> Optional[Dict[str, Any]]:
+        payload: Optional[Dict[str, Any]]
+        runtime_args: Dict[str, Any]
         with self._lock:
             state = self._states.get(stream_id)
             if not state or not state.should_run():
                 return None
             media = self._next_media(state)
+            media_mode = state.media_mode
             if media is None:
                 state.set_error("no_media")
-                return state.to_payload()
-            duration = self._compute_duration(state, media)
-            playback_mode = state.video_playback_mode if media.get("kind") == "video" else None
-            state.set_media(media, duration=duration, source=reason, playback_mode=playback_mode)
-            payload = state.to_payload()
+                payload = state.to_payload()
+                runtime_args = {
+                    "path": None,
+                    "kind": None,
+                    "media_mode": media_mode,
+                    "stream_url": None,
+                    "source": f"playback_{reason}",
+                    "force_thumbnail": True,
+                }
+            else:
+                duration = self._compute_duration(state, media)
+                playback_mode = state.video_playback_mode if media.get("kind") == "video" else None
+                state.set_media(media, duration=duration, source=reason, playback_mode=playback_mode)
+                payload = state.to_payload()
+                runtime_args = {
+                    "path": media.get("path"),
+                    "kind": media.get("kind"),
+                    "media_mode": media_mode,
+                    "stream_url": media.get("stream_url"),
+                    "source": f"playback_{reason}",
+                }
+        thumbnail_info = _update_stream_runtime_state(stream_id, **runtime_args)
+        if payload and thumbnail_info is not None:
+            payload["thumbnail"] = thumbnail_info
         return payload
 
     def _loop(self) -> None:
@@ -2422,6 +2558,34 @@ def _create_livestream_thumbnail(stream_url: Optional[str]) -> Optional[Image.Im
         logger.debug('Livestream thumbnail compose failed for %s: %s', stream_url, exc)
         return None
 
+def _render_thumbnail_image(snapshot: Dict[str, Any]) -> Tuple[Image.Image, bool]:
+    """Return a composed thumbnail image and placeholder flag for the snapshot data."""
+    kind = snapshot.get("kind")
+    path = snapshot.get("path")
+    badge = snapshot.get("badge") or None
+    image_obj: Optional[Image.Image] = None
+    placeholder = False
+    if kind == "image" and path:
+        media_path = _resolve_media_path(path)
+        if media_path is not None:
+            image_obj = _create_thumbnail_image(media_path)
+    elif kind == "video" and path:
+        media_path = _resolve_media_path(path)
+        if media_path is not None:
+            image_obj = _create_video_thumbnail(media_path)
+    elif kind == "livestream":
+        image_obj = _create_livestream_thumbnail(snapshot.get("stream_url"))
+    if image_obj is None:
+        placeholder = True
+        if kind == "video":
+            badge_text = badge or "Video"
+        elif kind == "livestream":
+            badge_text = badge or "Live"
+        else:
+            badge_text = badge or "Image"
+        image_obj = _generate_placeholder_thumbnail(badge_text)
+    return image_obj, placeholder
+
 
 def _thumbnail_image_to_bytes(image: Image.Image) -> io.BytesIO:
     buffer = io.BytesIO()
@@ -2484,6 +2648,91 @@ def _compute_thumbnail_snapshot(stream_id: str) -> Optional[Dict[str, Any]]:
         'placeholder': placeholder,
         'source': runtime.get('source'),
     }
+
+def _thumbnail_signature(snapshot: Dict[str, Any]) -> Tuple[Any, ...]:
+    return (
+        snapshot.get("media_mode"),
+        snapshot.get("kind"),
+        snapshot.get("path"),
+        snapshot.get("stream_url"),
+    )
+
+def _refresh_stream_thumbnail(stream_id: str, snapshot: Optional[Dict[str, Any]] = None, *, force: bool = False) -> Optional[Dict[str, Any]]:
+    """Ensure a cached thumbnail exists for the stream and return client metadata."""
+    info = snapshot if snapshot is not None else _compute_thumbnail_snapshot(stream_id)
+    if info is None:
+        return None
+    signature = _thumbnail_signature(info)
+    with STREAM_RUNTIME_LOCK:
+        entry = STREAM_RUNTIME_STATE.setdefault(stream_id, {})
+        existing = entry.get("thumbnail")
+        if not force and isinstance(existing, dict) and existing.get("_signature") == signature:
+            return _public_thumbnail_payload(existing)
+    image_obj, placeholder = _render_thumbnail_image(info)
+    if image_obj is None:
+        return None
+    buffer = _thumbnail_image_to_bytes(image_obj)
+    binary = buffer.getvalue()
+    updated_ts = time.time()
+    record: Dict[str, Any] = {
+        "url": None,
+        "placeholder": placeholder,
+        "badge": info.get("badge"),
+        "updated_at": _runtime_timestamp_to_iso(updated_ts),
+        "_signature": signature,
+        "_updated_ts": updated_ts,
+    }
+    saved_path: Optional[Path] = None
+    data_url: Optional[str] = None
+
+    cache_dir = _ensure_thumbnail_dir()
+    if cache_dir is not None:
+        target_path = _thumbnail_disk_path(stream_id)
+        temp_path = target_path.with_suffix(".tmp")
+        try:
+            with open(temp_path, "wb") as fh:
+                fh.write(binary)
+            os.replace(temp_path, target_path)
+            saved_path = target_path
+            record["url"] = _thumbnail_public_url(stream_id)
+        except OSError as exc:  # pragma: no cover - filesystem differences best effort
+            logger.debug("Failed to persist thumbnail for %s: %s", stream_id, exc)
+            try:
+                if temp_path.exists():
+                    temp_path.unlink()
+            except OSError:
+                pass
+
+    if saved_path is None:
+        encoded = base64.b64encode(binary).decode("ascii")
+        data_url = f"data:image/jpeg;base64,{encoded}"
+        record["url"] = data_url
+
+    if saved_path is not None:
+        record["_path"] = str(saved_path)
+    if data_url is not None:
+        record["_data_url"] = data_url
+
+    with STREAM_RUNTIME_LOCK:
+        entry = STREAM_RUNTIME_STATE.setdefault(stream_id, {})
+        entry["thumbnail"] = record
+
+    payload = _public_thumbnail_payload(record)
+    if payload:
+        try:
+            socketio.emit(
+                "thumbnail_update",
+                {
+                    "stream": stream_id,
+                    "url": record["url"],
+                    "placeholder": placeholder,
+                    "badge": info.get("badge"),
+                    "updated_at": payload.get("updated_at"),
+                },
+            )
+        except Exception as exc:  # pragma: no cover - socket broadcast best effort
+            logger.debug("Thumbnail update emit failed for %s: %s", stream_id, exc)
+    return payload
 ensure_ai_presets_storage()
 # Backfill defaults for existing stream entries
 for k, v in list(settings.items()):
@@ -4399,6 +4648,13 @@ def stream_thumbnail_metadata(stream_id):
     info = _compute_thumbnail_snapshot(stream_id)
     if info is None:
         return jsonify({"error": f"No stream '{stream_id}' found"}), 404
+    force_refresh = _parse_truthy(request.args.get("force"))
+    if force_refresh:
+        thumbnail_info = _refresh_stream_thumbnail(stream_id, info, force=True)
+    else:
+        thumbnail_info = _get_runtime_thumbnail_payload(stream_id)
+        if thumbnail_info is None:
+            thumbnail_info = _refresh_stream_thumbnail(stream_id, info)
     timestamp = info.get('timestamp')
     cache_key = None
     if isinstance(timestamp, (int, float)):
@@ -4406,15 +4662,20 @@ def stream_thumbnail_metadata(stream_id):
             cache_key = str(int(timestamp))
         except (TypeError, ValueError):
             cache_key = None
-    image_url = url_for('stream_thumbnail_image', stream_id=stream_id)
-    if cache_key:
-        image_url = f"{image_url}?v={cache_key}"
+    raw_url = thumbnail_info.get("url") if isinstance(thumbnail_info, dict) else None
+    if raw_url and raw_url.startswith("data:"):
+        image_url = raw_url
+    else:
+        image_url = raw_url or url_for('stream_thumbnail_image', stream_id=stream_id)
+        if cache_key:
+            image_url = f"{image_url}?v={cache_key}"
     payload = {
         'stream_id': stream_id,
         'media_mode': info.get('media_mode'),
         'kind': info.get('kind'),
         'path': info.get('path'),
         'image_url': image_url,
+        'thumbnail': thumbnail_info,
         'placeholder': bool(info.get('placeholder')),
         'badge': info.get('badge'),
         'updated_at': _runtime_timestamp_to_iso(info.get('timestamp')),
@@ -4431,32 +4692,37 @@ def stream_thumbnail_image(stream_id):
     info = _compute_thumbnail_snapshot(stream_id)
     if info is None:
         return 'Not found', 404
-    kind = info.get('kind')
-    path = info.get('path')
-    image_obj = None
-    if kind == "image" and path:
-        media_path = _resolve_media_path(path)
-        if media_path is not None:
-            image_obj = _create_thumbnail_image(media_path)
-    elif kind == "video" and path:
-        media_path = _resolve_media_path(path)
-        if media_path is not None:
-            image_obj = _create_video_thumbnail(media_path)
-    elif kind == "livestream":
-        image_obj = _create_livestream_thumbnail(info.get("stream_url"))
-    if image_obj is None:
-        badge = info.get('badge') or 'No Preview'
-        if kind == 'video':
-            badge = 'Video'
-        elif kind == 'livestream':
-            badge = 'Live'
-        image_obj = _generate_placeholder_thumbnail(badge)
-    buffer = _thumbnail_image_to_bytes(image_obj)
-    response = send_file(buffer, mimetype='image/jpeg')
+    _refresh_stream_thumbnail(stream_id, info)
+    target_path = _thumbnail_disk_path(stream_id)
+    raw_record: Optional[Dict[str, Any]] = None
+    with STREAM_RUNTIME_LOCK:
+        entry = STREAM_RUNTIME_STATE.get(stream_id)
+        if entry and isinstance(entry.get("thumbnail"), dict):
+            raw_record = dict(entry["thumbnail"])
+    if target_path.exists():
+        response = send_file(str(target_path), mimetype='image/jpeg')
+    else:
+        data_url = raw_record.get("_data_url") if isinstance(raw_record, dict) else None
+        if isinstance(data_url, str) and "," in data_url:
+            encoded = data_url.split(",", 1)[1]
+            try:
+                binary = base64.b64decode(encoded)
+            except Exception:  # pragma: no cover - defensive decode
+                binary = b""
+            buffer = io.BytesIO(binary)
+            response = send_file(buffer, mimetype='image/jpeg')
+        else:
+            image_obj, _ = _render_thumbnail_image(info)
+            buffer = _thumbnail_image_to_bytes(image_obj)
+            response = send_file(buffer, mimetype='image/jpeg')
     response.headers['Cache-Control'] = 'no-store, max-age=0'
     return response
 
 
+@app.route("/thumbnails/<stream_id>.jpg", methods=["GET"])
+def cached_stream_thumbnail(stream_id: str):
+    """Serve cached dashboard thumbnails via the simplified public path."""
+    return stream_thumbnail_image(stream_id)
 
 
 def _normalize_group_layout(layout: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
