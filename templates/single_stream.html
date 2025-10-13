@@ -204,12 +204,17 @@ function computeServerPlaybackPosition(state) {
     return 0;
   }
   const base = Number(state.position);
+  const serverTime = Number(state.server_time);
   const startedAt = Number(state.started_at);
   const duration = Number(state.duration);
   let position = Number.isFinite(base) ? base : 0;
-  if (!state.is_paused && Number.isFinite(startedAt)) {
+  if (!state.is_paused) {
     const nowSeconds = Date.now() / 1000;
-    position += Math.max(0, nowSeconds - startedAt);
+    if (Number.isFinite(serverTime)) {
+      position += Math.max(0, nowSeconds - serverTime);
+    } else if (Number.isFinite(startedAt)) {
+      position = Math.max(0, nowSeconds - startedAt);
+    }
   }
   if (Number.isFinite(duration) && duration > 0) {
     position = Math.min(position, duration);
@@ -236,7 +241,7 @@ function syncVideoCurrentTime(video, state) {
     if (!Number.isFinite(target)) {
       return;
     }
-    if (Math.abs(video.currentTime - target) > 0.35) {
+    if (Math.abs(video.currentTime - target) > 0.2) {
       try {
         video.currentTime = target;
       } catch (err) {
@@ -678,6 +683,60 @@ function handleStreamUpdate(payload) {
   }
 }
 
+function handleSyncTime(payload) {
+  if (!payload || payload.stream_id !== streamId) {
+    return;
+  }
+  if (!usingSynchronizedPlayback || !serverPlaybackState) {
+    return;
+  }
+  const incomingMedia = payload.media;
+  const currentMedia = serverPlaybackState.media;
+  if (
+    incomingMedia &&
+    incomingMedia.path &&
+    currentMedia &&
+    currentMedia.path &&
+    incomingMedia.path !== currentMedia.path
+  ) {
+    handleStreamUpdate(payload);
+    return;
+  }
+  const updated = { ...serverPlaybackState };
+  if (Object.prototype.hasOwnProperty.call(payload, 'media')) {
+    updated.media = incomingMedia || null;
+  }
+  if (Object.prototype.hasOwnProperty.call(payload, 'duration')) {
+    updated.duration = payload.duration;
+  }
+  if (Object.prototype.hasOwnProperty.call(payload, 'position')) {
+    const numeric = Number(payload.position);
+    updated.position = Number.isFinite(numeric) ? numeric : 0;
+  }
+  if (Object.prototype.hasOwnProperty.call(payload, 'started_at')) {
+    updated.started_at = payload.started_at;
+  }
+  if (Object.prototype.hasOwnProperty.call(payload, 'is_paused')) {
+    updated.is_paused = !!payload.is_paused;
+  }
+  if (Object.prototype.hasOwnProperty.call(payload, 'server_time')) {
+    const asNumber = Number(payload.server_time);
+    updated.server_time = Number.isFinite(asNumber) ? asNumber : Date.now() / 1000;
+  } else {
+    updated.server_time = Date.now() / 1000;
+  }
+  serverPlaybackState = updated;
+  const media = updated.media;
+  if (!media) {
+    return;
+  }
+  const kind = detectMediaKind(media.path, media.kind);
+  if (kind === 'video' && activeVideoElement) {
+    syncVideoCurrentTime(activeVideoElement, updated);
+    applyVideoPlaybackState(activeVideoElement, updated);
+  }
+}
+
 function startAiRotation(paths, config, container) {
   setMediaController(createNoopMediaController());
   clearPlaybackTimer();
@@ -925,7 +984,9 @@ socket.on('refresh', data => {
 });
 
 socket.on('video_control', handleVideoControl);
+socket.on('stream_init', handleStreamUpdate);
 socket.on('stream_update', handleStreamUpdate);
+socket.on('sync_time', handleSyncTime);
 
 load();
 </script>

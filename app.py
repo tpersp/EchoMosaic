@@ -164,7 +164,9 @@ STREAM_RUNTIME_LOCK = threading.Lock()
 
 STREAM_PLAYBACK_HISTORY_LIMIT = 50
 STREAM_UPDATE_EVENT = "stream_update"
-STREAM_STATE_EVENT = "stream_state"
+STREAM_INIT_EVENT = "stream_init"
+SYNC_TIME_EVENT = "sync_time"
+STREAM_SYNC_INTERVAL_SECONDS = 3.0
 
 playback_manager: Optional["StreamPlaybackManager"] = None
 
@@ -1712,6 +1714,7 @@ class StreamPlaybackState:
         self.updated_at: float = time.time()
         self._source_signature: Optional[Tuple[Any, ...]] = None
         self._duration_signature: Optional[Tuple[Any, ...]] = None
+        self.last_sync_emit: float = 0.0
 
     def apply_config(self, conf: Dict[str, Any]) -> Dict[str, bool]:
         previous_should_run = self.should_run()
@@ -1797,6 +1800,7 @@ class StreamPlaybackState:
         self.error = None
         self.last_reason = "reset"
         self.updated_at = time.time()
+        self.last_sync_emit = 0.0
 
     def set_error(self, code: str) -> None:
         self.current_media = None
@@ -1808,6 +1812,7 @@ class StreamPlaybackState:
         self.error = code
         self.last_reason = code
         self.updated_at = time.time()
+        self.last_sync_emit = 0.0
 
     def get_position(self, now: Optional[float] = None) -> float:
         if now is None:
@@ -1928,6 +1933,22 @@ class StreamPlaybackState:
         }
         return payload
 
+    def to_sync_payload(self, now: Optional[float] = None) -> Dict[str, Any]:
+        snapshot = now if now is not None else time.time()
+        position = self.get_position(snapshot)
+        if self.duration is not None:
+            position = min(self.duration, position)
+        payload = {
+            "stream_id": self.stream_id,
+            "media": dict(self.current_media) if self.current_media else None,
+            "duration": self.duration,
+            "position": position,
+            "started_at": self.started_at,
+            "is_paused": self.is_paused,
+            "server_time": snapshot,
+        }
+        return payload
+
 
 def _compute_video_duration_seconds(rel_path: Optional[str]) -> Optional[float]:
     if not rel_path:
@@ -1978,6 +1999,9 @@ class StreamPlaybackManager:
         self._stop.set()
         if self._thread.is_alive():
             self._thread.join(timeout=2.0)
+
+    def emit_state(self, payload: Dict[str, Any], *, room: Optional[str] = None, event: str = STREAM_UPDATE_EVENT) -> None:
+        self._emit_state(payload, room=room, event=event)
 
     def bootstrap(self, stream_settings: Dict[str, Any]) -> None:
         for stream_id, conf in stream_settings.items():
@@ -2130,14 +2154,31 @@ class StreamPlaybackManager:
             return self.resume(stream_id)
         return self.pause(stream_id)
 
-    def _emit_state(self, payload: Dict[str, Any], *, room: Optional[str] = None) -> None:
-        target_room = room or payload.get("stream_id")
-        if not target_room:
+    def _mark_sync_sent(self, stream_id: Optional[str], server_time: Optional[float]) -> None:
+        if not stream_id:
             return
+        with self._lock:
+            state = self._states.get(stream_id)
+            if not state:
+                return
+            if isinstance(server_time, (int, float)):
+                state.last_sync_emit = float(server_time)
+            else:
+                state.last_sync_emit = time.time()
+
+    def _emit_state(self, payload: Dict[str, Any], *, room: Optional[str] = None, event: str = STREAM_UPDATE_EVENT) -> None:
+        stream_id = payload.get("stream_id")
+        server_time = payload.get("server_time")
+        if stream_id:
+            self._mark_sync_sent(stream_id, server_time if isinstance(server_time, (int, float)) else None)
+        target_room = room or stream_id
         try:
-            socketio.emit(STREAM_UPDATE_EVENT, payload, to=target_room)
+            if target_room:
+                socketio.emit(event, payload, to=target_room)
+            else:
+                socketio.emit(event, payload)
         except Exception as exc:  # pragma: no cover - socket broadcast best effort
-            logger.debug("Stream update emit failed for %s: %s", target_room, exc)
+            logger.debug("Stream emit failed for %s (%s): %s", target_room or stream_id, event, exc)
 
     def _next_media(self, state: StreamPlaybackState) -> Optional[Dict[str, Any]]:
         entries = list_media(state.folder, hide_nsfw=state.hide_nsfw)
@@ -2198,22 +2239,37 @@ class StreamPlaybackManager:
             now = time.time()
             next_deadline: Optional[float] = None
             due_streams: List[str] = []
+            sync_payloads: List[Dict[str, Any]] = []
             with self._lock:
                 for stream_id, state in self._states.items():
-                    if not state.should_run() or state.is_paused:
+                    if not state.should_run():
                         continue
-                    deadline = state.next_auto_event
-                    if deadline is None:
-                        continue
-                    if deadline <= now:
-                        due_streams.append(stream_id)
+                    is_due = False
+                    if not state.is_paused:
+                        deadline = state.next_auto_event
+                        if deadline is not None:
+                            if deadline <= now:
+                                due_streams.append(stream_id)
+                                is_due = True
+                            else:
+                                if next_deadline is None or deadline < next_deadline:
+                                    next_deadline = deadline
                     else:
-                        if next_deadline is None or deadline < next_deadline:
-                            next_deadline = deadline
+                        deadline = None
+                    if (
+                        state.current_media
+                        and not state.is_paused
+                        and not is_due
+                    ):
+                        last_sync = state.last_sync_emit if isinstance(state.last_sync_emit, (int, float)) else 0.0
+                        if last_sync <= 0.0 or (now - last_sync) >= STREAM_SYNC_INTERVAL_SECONDS:
+                            sync_payloads.append(state.to_sync_payload(now))
             for stream_id in due_streams:
                 payload = self._advance_stream(stream_id, reason="auto")
                 if payload:
                     self._emit_state(payload, room=stream_id)
+            for payload in sync_payloads:
+                self._emit_state(payload, event=SYNC_TIME_EVENT)
             if next_deadline is None:
                 sleep_for = 1.0
             else:
@@ -4488,7 +4544,7 @@ def handle_stream_subscribe(payload):
     if not state:
         state = playback_manager.get_state(stream_id)
     if state:
-        socketio.emit(STREAM_UPDATE_EVENT, state, to=request.sid)
+        playback_manager.emit_state(state, room=request.sid, event=STREAM_INIT_EVENT)
 
 
 @socketio.on("stream_unsubscribe")
