@@ -1,5 +1,3 @@
-from flask import Flask, jsonify, send_file, request, render_template, redirect, url_for
-from flask_socketio import SocketIO, join_room, leave_room
 import base64
 import json
 import atexit
@@ -17,6 +15,8 @@ import hashlib
 from copy import deepcopy
 from datetime import datetime, timedelta
 from pathlib import Path
+from concurrent.futures import Future, ThreadPoolExecutor
+from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple, Union, Set
 from urllib.parse import quote, urlparse
 
@@ -34,8 +34,15 @@ try:
 except Exception:
     requests = None
 
+from flask import Flask, jsonify, send_file, request, render_template, redirect, url_for
+from flask_socketio import SocketIO, join_room, leave_room
 from stablehorde import StableHorde, StableHordeError, StableHordeCancelled
 from update_helpers import backup_user_state, restore_user_state
+
+try:
+    from yt_dlp import YoutubeDL  # type: ignore[import]
+except Exception:  # pragma: no cover - yt_dlp is optional at import-time
+    YoutubeDL = None
 
 app = Flask(__name__, static_folder="static", static_url_path="/static")
 socketio = SocketIO(app)
@@ -196,6 +203,11 @@ STREAM_UPDATE_EVENT = "stream_update"
 STREAM_INIT_EVENT = "stream_init"
 SYNC_TIME_EVENT = "sync_time"
 STREAM_SYNC_INTERVAL_SECONDS = 3.0
+
+LIVE_HLS_ASYNC = True
+HLS_TTL_SECS = 3600
+MAX_HLS_WORKERS = 3
+HLS_ERROR_RETRY_SECS = 30
 
 playback_manager: Optional["StreamPlaybackManager"] = None
 
@@ -1242,6 +1254,12 @@ AI_DEFAULT_PERSIST = _coerce_bool(config_data.get("AI_DEFAULT_PERSIST"), AI_DEFA
 AI_POLL_INTERVAL = _coerce_float(config_data.get("AI_POLL_INTERVAL"), AI_POLL_INTERVAL)
 AI_TIMEOUT = _coerce_float(config_data.get("AI_TIMEOUT"), AI_TIMEOUT)
 
+LIVE_HLS_ASYNC = _coerce_bool(config_data.get("LIVE_HLS_ASYNC"), LIVE_HLS_ASYNC)
+HLS_TTL_SECS = max(60, _coerce_int(config_data.get("LIVE_HLS_TTL_SECS"), HLS_TTL_SECS))
+MAX_HLS_WORKERS = max(1, _coerce_int(config_data.get("LIVE_HLS_MAX_WORKERS"), MAX_HLS_WORKERS))
+HLS_ERROR_RETRY_SECS = max(5, _coerce_int(config_data.get("LIVE_HLS_ERROR_RETRY_SECS"), HLS_ERROR_RETRY_SECS))
+HLS_ERROR_RETRY_SECS = min(HLS_ERROR_RETRY_SECS, HLS_TTL_SECS)
+
 
 AI_OUTPUT_ROOT = _ensure_dir(Path(IMAGE_DIR) / AI_OUTPUT_SUBDIR)
 AI_TEMP_ROOT = _ensure_dir(Path(IMAGE_DIR) / AI_TEMP_SUBDIR)
@@ -1262,6 +1280,45 @@ ai_jobs: Dict[str, Dict[str, Any]] = {}
 ai_job_controls: Dict[str, Dict[str, Any]] = {}
 ai_model_cache: Dict[str, Any] = {"timestamp": 0.0, "data": []}
 auto_scheduler: Optional['AutoGenerateScheduler'] = None
+
+
+@dataclass
+class HLSCacheEntry:
+    url: Optional[str]
+    extracted_at: float
+    error: Optional[str] = None
+
+
+HLS_CACHE: Dict[str, HLSCacheEntry] = {}
+HLS_JOBS: Dict[str, Future] = {}
+HLS_METRICS: Dict[str, int] = {
+    "hits": 0,
+    "misses": 0,
+    "stale": 0,
+    "jobs_started": 0,
+    "jobs_completed": 0,
+    "errors": 0,
+}
+HLS_LOCK = threading.RLock()
+HLS_LOG_PREFIX = "live_hls"
+HLS_EXECUTOR: Optional[ThreadPoolExecutor]
+if LIVE_HLS_ASYNC:
+    HLS_EXECUTOR = ThreadPoolExecutor(max_workers=MAX_HLS_WORKERS, thread_name_prefix="live-hls")
+else:
+    HLS_EXECUTOR = None
+
+
+def _shutdown_hls_executor():
+    executor = HLS_EXECUTOR
+    if executor is None:
+        return
+    try:
+        executor.shutdown(wait=False, cancel_futures=True)
+    except TypeError:  # Python < 3.9 fallback
+        executor.shutdown(wait=False)
+
+
+atexit.register(_shutdown_hls_executor)
 
 
 def _relative_image_path(path: Union[Path, str]) -> str:
@@ -2874,21 +2931,183 @@ if playback_manager is None:
     atexit.register(playback_manager.stop)
 
 
-def try_get_hls(original_url):
+def _hls_url_fingerprint(original_url: str) -> str:
+    if not original_url:
+        return "none"
+    try:
+        return hashlib.sha1(original_url.encode("utf-8")).hexdigest()[:10]
+    except Exception:
+        return "error"
+
+
+def _log_hls_event(event: str, stream_id: str, original_url: str, **extra: Any) -> None:
+    if not LIVE_HLS_ASYNC:
+        return
+    details = " ".join(f"{k}={v}" for k, v in sorted(extra.items())) if extra else ""
+    logger.info(
+        "%s.%s stream=%s url=%s%s",
+        HLS_LOG_PREFIX,
+        event,
+        stream_id or "-",
+        _hls_url_fingerprint(original_url),
+        f" {details}" if details else "",
+    )
+
+
+def _record_hls_metric(name: str, delta: int = 1) -> None:
+    if not LIVE_HLS_ASYNC:
+        return
+    with HLS_LOCK:
+        HLS_METRICS[name] = HLS_METRICS.get(name, 0) + delta
+
+
+def _live_hls_cache_key(stream_id: Optional[str], original_url: str) -> str:
+    sid = (stream_id or "").strip() or "unknown"
+    return f"live:{sid}:{original_url}"
+
+
+def _is_manifest_url(candidate: Optional[str]) -> bool:
+    if not isinstance(candidate, str):
+        return False
+    lower = candidate.lower()
+    return any(marker in lower for marker in (".m3u8", ".mpd", "manifest.mpd", "format=m3u8"))
+
+
+def _extract_hls_candidate(info: Dict[str, Any]) -> Optional[str]:
+    if not isinstance(info, dict):
+        return None
+
+    for key in ("url", "manifest_url", "hls_manifest_url"):
+        candidate = info.get(key)
+        if isinstance(candidate, str) and _is_manifest_url(candidate):
+            return candidate
+
+    for formats_key in ("formats", "requested_formats"):
+        formats = info.get(formats_key)
+        if not isinstance(formats, list):
+            continue
+        for fmt in formats:
+            if not isinstance(fmt, dict):
+                continue
+            candidate = fmt.get("url") or fmt.get("manifest_url")
+            if not isinstance(candidate, str):
+                continue
+            protocol = str(fmt.get("protocol") or "").lower()
+            ext = str(fmt.get("ext") or "").lower()
+            if _is_manifest_url(candidate) or "m3u8" in protocol or "dash" in protocol or ext in {"m3u8", "mpd"}:
+                return candidate
+        for fmt in formats:
+            if not isinstance(fmt, dict):
+                continue
+            manifest_url = fmt.get("manifest_url")
+            if isinstance(manifest_url, str) and _is_manifest_url(manifest_url):
+                return manifest_url
+
+    entries = info.get("entries")
+    if isinstance(entries, list):
+        for entry in entries:
+            candidate = _extract_hls_candidate(entry)
+            if candidate:
+                return candidate
+
+    return None
+
+
+def _detect_hls_stream_url(original_url: str) -> Optional[str]:
     if not original_url:
         return None
-    try:
-        result = subprocess.run(
-            ["yt-dlp", "-g", original_url],
-            capture_output=True,
-            text=True,
-            check=True
-        )
-        raw_url = result.stdout.strip()
-        if any(ext in raw_url for ext in [".m3u8", ".mpd"]):
-            return raw_url
+    if YoutubeDL is None:
+        raise RuntimeError("yt_dlp module is not available")
+    ydl_opts = {
+        "quiet": True,
+        "nocheckcertificate": True,
+        "skip_download": True,
+        "noplaylist": True,
+        "extract_flat": False,
+    }
+    with YoutubeDL(ydl_opts) as ydl:
+        info = ydl.extract_info(original_url, download=False)
+    if not info:
         return None
-    except subprocess.CalledProcessError:
+    return _extract_hls_candidate(info)
+
+
+def _get_hls_cache_entry(key: str) -> Optional[HLSCacheEntry]:
+    with HLS_LOCK:
+        return HLS_CACHE.get(key)
+
+
+def _cancel_hls_job(key: str) -> bool:
+    with HLS_LOCK:
+        future = HLS_JOBS.get(key)
+        if not future:
+            return False
+        cancelled = future.cancel()
+        if cancelled:
+            HLS_JOBS.pop(key, None)
+        return cancelled
+
+
+def schedule_hls_detection(stream_id: str, original_url: str) -> None:
+    if not LIVE_HLS_ASYNC or not original_url or HLS_EXECUTOR is None:
+        return
+    key = _live_hls_cache_key(stream_id, original_url)
+    with HLS_LOCK:
+        future = HLS_JOBS.get(key)
+        if future and not future.done():
+            return
+        future = HLS_EXECUTOR.submit(_run_hls_detection_job, key, stream_id, original_url)
+        HLS_JOBS[key] = future
+        in_flight = len(HLS_JOBS)
+    _record_hls_metric("jobs_started")
+    _log_hls_event("job_start", stream_id, original_url, inflight=in_flight)
+
+
+def _run_hls_detection_job(key: str, stream_id: str, original_url: str) -> None:
+    started_at = time.time()
+    _log_hls_event("job_run", stream_id, original_url)
+    try:
+        url = _detect_hls_stream_url(original_url)
+        entry = HLSCacheEntry(url=url, extracted_at=time.time(), error=None)
+        success = bool(url)
+        error_text = None
+    except Exception as exc:
+        entry = HLSCacheEntry(url=None, extracted_at=time.time(), error=str(exc))
+        success = False
+        error_text = entry.error
+        _record_hls_metric("errors")
+    finally:
+        _record_hls_metric("jobs_completed")
+    with HLS_LOCK:
+        HLS_CACHE[key] = entry
+        HLS_JOBS.pop(key, None)
+        in_flight = len(HLS_JOBS)
+    duration_ms = int((time.time() - started_at) * 1000)
+    _log_hls_event(
+        "job_done",
+        stream_id,
+        original_url,
+        success=success,
+        inflight=in_flight,
+        duration_ms=duration_ms,
+        error=error_text or "none",
+    )
+    if entry.url:
+        try:
+            with app.app_context():
+                socketio.emit(
+                    "live_hls_ready",
+                    {"stream_id": stream_id, "cache_key": key, "hls_url": entry.url},
+                )
+        except Exception as exc:  # pragma: no cover - socket failures should not break detection
+            logger.debug("live_hls_ready emit failed for %s: %s", stream_id, exc)
+
+
+def try_get_hls(original_url):
+    """Legacy synchronous helper retained for compatibility."""
+    try:
+        return _detect_hls_stream_url(original_url)
+    except Exception:
         return None
 
 @app.route("/")
@@ -4368,51 +4587,168 @@ def groups_delete(name):
 
 @app.route("/stream/live")
 def stream_live():
-    stream_id = request.args.get("stream_id", "").strip()
-    if stream_id not in settings:
+    stream_id = (request.args.get("stream_id") or "").strip()
+    if not stream_id:
+        return jsonify({"error": "stream_id required"}), 400
+
+    stream_conf = settings.get(stream_id)
+    if not stream_conf:
         return jsonify({"error": f"No stream '{stream_id}' found"}), 404
 
-    stream_url = settings[stream_id].get("stream_url", "")
+    override_url = request.args.get("url")
+    stream_url_raw = override_url if override_url is not None else stream_conf.get("stream_url", "")
+    stream_url = (stream_url_raw or "").strip()
     if not stream_url:
         return jsonify({"error": "No live stream URL configured"}), 404
 
-    if "youtube.com" in stream_url or "youtu.be" in stream_url:
+    lowered = stream_url.lower()
+    if "youtube.com" in lowered or "youtu.be" in lowered:
         embed_id = None
         if "watch?v=" in stream_url:
-            parts = stream_url.split("watch?v=")[1].split("&")[0].split("#")[0]
-            embed_id = parts
+            try:
+                embed_id = stream_url.split("watch?v=")[1].split("&")[0].split("#")[0]
+            except Exception:
+                embed_id = None
         elif "youtu.be/" in stream_url:
-            embed_id = stream_url.split("youtu.be/")[1].split("?")[0].split("&")[0]
+            try:
+                embed_id = stream_url.split("youtu.be/")[1].split("?")[0].split("&")[0]
+            except Exception:
+                embed_id = None
         return jsonify({
             "embed_type": "youtube",
             "embed_id": embed_id,
             "hls_url": None,
-            "original_url": stream_url
+            "original_url": stream_url,
         })
 
-    if "twitch.tv" in stream_url:
-        embed_id = stream_url.split("twitch.tv/")[1].split("/")[0]
+    if "twitch.tv" in lowered:
+        try:
+            embed_id = stream_url.split("twitch.tv/")[1].split("/")[0]
+        except Exception:
+            embed_id = ""
         return jsonify({
             "embed_type": "twitch",
             "embed_id": embed_id,
             "hls_url": None,
-            "original_url": stream_url
+            "original_url": stream_url,
         })
 
-    hls_link = try_get_hls(stream_url)
-    if hls_link:
+    if _is_manifest_url(stream_url):
+        _log_hls_event("direct_manifest", stream_id, stream_url)
         return jsonify({
             "embed_type": "hls",
             "embed_id": None,
-            "hls_url": hls_link,
-            "original_url": stream_url
+            "hls_url": stream_url,
+            "original_url": stream_url,
+        })
+
+    hls_url = None
+    if LIVE_HLS_ASYNC and HLS_EXECUTOR is not None:
+        now = time.time()
+        cache_key = _live_hls_cache_key(stream_id, stream_url)
+        entry = _get_hls_cache_entry(cache_key)
+        schedule_needed = False
+
+        if entry is None:
+            _record_hls_metric("misses")
+            _log_hls_event("cache_miss", stream_id, stream_url)
+            schedule_needed = True
+        else:
+            age = now - entry.extracted_at
+            age_ms = int(age * 1000)
+            if entry.url and age < HLS_TTL_SECS:
+                hls_url = entry.url
+                _record_hls_metric("hits")
+                _log_hls_event("cache_hit", stream_id, stream_url, age_ms=age_ms)
+            else:
+                _record_hls_metric("stale")
+                _log_hls_event(
+                    "cache_stale",
+                    stream_id,
+                    stream_url,
+                    age_ms=age_ms,
+                    had_url=bool(entry.url),
+                    error=entry.error or "none",
+                )
+                if entry.url:
+                    schedule_needed = True
+                else:
+                    schedule_needed = age >= HLS_ERROR_RETRY_SECS
+                    if not schedule_needed:
+                        wait_ms = max(0, int((HLS_ERROR_RETRY_SECS - age) * 1000))
+                        _log_hls_event(
+                            "retry_pending",
+                            stream_id,
+                            stream_url,
+                            retry_in_ms=wait_ms,
+                            error=entry.error or "none",
+                        )
+        if schedule_needed:
+            schedule_hls_detection(stream_id, stream_url)
+    else:
+        try:
+            hls_url = _detect_hls_stream_url(stream_url)
+        except Exception as exc:
+            logger.debug("Synchronous HLS detection failed for %s: %s", stream_id, exc)
+
+    if hls_url:
+        return jsonify({
+            "embed_type": "hls",
+            "embed_id": None,
+            "hls_url": hls_url,
+            "original_url": stream_url,
         })
 
     return jsonify({
         "embed_type": "iframe",
         "embed_id": None,
         "hls_url": None,
-        "original_url": stream_url
+        "original_url": stream_url,
+    })
+
+
+@app.route("/stream/live/invalidate", methods=["POST"])
+def stream_live_invalidate():
+    payload = request.get_json(silent=True) or {}
+    stream_id = str(payload.get("stream_id") or "").strip()
+    if not stream_id:
+        return jsonify({"error": "stream_id required"}), 400
+
+    stream_conf = settings.get(stream_id)
+    if not stream_conf:
+        return jsonify({"error": f"No stream '{stream_id}' found"}), 404
+
+    requested_url = payload.get("url")
+    target_url_raw = requested_url if requested_url is not None else stream_conf.get("stream_url", "")
+    target_url = (target_url_raw or "").strip()
+    if not target_url:
+        return jsonify({"error": "No live stream URL provided"}), 400
+
+    prefix = f"live:{stream_id}:"
+    with HLS_LOCK:
+        cache_keys = [key for key in list(HLS_CACHE.keys()) if key.startswith(prefix)]
+        job_keys = [key for key in list(HLS_JOBS.keys()) if key.startswith(prefix)]
+        removed = 0
+        for key in cache_keys:
+            if HLS_CACHE.pop(key, None) is not None:
+                removed += 1
+    cancelled = 0
+    for key in job_keys:
+        if _cancel_hls_job(key):
+            cancelled += 1
+
+    _log_hls_event("invalidate", stream_id, target_url, removed=removed, cancelled=cancelled)
+
+    rescheduled = False
+    if LIVE_HLS_ASYNC and HLS_EXECUTOR is not None:
+        schedule_hls_detection(stream_id, target_url)
+        rescheduled = True
+
+    return jsonify({
+        "status": "ok",
+        "removed": removed,
+        "jobs_cancelled": cancelled,
+        "rescheduled": rescheduled,
     })
 
 
@@ -4871,10 +5207,3 @@ def handle_video_control(payload):
 
 if __name__ == "__main__":
     socketio.run(app, host="0.0.0.0", port=5000, debug=True)
-
-
-
-
-
-
-
