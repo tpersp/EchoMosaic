@@ -1621,3 +1621,7 @@ body.ai-preset-manager-open {
   opacity: 1;
 }
 
+.picsum-current-seed {
+  font-size: 0.8rem;
+  opacity: 0.75;
+}

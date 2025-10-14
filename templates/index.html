@@ -70,8 +70,8 @@
 
   <div id="dashboard-grid" class="dashboard-grid">
     {# Generate a card for each stream dynamically #}
-    {% for stream_id, conf in stream_settings.items() %}
-    <div class="stream-card" data-stream="{{ stream_id }}" data-hide-nsfw="{{ "true" if conf.hide_nsfw|default(False) else "false" }}" data-tags='{{ (conf.tags|default([]))|tojson }}' data-selected-path="{{ conf.selected_image or '' }}" data-selected-kind="{{ conf.selected_media_kind or '' }}" data-video-mode="{{ conf.video_playback_mode|default('duration') }}" data-video-volume="{{ conf.video_volume|default(1.0) }}" data-media-mode="{{ conf.media_mode|default('image') }}">
+{% for stream_id, conf in stream_settings.items() %}
+    <div class="stream-card" data-stream="{{ stream_id }}" data-hide-nsfw="{{ "true" if conf.hide_nsfw|default(False) else "false" }}" data-tags='{{ (conf.tags|default([]))|tojson }}' data-selected-path="{{ conf.selected_image or '' }}" data-selected-kind="{{ conf.selected_media_kind or '' }}" data-video-mode="{{ conf.video_playback_mode|default('duration') }}" data-video-volume="{{ conf.video_volume|default(1.0) }}" data-media-mode="{{ conf.media_mode|default('image') }}" data-picsum-seed="{{ conf.picsum_settings.seed if conf.picsum_settings and conf.picsum_settings.seed is not none else '' }}" data-picsum-seed-custom="{{ 'true' if conf._picsum_seed_custom|default(False) else 'false' }}">
       <div class="card-header">
         <div class="title-row">
           <h2><a class="stream-link" href="{{ url_for('render_stream', name=(conf.label if conf.label else stream_id)|slugify) }}" target="_blank">{{ conf.label if conf.label else stream_id|capitalize }}</a></h2>
@@ -100,6 +100,7 @@
         {% set media_mode = conf.media_mode|default('image') %}
         {% set mode_value = conf.mode|default('random') %}
         {% set picsum = conf.picsum_settings or {} %}
+        {% set picsum_seed_custom = conf._picsum_seed_custom|default(False) %}
         <div class="form-row mode-row">
           <label for="mode-category-{{ stream_id }}">Mode</label>
           <div class="mode-selectors">
@@ -235,7 +236,7 @@
         <!-- Picsum Settings -->
         <div class="form-row picsum-row" {% if media_mode != 'picsum' %} style="display:none;" {% endif %}>
           <label for="picsum-width-{{ stream_id }}">Picsum</label>
-          <div class="picsum-config" data-stream="{{ stream_id }}">
+          <div class="picsum-config" data-stream="{{ stream_id }}" data-seed-custom="{{ 'true' if picsum_seed_custom else 'false' }}">
             <div class="picsum-grid">
               <div class="picsum-field">
                 <label for="picsum-width-{{ stream_id }}">Width</label>
@@ -258,12 +259,13 @@
               </div>
               <div class="picsum-field picsum-seed">
                 <label for="picsum-seed-{{ stream_id }}">Seed</label>
-                <input id="picsum-seed-{{ stream_id }}" type="text" class="picsum-seed" maxlength="64" placeholder="Optional" value="{{ picsum.seed or '' }}">
+                <input id="picsum-seed-{{ stream_id }}" type="text" class="picsum-seed" maxlength="64" placeholder="Optional" value="{% if picsum_seed_custom %}{{ picsum.seed }}{% else %}{% endif %}">
               </div>
             </div>
             <div class="picsum-actions">
               <button type="button" class="picsum-fetch-btn" data-stream="{{ stream_id }}">Fetch Image</button>
-              <span class="picsum-status" aria-live="polite"></span>
+              <span class="picsum-status" aria-live="polite" hidden></span>
+              <span class="picsum-current-seed" aria-live="polite" {% if not picsum.seed %}hidden{% endif %}>{% if picsum.seed %}Current seed: {{ picsum.seed }}{% endif %}</span>
             </div>
           </div>
         </div>
@@ -2082,7 +2084,8 @@
       }
     }
     if (conf.picsum_settings !== undefined) {
-      applyPicsumSettings(card, conf.picsum_settings);
+      const seedCustom = Boolean(conf._picsum_seed_custom);
+      applyPicsumSettings(card, conf.picsum_settings, { seedWasCustom: seedCustom, setSeedInput: seedCustom });
       const mediaMode = (conf.media_mode || card.dataset.mediaMode || '').toLowerCase();
       if (mediaMode === 'picsum') {
         setPicsumStatus(card, '');
@@ -3640,7 +3643,8 @@
           const effectiveMode = updatedMode || (variantlessModes.has(updatedMediaMode) ? updatedMediaMode : 'random');
           applyModeState(card, updatedMediaMode, effectiveMode, urlInputEl ? urlInputEl.value : '');
           if (data.new_config && data.new_config.picsum_settings !== undefined) {
-            applyPicsumSettings(card, data.new_config.picsum_settings);
+            const seedCustom = Boolean(data.new_config._picsum_seed_custom);
+            applyPicsumSettings(card, data.new_config.picsum_settings, { seedWasCustom: seedCustom, setSeedInput: seedCustom });
             if (updatedMediaMode === 'picsum') {
               setPicsumStatus(card, '');
             }
@@ -3808,12 +3812,12 @@
       height: heightInput ? heightInput.value : PICSUM_DEFAULTS.height,
       blur: blurInput ? blurInput.value : PICSUM_DEFAULTS.blur,
       grayscale: grayscaleInput ? grayscaleInput.checked : PICSUM_DEFAULTS.grayscale,
-      seed: seedInput ? seedInput.value : PICSUM_DEFAULTS.seed,
+      seed: seedInput ? seedInput.value.trim() : '',
     };
     return normalizePicsumSettings(payload);
   }
 
-  function applyPicsumSettings(card, settings) {
+  function applyPicsumSettings(card, settings, opts = {}) {
     const normalized = normalizePicsumSettings(settings);
     const config = card.querySelector('.picsum-config');
     if (!config) {
@@ -3824,11 +3828,40 @@
     const blurInput = config.querySelector('.picsum-blur');
     const grayscaleInput = config.querySelector('.picsum-grayscale');
     const seedInput = config.querySelector('.picsum-seed');
+    const seedDisplay = config.querySelector('.picsum-current-seed');
+    const seedWasCustom = typeof opts.seedWasCustom === 'boolean'
+      ? opts.seedWasCustom
+      : Boolean(
+          (settings && (settings._picsum_seed_custom || settings.seed_custom)) ||
+          (settings && typeof settings.seed === 'string' && settings.seed.trim())
+        );
+
     if (widthInput) widthInput.value = normalized.width;
     if (heightInput) heightInput.value = normalized.height;
     if (blurInput) blurInput.value = normalized.blur;
     if (grayscaleInput) grayscaleInput.checked = normalized.grayscale;
-    if (seedInput) seedInput.value = normalized.seed || '';
+
+    if (seedInput) {
+      if (opts.resetSeedInput) {
+        seedInput.value = '';
+      } else if (opts.setSeedInput) {
+        seedInput.value = normalized.seed || '';
+      }
+    }
+    if (seedDisplay) {
+      if (normalized.seed) {
+        seedDisplay.textContent = `Current seed: ${normalized.seed}`;
+        seedDisplay.hidden = false;
+      } else {
+        seedDisplay.textContent = '';
+        seedDisplay.hidden = true;
+      }
+      seedDisplay.dataset.custom = seedWasCustom ? 'true' : 'false';
+    }
+    config.dataset.seedCustom = seedWasCustom ? 'true' : 'false';
+    config.dataset.currentSeed = normalized.seed || '';
+    card.dataset.picsumSeed = normalized.seed || '';
+    card.dataset.picsumSeedCustom = seedWasCustom ? 'true' : 'false';
     return normalized;
   }
 
@@ -3839,6 +3872,7 @@
     }
     statusEl.textContent = message || '';
     statusEl.classList.toggle('is-error', !!isError);
+    statusEl.hidden = !message;
   }
 
   function savePicsumSettings(card, opts = {}) {
@@ -3856,6 +3890,7 @@
       throw new Error('Stream id unavailable');
     }
     const settings = collectPicsumSettings(card);
+    const requestedSeed = typeof settings.seed === 'string' && settings.seed.trim() ? settings.seed.trim() : '';
     const response = await fetch('/picsum/refresh', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -3875,17 +3910,23 @@
       throw new Error(detail);
     }
     const sanitized = normalizePicsumSettings(data.settings || data);
-    applyPicsumSettings(card, sanitized);
+    const seedCustom = typeof data.seed_custom === 'boolean' ? data.seed_custom : Boolean(requestedSeed);
+    applyPicsumSettings(card, sanitized, {
+      setSeedInput: seedCustom,
+      resetSeedInput: !seedCustom,
+      seedWasCustom: seedCustom,
+    });
     const imageUrl = data.url;
     card.dataset.selectedPath = imageUrl || '';
     card.dataset.selectedKind = 'image';
     card.dataset.mediaMode = 'picsum';
+    card.dataset.picsumSeedCustom = seedCustom ? 'true' : 'false';
     const display = card.querySelector('.selected-image-display');
     if (display) {
       display.textContent = imageUrl || 'None';
     }
     await refreshThumbnail(card, streamId, { force: true });
-    setPicsumStatus(card, 'Picsum image updated');
+    setPicsumStatus(card, seedCustom ? 'Picsum updated with custom seed' : 'Picsum updated with random seed');
     showNotification(`Fetched Picsum image for ${streamId}`);
     return data;
   }
@@ -4283,13 +4324,18 @@
         const seedInput = picsumConfig.querySelector('.picsum-seed');
         const fetchBtn = picsumConfig.querySelector('.picsum-fetch-btn');
         const maybeSave = () => {
-          if ((card.dataset.mediaMode || '').toLowerCase() !== 'picsum') {
-            return;
-          }
-          const normalized = collectPicsumSettings(card);
-          applyPicsumSettings(card, normalized);
-          savePicsumSettings(card);
-        };
+        if ((card.dataset.mediaMode || '').toLowerCase() !== 'picsum') {
+          return;
+        }
+        const normalized = collectPicsumSettings(card);
+        const seedCustom = Boolean(normalized.seed);
+        applyPicsumSettings(card, normalized, {
+          setSeedInput: seedCustom,
+          resetSeedInput: !seedCustom,
+          seedWasCustom: seedCustom,
+        });
+        savePicsumSettings(card);
+      };
         if (widthInput) widthInput.addEventListener('change', maybeSave);
         if (heightInput) heightInput.addEventListener('change', maybeSave);
         if (blurInput) blurInput.addEventListener('change', maybeSave);

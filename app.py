@@ -532,10 +532,14 @@ def ensure_picsum_defaults(conf: Dict[str, Any]) -> None:
         conf[PICSUM_SETTINGS_KEY] = _sanitize_picsum_settings(current, defaults)
     else:
         conf[PICSUM_SETTINGS_KEY] = deepcopy(defaults)
+    if "_picsum_seed_custom" not in conf:
+        conf["_picsum_seed_custom"] = False
+    else:
+        conf["_picsum_seed_custom"] = bool(conf["_picsum_seed_custom"])
 
 
 def _generate_picsum_seed() -> str:
-    return secrets.token_hex(12)
+    return secrets.token_hex(6)
 
 
 def _normalize_tag_name(value: Any) -> Optional[str]:
@@ -855,6 +859,7 @@ def default_stream_config():
         "background_blur_enabled": False,
         "background_blur_amount": 50,
         PICSUM_SETTINGS_KEY: default_picsum_settings(),
+        "_picsum_seed_custom": False,
         AI_SETTINGS_KEY: default_ai_settings(),
         AI_STATE_KEY: default_ai_state(),
         "_ai_customized": False,
@@ -955,6 +960,7 @@ def _sanitize_imported_stream_config(stream_id: str, raw_conf: Any) -> Dict[str,
     conf['_ai_customized'] = not _ai_settings_match_defaults(conf[AI_SETTINGS_KEY], defaults=AI_FALLBACK_DEFAULTS)
     picsum_raw = conf.get(PICSUM_SETTINGS_KEY)
     conf[PICSUM_SETTINGS_KEY] = _sanitize_picsum_settings(picsum_raw, defaults=default_picsum_settings())
+    conf['_picsum_seed_custom'] = bool(conf.get('_picsum_seed_custom', False))
     ensure_background_defaults(conf)
     return conf
 
@@ -3551,8 +3557,21 @@ def refresh_picsum_image():
     ensure_picsum_defaults(conf)
 
     incoming_settings = payload.get("settings") or payload.get(PICSUM_SETTINGS_KEY) or {}
+    raw_seed_value: Optional[str]
+    if isinstance(incoming_settings, dict) and "seed" in incoming_settings:
+        raw_seed_candidate = incoming_settings.get("seed")
+        if isinstance(raw_seed_candidate, str):
+            raw_seed_value = raw_seed_candidate.strip()
+        elif raw_seed_candidate is None:
+            raw_seed_value = None
+        else:
+            raw_seed_value = str(raw_seed_candidate).strip()
+    else:
+        raw_seed_value = None
+
     sanitized = _sanitize_picsum_settings(incoming_settings, defaults=conf.get(PICSUM_SETTINGS_KEY))
-    if not sanitized.get("seed"):
+    seed_was_custom = bool(raw_seed_value and sanitized.get("seed"))
+    if not seed_was_custom:
         sanitized["seed"] = _generate_picsum_seed()
 
     image_url = build_picsum_url(
@@ -3568,6 +3587,7 @@ def refresh_picsum_image():
     conf["selected_media_kind"] = "image"
     conf["media_mode"] = MEDIA_MODE_PICSUM
     conf["mode"] = MEDIA_MODE_PICSUM
+    conf["_picsum_seed_custom"] = seed_was_custom
 
     runtime_thumbnail = _update_stream_runtime_state(
         stream_id,
@@ -3576,10 +3596,18 @@ def refresh_picsum_image():
         media_mode=MEDIA_MODE_PICSUM,
         source="picsum_refresh",
     )
+    with STREAM_RUNTIME_LOCK:
+        entry = STREAM_RUNTIME_STATE.setdefault(stream_id, {})
+        entry["picsum_seed"] = sanitized.get("seed")
+        entry["picsum_seed_custom"] = seed_was_custom
 
     save_settings(settings)
 
-    refresh_payload = {"stream_id": stream_id, "config": conf, "tags": get_global_tags()}
+    refresh_payload = {
+        "stream_id": stream_id,
+        "config": conf,
+        "tags": get_global_tags(),
+    }
     socketio.emit("refresh", refresh_payload)
 
     stream_update_payload = {
@@ -3591,6 +3619,8 @@ def refresh_picsum_image():
             "path": image_url,
             "kind": "image",
             "stream_url": None,
+            "seed": sanitized.get("seed"),
+            "seed_custom": seed_was_custom,
         },
         "duration": None,
         "position": 0.0,
@@ -3605,6 +3635,7 @@ def refresh_picsum_image():
         "stream_id": stream_id,
         "url": image_url,
         "settings": sanitized,
+        "seed_custom": seed_was_custom,
     }
     return jsonify(response)
 
