@@ -3807,12 +3807,13 @@
     const blurInput = config.querySelector('.picsum-blur');
     const grayscaleInput = config.querySelector('.picsum-grayscale');
     const seedInput = config.querySelector('.picsum-seed');
+    const seedRaw = seedInput ? seedInput.value : '';
     const payload = {
       width: widthInput ? widthInput.value : PICSUM_DEFAULTS.width,
       height: heightInput ? heightInput.value : PICSUM_DEFAULTS.height,
       blur: blurInput ? blurInput.value : PICSUM_DEFAULTS.blur,
       grayscale: grayscaleInput ? grayscaleInput.checked : PICSUM_DEFAULTS.grayscale,
-      seed: seedInput ? seedInput.value.trim() : '',
+      seed: typeof seedRaw === 'string' ? seedRaw.trim() : '',
     };
     return normalizePicsumSettings(payload);
   }
