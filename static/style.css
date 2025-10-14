@@ -1625,3 +1625,39 @@ body.ai-preset-manager-open {
   font-size: 0.8rem;
   opacity: 0.75;
 }
+
+.picsum-auto {
+  display: grid;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+  grid-template-columns: repeat(auto-fit, minmax(140px, max-content));
+  align-items: end;
+}
+
+.picsum-auto-field label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  font-size: 0.85rem;
+}
+
+.picsum-auto-field input,
+.picsum-auto-field select {
+  width: 100%;
+}
+
+.picsum-auto-summary {
+  display: flex;
+  gap: 0.75rem;
+  font-size: 0.75rem;
+  opacity: 0.7;
+  flex-wrap: wrap;
+}
+
+.picsum-auto-summary[hidden] {
+  display: none;
+}
+
+.picsum-auto-summary span[hidden] {
+  display: none;
+}

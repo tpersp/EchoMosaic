@@ -262,6 +262,29 @@
                 <input id="picsum-seed-{{ stream_id }}" type="text" class="picsum-seed" maxlength="64" placeholder="Optional" value="{% if picsum_seed_custom %}{{ picsum.seed }}{% else %}{% endif %}">
               </div>
             </div>
+            {% set picsum_auto_mode = (picsum.auto_mode or 'off')|lower %}
+            <div class="picsum-auto" data-auto-mode="{{ picsum_auto_mode }}">
+              <div class="picsum-auto-field">
+                <label for="picsum-auto-mode-{{ stream_id }}">Auto Mode</label>
+                <select id="picsum-auto-mode-{{ stream_id }}" class="picsum-auto-mode">
+                  <option value="off" {% if picsum_auto_mode == 'off' %}selected{% endif %}>Off</option>
+                  <option value="timer" {% if picsum_auto_mode == 'timer' %}selected{% endif %}>Timer</option>
+                  <option value="clock" {% if picsum_auto_mode == 'clock' %}selected{% endif %}>Clock</option>
+                </select>
+              </div>
+              <div class="picsum-auto-field picsum-auto-timer" {% if picsum_auto_mode != 'timer' %}style="display:none;"{% endif %}>
+                <label for="picsum-auto-interval-{{ stream_id }}">Every (min)</label>
+                <input id="picsum-auto-interval-{{ stream_id }}" type="number" class="picsum-auto-interval" min="1" step="0.5" value="{{ picsum.auto_interval_value|default(10) }}">
+              </div>
+              <div class="picsum-auto-field picsum-auto-clock" {% if picsum_auto_mode != 'clock' %}style="display:none;"{% endif %}>
+                <label for="picsum-auto-time-{{ stream_id }}">At (HH:MM)</label>
+                <input id="picsum-auto-time-{{ stream_id }}" type="time" class="picsum-auto-time" value="{{ picsum.auto_clock_time|default('') }}">
+              </div>
+              <div class="picsum-auto-summary" {% if not picsum.last_auto_trigger and not picsum.next_auto_trigger %}hidden{% endif %}>
+                <span class="picsum-auto-last" {% if not picsum.last_auto_trigger %}hidden{% endif %}>{% if picsum.last_auto_trigger %}Last: {{ picsum.last_auto_trigger }}{% endif %}</span>
+                <span class="picsum-auto-next" {% if not picsum.next_auto_trigger %}hidden{% endif %}>{% if picsum.next_auto_trigger %}Next: {{ picsum.next_auto_trigger }}{% endif %}</span>
+              </div>
+            </div>
             <div class="picsum-actions">
               <button type="button" class="picsum-fetch-btn" data-stream="{{ stream_id }}">Fetch Image</button>
               <span class="picsum-status" aria-live="polite" hidden></span>
@@ -3768,6 +3791,12 @@
     blur: PICSUM_LIMITS.blur.default,
     grayscale: false,
     seed: null,
+    auto_mode: 'off',
+    auto_interval_value: 10,
+    auto_interval_unit: 'minutes',
+    auto_clock_time: '',
+    next_auto_trigger: null,
+    last_auto_trigger: null,
   });
 
   function clamp(value, min, max) {
@@ -3788,12 +3817,30 @@
     const seedRaw = typeof raw.seed === 'string' ? raw.seed.trim() : '';
     const sanitizedSeed = seedRaw ? seedRaw.replace(/[^A-Za-z0-9_.-]/g, '').slice(0, 64) : '';
     const seedValue = sanitizedSeed || null;
+    const autoModeRaw = typeof raw.auto_mode === 'string' ? raw.auto_mode.trim().toLowerCase() : PICSUM_DEFAULTS.auto_mode;
+    const autoMode = ['off', 'timer', 'clock'].includes(autoModeRaw) ? autoModeRaw : 'off';
+    let autoIntervalValue = parseFloat(raw.auto_interval_value);
+    if (!Number.isFinite(autoIntervalValue) || autoIntervalValue <= 0) {
+      autoIntervalValue = PICSUM_DEFAULTS.auto_interval_value;
+    }
+    const autoIntervalUnitRaw = typeof raw.auto_interval_unit === 'string' ? raw.auto_interval_unit.trim().toLowerCase() : PICSUM_DEFAULTS.auto_interval_unit;
+    const autoIntervalUnit = autoIntervalUnitRaw === 'hours' ? 'hours' : 'minutes';
+    const autoClockRaw = typeof raw.auto_clock_time === 'string' ? raw.auto_clock_time.trim() : '';
+    const autoClockTime = /^\d{2}:\d{2}$/.test(autoClockRaw) ? autoClockRaw : '';
+    const nextAutoRaw = typeof raw.next_auto_trigger === 'string' ? raw.next_auto_trigger.trim() : '';
+    const lastAutoRaw = typeof raw.last_auto_trigger === 'string' ? raw.last_auto_trigger.trim() : '';
     return {
       width: widthNumeric,
       height: heightNumeric,
       blur: blurNumeric,
       grayscale: grayscaleValue,
       seed: seedValue,
+      auto_mode: autoMode,
+      auto_interval_value: autoIntervalValue,
+      auto_interval_unit: autoIntervalUnit,
+      auto_clock_time: autoClockTime,
+      next_auto_trigger: nextAutoRaw || null,
+      last_auto_trigger: lastAutoRaw || null,
     };
   }
 
@@ -3807,13 +3854,24 @@
     const blurInput = config.querySelector('.picsum-blur');
     const grayscaleInput = config.querySelector('.picsum-grayscale');
     const seedInput = config.querySelector('.picsum-seed');
+    const autoModeSelect = config.querySelector('.picsum-auto-mode');
+    const autoIntervalInput = config.querySelector('.picsum-auto-interval');
+    const autoTimeInput = config.querySelector('.picsum-auto-time');
     const seedRaw = seedInput ? seedInput.value : '';
+    const autoModeRaw = autoModeSelect ? autoModeSelect.value : 'off';
+    const autoMode = typeof autoModeRaw === 'string' ? autoModeRaw.trim().toLowerCase() : 'off';
+    const autoIntervalRaw = autoIntervalInput ? parseFloat(autoIntervalInput.value) : PICSUM_DEFAULTS.auto_interval_value;
+    const autoTimeRaw = autoTimeInput ? autoTimeInput.value : '';
     const payload = {
       width: widthInput ? widthInput.value : PICSUM_DEFAULTS.width,
       height: heightInput ? heightInput.value : PICSUM_DEFAULTS.height,
       blur: blurInput ? blurInput.value : PICSUM_DEFAULTS.blur,
       grayscale: grayscaleInput ? grayscaleInput.checked : PICSUM_DEFAULTS.grayscale,
       seed: typeof seedRaw === 'string' ? seedRaw.trim() : '',
+      auto_mode: ['timer', 'clock'].includes(autoMode) ? autoMode : 'off',
+      auto_interval_value: Number.isFinite(autoIntervalRaw) && autoIntervalRaw > 0 ? autoIntervalRaw : PICSUM_DEFAULTS.auto_interval_value,
+      auto_interval_unit: 'minutes',
+      auto_clock_time: typeof autoTimeRaw === 'string' && /^\d{2}:\d{2}$/.test(autoTimeRaw.trim()) ? autoTimeRaw.trim() : '',
     };
     return normalizePicsumSettings(payload);
   }
@@ -3830,6 +3888,12 @@
     const grayscaleInput = config.querySelector('.picsum-grayscale');
     const seedInput = config.querySelector('.picsum-seed');
     const seedDisplay = config.querySelector('.picsum-current-seed');
+    const autoModeSelect = config.querySelector('.picsum-auto-mode');
+    const autoIntervalInput = config.querySelector('.picsum-auto-interval');
+    const autoTimeInput = config.querySelector('.picsum-auto-time');
+    const autoSummary = config.querySelector('.picsum-auto-summary');
+    const autoLast = config.querySelector('.picsum-auto-last');
+    const autoNext = config.querySelector('.picsum-auto-next');
     const seedWasCustom = typeof opts.seedWasCustom === 'boolean'
       ? opts.seedWasCustom
       : Boolean(
@@ -3859,13 +3923,84 @@
       }
       seedDisplay.dataset.custom = seedWasCustom ? 'true' : 'false';
     }
+
+    if (autoModeSelect) {
+      autoModeSelect.value = normalized.auto_mode || 'off';
+    }
+    if (autoIntervalInput) {
+      const intervalValue = Number(normalized.auto_interval_value);
+      const safeValue = Number.isFinite(intervalValue) && intervalValue > 0 ? intervalValue : PICSUM_DEFAULTS.auto_interval_value;
+      autoIntervalInput.value = String(safeValue);
+    }
+    if (autoTimeInput) {
+      autoTimeInput.value = normalized.auto_clock_time || '';
+    }
+    updatePicsumAutoVisibility(config, normalized.auto_mode || 'off');
+    if (autoSummary) {
+      const formattedLast = formatPicsumTimestamp(normalized.last_auto_trigger);
+      const formattedNext = formatPicsumTimestamp(normalized.next_auto_trigger);
+      let hasInfo = false;
+      if (autoLast) {
+        if (formattedLast) {
+          autoLast.textContent = `Last: ${formattedLast}`;
+          autoLast.hidden = false;
+          hasInfo = true;
+        } else {
+          autoLast.textContent = '';
+          autoLast.hidden = true;
+        }
+      }
+      if (autoNext) {
+        if (formattedNext) {
+          autoNext.textContent = `Next: ${formattedNext}`;
+          autoNext.hidden = false;
+          hasInfo = true;
+        } else {
+          autoNext.textContent = '';
+          autoNext.hidden = true;
+        }
+      }
+      autoSummary.hidden = !hasInfo;
+    }
+
     config.dataset.seedCustom = seedWasCustom ? 'true' : 'false';
     config.dataset.currentSeed = normalized.seed || '';
+    config.dataset.autoMode = normalized.auto_mode || 'off';
+    config.dataset.autoIntervalValue = normalized.auto_interval_value;
+    config.dataset.autoClockTime = normalized.auto_clock_time || '';
     card.dataset.picsumSeed = normalized.seed || '';
     card.dataset.picsumSeedCustom = seedWasCustom ? 'true' : 'false';
     return normalized;
   }
+  function updatePicsumAutoVisibility(config, mode) {
+    const normalized = typeof mode === 'string' ? mode.toLowerCase() : 'off';
+    const timerField = config.querySelector('.picsum-auto-timer');
+    const clockField = config.querySelector('.picsum-auto-clock');
+    if (timerField) timerField.style.display = normalized === 'timer' ? '' : 'none';
+    if (clockField) clockField.style.display = normalized === 'clock' ? '' : 'none';
+    config.dataset.autoMode = normalized;
+  }
 
+  function formatPicsumTimestamp(value) {
+    if (!value || typeof value !== 'string') {
+      return '';
+    }
+    const trimmed = value.trim();
+    if (!trimmed) {
+      return '';
+    }
+    const lower = trimmed.toLowerCase();
+    if (lower === 'none' || lower === 'null') {
+      return '';
+    }
+    const parsed = new Date(trimmed);
+    if (Number.isNaN(parsed.getTime())) {
+      return trimmed;
+    }
+    return parsed.toLocaleString();
+  }
+    return parsed.toLocaleString();
+  }
   function setPicsumStatus(card, message, isError = false) {
     const statusEl = card.querySelector('.picsum-status');
     if (!statusEl) {
@@ -4101,7 +4236,15 @@
     if (nsfwRow) nsfwRow.style.display = (isLivestream || isPicsum) ? 'none' : '';
     if (qualityRow) qualityRow.style.display = (isLivestream || isVideo || isPicsum) ? 'none' : '';
     if (backgroundRow) backgroundRow.style.display = (isLivestream || isVideo) ? 'none' : '';
-    if (picsumRow) picsumRow.style.display = isPicsum ? '' : 'none';
+    if (picsumRow) {
+      picsumRow.style.display = isPicsum ? '' : 'none';
+      if (isPicsum) {
+        const picsumConfig = card.querySelector('.picsum-config');
+        if (picsumConfig) {
+          updatePicsumAutoVisibility(picsumConfig, picsumConfig.dataset.autoMode || 'off');
+        }
+      }
+    }
 
     if (videoModeSelect) {
       if (isVideo && isRandom) {
@@ -4323,20 +4466,29 @@
         const blurInput = picsumConfig.querySelector('.picsum-blur');
         const grayscaleInput = picsumConfig.querySelector('.picsum-grayscale');
         const seedInput = picsumConfig.querySelector('.picsum-seed');
+        const autoModeSelect = picsumConfig.querySelector('.picsum-auto-mode');
+        const autoIntervalInput = picsumConfig.querySelector('.picsum-auto-interval');
+        const autoTimeInput = picsumConfig.querySelector('.picsum-auto-time');
         const fetchBtn = picsumConfig.querySelector('.picsum-fetch-btn');
         const maybeSave = () => {
-        if ((card.dataset.mediaMode || '').toLowerCase() !== 'picsum') {
-          return;
-        }
-        const normalized = collectPicsumSettings(card);
-        const seedCustom = Boolean(normalized.seed);
-        applyPicsumSettings(card, normalized, {
-          setSeedInput: seedCustom,
-          resetSeedInput: !seedCustom,
-          seedWasCustom: seedCustom,
-        });
-        savePicsumSettings(card);
-      };
+          if ((card.dataset.mediaMode || '').toLowerCase() !== 'picsum') {
+            return;
+          }
+          const normalized = collectPicsumSettings(card);
+          const seedCustom = Boolean(normalized.seed);
+          applyPicsumSettings(card, normalized, {
+            setSeedInput: seedCustom,
+            resetSeedInput: !seedCustom,
+            seedWasCustom: seedCustom,
+          });
+          setPicsumStatus(card, 'Saving...');
+          savePicsumSettings(card)
+            .then(() => setPicsumStatus(card, ''))
+            .catch(err => {
+              console.error('Picsum settings save failed', err);
+              setPicsumStatus(card, 'Failed to save Picsum settings', true);
+            });
+        };
         if (widthInput) widthInput.addEventListener('change', maybeSave);
         if (heightInput) heightInput.addEventListener('change', maybeSave);
         if (blurInput) blurInput.addEventListener('change', maybeSave);
@@ -4344,6 +4496,20 @@
         if (seedInput) {
           seedInput.addEventListener('change', maybeSave);
           seedInput.addEventListener('blur', maybeSave);
+        }
+        if (autoModeSelect) {
+          autoModeSelect.addEventListener('change', e => {
+            updatePicsumAutoVisibility(picsumConfig, e.target.value);
+            maybeSave();
+          });
+        }
+        if (autoIntervalInput) {
+          autoIntervalInput.addEventListener('change', maybeSave);
+          autoIntervalInput.addEventListener('blur', maybeSave);
+        }
+        if (autoTimeInput) {
+          autoTimeInput.addEventListener('change', maybeSave);
+          autoTimeInput.addEventListener('blur', maybeSave);
         }
         if (fetchBtn) {
           fetchBtn.addEventListener('click', async () => {

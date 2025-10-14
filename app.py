@@ -474,6 +474,10 @@ PICSUM_MAX_DIMENSION = 4096
 PICSUM_MIN_BLUR = 0
 PICSUM_MAX_BLUR = 10
 PICSUM_DEFAULT_BLUR = 0
+PICSUM_AUTO_MODES = {"off", "timer", "clock"}
+PICSUM_DEFAULT_AUTO_MODE = "off"
+PICSUM_DEFAULT_INTERVAL_VALUE = 10.0
+PICSUM_DEFAULT_INTERVAL_UNIT = "minutes"
 
 
 def default_picsum_settings() -> Dict[str, Any]:
@@ -483,6 +487,12 @@ def default_picsum_settings() -> Dict[str, Any]:
         "blur": PICSUM_DEFAULT_BLUR,
         "grayscale": False,
         "seed": None,
+        "auto_mode": PICSUM_DEFAULT_AUTO_MODE,
+        "auto_interval_value": PICSUM_DEFAULT_INTERVAL_VALUE,
+        "auto_interval_unit": PICSUM_DEFAULT_INTERVAL_UNIT,
+        "auto_clock_time": "",
+        "next_auto_trigger": None,
+        "last_auto_trigger": None,
     }
 
 
@@ -509,6 +519,12 @@ def _sanitize_picsum_settings(
     blur_default = baseline.get("blur", PICSUM_DEFAULT_BLUR)
     grayscale_default = bool(baseline.get("grayscale", False))
     seed_default = baseline.get("seed")
+    auto_mode_default = baseline.get("auto_mode", PICSUM_DEFAULT_AUTO_MODE)
+    auto_interval_default = float(baseline.get("auto_interval_value", PICSUM_DEFAULT_INTERVAL_VALUE))
+    auto_unit_default = baseline.get("auto_interval_unit", PICSUM_DEFAULT_INTERVAL_UNIT)
+    auto_clock_default = baseline.get("auto_clock_time", "")
+    next_auto_default = baseline.get("next_auto_trigger")
+    last_auto_default = baseline.get("last_auto_trigger")
 
     width_val = _coerce_int(value.get("width"), width_default)
     height_val = _coerce_int(value.get("height"), height_default)
@@ -522,6 +538,54 @@ def _sanitize_picsum_settings(
         "grayscale": bool(grayscale_val),
         "seed": seed_val if seed_val is not None else seed_default if seed_default else None,
     }
+    auto_mode_raw = value.get("auto_mode")
+    auto_mode = str(auto_mode_raw).strip().lower() if isinstance(auto_mode_raw, str) else auto_mode_default
+    if auto_mode not in PICSUM_AUTO_MODES:
+        auto_mode = PICSUM_DEFAULT_AUTO_MODE
+
+    interval_value = _coerce_float(value.get("auto_interval_value"), auto_interval_default)
+    if interval_value is None or interval_value <= 0:
+        interval_value = PICSUM_DEFAULT_INTERVAL_VALUE
+
+    interval_unit_raw = value.get("auto_interval_unit")
+    interval_unit = str(interval_unit_raw).strip().lower() if isinstance(interval_unit_raw, str) else auto_unit_default
+    if interval_unit not in AUTO_GENERATE_INTERVAL_UNITS:
+        interval_unit = PICSUM_DEFAULT_INTERVAL_UNIT
+
+    clock_raw = value.get("auto_clock_time")
+    if clock_raw is None:
+        clock_time = _normalize_clock_time(auto_clock_default)
+    else:
+        clock_time = _normalize_clock_time(clock_raw)
+    if clock_time is None:
+        clock_time = ""
+
+    next_auto_raw = value.get("next_auto_trigger")
+    if isinstance(next_auto_raw, str) and next_auto_raw.strip():
+        next_auto = next_auto_raw.strip()
+    elif isinstance(next_auto_default, str) and next_auto_default.strip():
+        next_auto = next_auto_default.strip()
+    else:
+        next_auto = None
+
+    last_auto_raw = value.get("last_auto_trigger")
+    if isinstance(last_auto_raw, str) and last_auto_raw.strip():
+        last_auto = last_auto_raw.strip()
+    elif isinstance(last_auto_default, str) and last_auto_default.strip():
+        last_auto = last_auto_default.strip()
+    else:
+        last_auto = None
+
+    result.update(
+        {
+            "auto_mode": auto_mode,
+            "auto_interval_value": float(interval_value),
+            "auto_interval_unit": interval_unit,
+            "auto_clock_time": clock_time,
+            "next_auto_trigger": next_auto,
+            "last_auto_trigger": last_auto,
+        }
+    )
     return result
 
 
@@ -1367,6 +1431,7 @@ ai_jobs: Dict[str, Dict[str, Any]] = {}
 ai_job_controls: Dict[str, Dict[str, Any]] = {}
 ai_model_cache: Dict[str, Any] = {"timestamp": 0.0, "data": []}
 auto_scheduler: Optional['AutoGenerateScheduler'] = None
+picsum_scheduler: Optional['PicsumAutoScheduler'] = None
 
 
 @dataclass
@@ -3351,6 +3416,8 @@ def delete_stream(stream_id):
         save_settings(settings)
         if auto_scheduler is not None:
             auto_scheduler.remove(stream_id)
+        if picsum_scheduler is not None:
+            picsum_scheduler.remove(stream_id)
         socketio.emit("streams_changed", {"action": "deleted", "stream_id": stream_id})
         return jsonify({"status": "deleted"})
     return jsonify({"error": "not found"}), 404
@@ -3537,8 +3604,118 @@ def update_stream_settings(stream_id):
     save_settings(settings)
     if auto_scheduler is not None:
         auto_scheduler.reschedule(stream_id)
+    if picsum_scheduler is not None:
+        picsum_scheduler.reschedule(stream_id)
     socketio.emit("refresh", {"stream_id": stream_id, "config": conf, "tags": get_global_tags()})
     return jsonify({"status": "success", "new_config": conf, "tags": get_global_tags()})
+
+
+def _refresh_picsum_stream(
+    stream_id: str, incoming_settings: Optional[Dict[str, Any]] = None
+) -> Optional[Dict[str, Any]]:
+    conf = settings.get(stream_id)
+    if not isinstance(conf, dict):
+        return None
+
+    ensure_picsum_defaults(conf)
+    defaults = conf.get(PICSUM_SETTINGS_KEY) or default_picsum_settings()
+    source_settings = incoming_settings if isinstance(incoming_settings, dict) else defaults
+    sanitized = _sanitize_picsum_settings(source_settings, defaults=defaults)
+    result_settings = deepcopy(sanitized)
+
+    incoming_seed_raw = ""
+    if isinstance(incoming_settings, dict) and "seed" in incoming_settings:
+        raw_value = incoming_settings.get("seed")
+        if isinstance(raw_value, str):
+            incoming_seed_raw = raw_value.strip()
+        elif raw_value is None:
+            incoming_seed_raw = ""
+        else:
+            incoming_seed_raw = str(raw_value).strip()
+
+    existing_seed = str(sanitized.get("seed") or "").strip()
+
+    seed_was_custom = bool(incoming_seed_raw)
+    if seed_was_custom:
+        seed_value = incoming_seed_raw
+    else:
+        if conf.get("_picsum_seed_custom") and existing_seed:
+            seed_value = existing_seed
+            seed_was_custom = True
+        else:
+            seed_value = _generate_picsum_seed()
+            seed_was_custom = False
+
+    seed_value = (seed_value or "").strip()
+    result_settings["seed"] = seed_value
+    sanitized["seed"] = seed_value
+
+    image_url = build_picsum_url(
+        sanitized["width"],
+        sanitized["height"],
+        sanitized["blur"],
+        bool(sanitized.get("grayscale")),
+        sanitized.get("seed"),
+    )
+
+    conf[PICSUM_SETTINGS_KEY] = deepcopy(sanitized)
+    conf["_picsum_seed_custom"] = seed_was_custom
+    conf["selected_image"] = image_url
+    conf["selected_media_kind"] = "image"
+    conf["media_mode"] = MEDIA_MODE_PICSUM
+    conf["mode"] = MEDIA_MODE_PICSUM
+
+    runtime_thumbnail = _update_stream_runtime_state(
+        stream_id,
+        path=image_url,
+        kind="image",
+        media_mode=MEDIA_MODE_PICSUM,
+        source="picsum_refresh",
+    )
+    with STREAM_RUNTIME_LOCK:
+        entry = STREAM_RUNTIME_STATE.setdefault(stream_id, {})
+        entry["picsum_seed"] = seed_value
+        entry["picsum_seed_custom"] = seed_was_custom
+
+    return {
+        "url": image_url,
+        "settings": result_settings,
+        "seed_custom": seed_was_custom,
+        "thumbnail": runtime_thumbnail,
+    }
+
+
+def _broadcast_picsum_update(
+    stream_id: str,
+    conf: Dict[str, Any],
+    image_url: str,
+    seed_value: Optional[str],
+    seed_custom: bool,
+    thumbnail: Optional[Dict[str, Any]],
+) -> None:
+    refresh_payload = {"stream_id": stream_id, "config": conf, "tags": get_global_tags()}
+    socketio.emit("refresh", refresh_payload)
+
+    stream_update_payload = {
+        "stream_id": stream_id,
+        "mode": MEDIA_MODE_PICSUM,
+        "media_mode": MEDIA_MODE_PICSUM,
+        "status": "playing",
+        "media": {
+            "path": image_url,
+            "kind": "image",
+            "stream_url": None,
+            "seed": seed_value,
+            "seed_custom": seed_custom,
+        },
+        "duration": None,
+        "position": 0.0,
+        "started_at": None,
+        "is_paused": True,
+        "server_time": time.time(),
+        "thumbnail": thumbnail or _get_runtime_thumbnail_payload(stream_id),
+    }
+    socketio.emit(STREAM_UPDATE_EVENT, stream_update_payload)
 
 
 @app.route("/picsum/refresh", methods=["POST"])
@@ -3557,85 +3734,35 @@ def refresh_picsum_image():
     ensure_picsum_defaults(conf)
 
     incoming_settings = payload.get("settings") or payload.get(PICSUM_SETTINGS_KEY) or {}
-    raw_seed_value: Optional[str]
-    if isinstance(incoming_settings, dict) and "seed" in incoming_settings:
-        raw_seed_candidate = incoming_settings.get("seed")
-        if isinstance(raw_seed_candidate, str):
-            raw_seed_value = raw_seed_candidate.strip()
-        elif raw_seed_candidate is None:
-            raw_seed_value = None
-        else:
-            raw_seed_value = str(raw_seed_candidate).strip()
-    else:
-        raw_seed_value = None
+    result = _refresh_picsum_stream(stream_id, incoming_settings=incoming_settings)
+    if result is None:
+        return jsonify({"error": f"No stream '{stream_id}' found"}), 404
 
-    sanitized = _sanitize_picsum_settings(incoming_settings, defaults=conf.get(PICSUM_SETTINGS_KEY))
-    seed_was_custom = bool(raw_seed_value and sanitized.get("seed"))
-    if not seed_was_custom:
-        sanitized["seed"] = _generate_picsum_seed()
-
-    image_url = build_picsum_url(
-        sanitized["width"],
-        sanitized["height"],
-        sanitized["blur"],
-        bool(sanitized.get("grayscale")),
-        sanitized.get("seed"),
-    )
-
-    conf[PICSUM_SETTINGS_KEY] = deepcopy(sanitized)
-    conf["selected_image"] = image_url
-    conf["selected_media_kind"] = "image"
-    conf["media_mode"] = MEDIA_MODE_PICSUM
-    conf["mode"] = MEDIA_MODE_PICSUM
-    conf["_picsum_seed_custom"] = seed_was_custom
-
-    runtime_thumbnail = _update_stream_runtime_state(
-        stream_id,
-        path=image_url,
-        kind="image",
-        media_mode=MEDIA_MODE_PICSUM,
-        source="picsum_refresh",
-    )
-    with STREAM_RUNTIME_LOCK:
-        entry = STREAM_RUNTIME_STATE.setdefault(stream_id, {})
-        entry["picsum_seed"] = sanitized.get("seed")
-        entry["picsum_seed_custom"] = seed_was_custom
+    if picsum_scheduler is not None:
+        picsum_scheduler.reschedule(stream_id, base_time=time.time())
 
     save_settings(settings)
 
-    refresh_payload = {
-        "stream_id": stream_id,
-        "config": conf,
-        "tags": get_global_tags(),
-    }
-    socketio.emit("refresh", refresh_payload)
+    conf = settings.get(stream_id, conf)
+    sanitized = result["settings"]
+    picsum_conf = conf.get(PICSUM_SETTINGS_KEY, {})
+    sanitized["next_auto_trigger"] = picsum_conf.get("next_auto_trigger")
+    sanitized["last_auto_trigger"] = picsum_conf.get("last_auto_trigger")
 
-    stream_update_payload = {
-        "stream_id": stream_id,
-        "mode": MEDIA_MODE_PICSUM,
-        "media_mode": MEDIA_MODE_PICSUM,
-        "status": "playing",
-        "media": {
-            "path": image_url,
-            "kind": "image",
-            "stream_url": None,
-            "seed": sanitized.get("seed"),
-            "seed_custom": seed_was_custom,
-        },
-        "duration": None,
-        "position": 0.0,
-        "started_at": None,
-        "is_paused": True,
-        "server_time": time.time(),
-        "thumbnail": runtime_thumbnail or _get_runtime_thumbnail_payload(stream_id),
-    }
-    socketio.emit(STREAM_UPDATE_EVENT, stream_update_payload)
+    _broadcast_picsum_update(
+        stream_id,
+        conf,
+        result["url"],
+        sanitized.get("seed"),
+        bool(result.get("seed_custom")),
+        result.get("thumbnail"),
+    )
 
     response = {
         "stream_id": stream_id,
-        "url": image_url,
+        "url": result["url"],
         "settings": sanitized,
-        "seed_custom": seed_was_custom,
+        "seed_custom": bool(result.get("seed_custom")),
     }
     return jsonify(response)
 
@@ -4085,6 +4212,134 @@ if auto_scheduler is None:
     auto_scheduler = AutoGenerateScheduler()
     auto_scheduler.reschedule_all()
     atexit.register(auto_scheduler.stop)
+
+# Picsum auto scheduler ------------------------------------------------------
+
+
+class PicsumAutoScheduler:
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._next_run: Dict[str, float] = {}
+        self._stop = threading.Event()
+        self._thread = threading.Thread(
+            target=self._loop,
+            name="PicsumAutoScheduler",
+            daemon=True,
+        )
+        self._thread.start()
+
+    def stop(self) -> None:
+        self._stop.set()
+        if self._thread.is_alive():
+            self._thread.join(timeout=2.0)
+
+    def reschedule_all(self) -> None:
+        for stream_id, conf in settings.items():
+            if stream_id.startswith("_") or not isinstance(conf, dict):
+                continue
+            self.reschedule(stream_id)
+
+    def remove(self, stream_id: str) -> None:
+        with self._lock:
+            self._next_run.pop(stream_id, None)
+        conf = settings.get(stream_id)
+        if isinstance(conf, dict):
+            picsum = conf.get(PICSUM_SETTINGS_KEY)
+            if isinstance(picsum, dict):
+                picsum["next_auto_trigger"] = None
+
+    def reschedule(self, stream_id: str, *, base_time: Optional[float] = None) -> None:
+        conf = settings.get(stream_id)
+        if not isinstance(conf, dict):
+            self.remove(stream_id)
+            return
+        ensure_picsum_defaults(conf)
+        picsum = conf.get(PICSUM_SETTINGS_KEY) or {}
+        mode_raw = picsum.get("auto_mode")
+        mode = str(mode_raw).strip().lower() if isinstance(mode_raw, str) else PICSUM_DEFAULT_AUTO_MODE
+        if conf.get("media_mode") != MEDIA_MODE_PICSUM or mode not in PICSUM_AUTO_MODES or mode == "off":
+            self.remove(stream_id)
+            return
+        next_dt = self._compute_next_datetime(conf, mode, base_time=base_time)
+        if next_dt is None:
+            self.remove(stream_id)
+            return
+        with self._lock:
+            self._next_run[stream_id] = next_dt.timestamp()
+        picsum["next_auto_trigger"] = next_dt.replace(microsecond=0).isoformat() + "Z"
+
+    def _compute_next_datetime(
+        self,
+        conf: Dict[str, Any],
+        mode: str,
+        *,
+        base_time: Optional[float],
+    ) -> Optional[datetime]:
+        picsum = conf.get(PICSUM_SETTINGS_KEY) or {}
+        reference_ts = base_time if base_time is not None else time.time()
+        if mode == "timer":
+            interval_value = _coerce_float(picsum.get("auto_interval_value"), PICSUM_DEFAULT_INTERVAL_VALUE)
+            if interval_value is None or interval_value <= 0:
+                interval_value = PICSUM_DEFAULT_INTERVAL_VALUE
+            unit_raw = picsum.get("auto_interval_unit")
+            unit = str(unit_raw).strip().lower() if isinstance(unit_raw, str) else PICSUM_DEFAULT_INTERVAL_UNIT
+            unit_seconds = AUTO_GENERATE_INTERVAL_UNITS.get(unit, AUTO_GENERATE_INTERVAL_UNITS[PICSUM_DEFAULT_INTERVAL_UNIT])
+            seconds = max(60.0, interval_value * unit_seconds)
+            target_ts = reference_ts + seconds
+            return datetime.utcfromtimestamp(target_ts)
+        if mode == "clock":
+            clock_value = _normalize_clock_time(picsum.get("auto_clock_time"))
+            if not clock_value:
+                return None
+            hour, minute = map(int, clock_value.split(":"))
+            base_dt = datetime.utcfromtimestamp(reference_ts)
+            target = base_dt.replace(hour=hour, minute=minute, second=0, microsecond=0)
+            if target <= base_dt:
+                target += timedelta(days=1)
+            return target
+        return None
+
+    def _loop(self) -> None:
+        while not self._stop.is_set():
+            now = time.time()
+            due: List[str] = []
+            with self._lock:
+                for stream_id, next_ts in list(self._next_run.items()):
+                    if next_ts <= now:
+                        due.append(stream_id)
+            for stream_id in due:
+                self._trigger_stream(stream_id)
+            self._stop.wait(5.0)
+
+    def _trigger_stream(self, stream_id: str) -> None:
+        conf = settings.get(stream_id)
+        if not isinstance(conf, dict):
+            self.remove(stream_id)
+            return
+        ensure_picsum_defaults(conf)
+        result = _refresh_picsum_stream(stream_id)
+        if result is None:
+            self.remove(stream_id)
+            return
+        picsum_conf = conf.get(PICSUM_SETTINGS_KEY) or {}
+        now_iso = datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
+        picsum_conf["last_auto_trigger"] = now_iso
+        self.reschedule(stream_id, base_time=time.time())
+        save_settings(settings)
+        _broadcast_picsum_update(
+            stream_id,
+            conf,
+            result["url"],
+            result["settings"].get("seed"),
+            bool(result.get("seed_custom")),
+            result.get("thumbnail"),
+        )
+
+
+if picsum_scheduler is None:
+    picsum_scheduler = PicsumAutoScheduler()
+    picsum_scheduler.reschedule_all()
+    atexit.register(picsum_scheduler.stop)
 
 
 @app.route('/ai/models')
