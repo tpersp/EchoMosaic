@@ -37,7 +37,7 @@ except Exception:
 from flask import Flask, jsonify, send_file, request, render_template, redirect, url_for
 from flask_socketio import SocketIO, join_room, leave_room
 from stablehorde import StableHorde, StableHordeError, StableHordeCancelled
-from picsum import register_picsum_routes
+from picsum import register_picsum_routes, build_picsum_url
 from update_helpers import backup_user_state, restore_user_state
 
 try:
@@ -532,6 +532,10 @@ def ensure_picsum_defaults(conf: Dict[str, Any]) -> None:
         conf[PICSUM_SETTINGS_KEY] = _sanitize_picsum_settings(current, defaults)
     else:
         conf[PICSUM_SETTINGS_KEY] = deepcopy(defaults)
+
+
+def _generate_picsum_seed() -> str:
+    return secrets.token_hex(12)
 
 
 def _normalize_tag_name(value: Any) -> Optional[str]:
@@ -3529,6 +3533,80 @@ def update_stream_settings(stream_id):
         auto_scheduler.reschedule(stream_id)
     socketio.emit("refresh", {"stream_id": stream_id, "config": conf, "tags": get_global_tags()})
     return jsonify({"status": "success", "new_config": conf, "tags": get_global_tags()})
+
+
+@app.route("/picsum/refresh", methods=["POST"])
+def refresh_picsum_image():
+    payload = request.get_json(silent=True) or {}
+    stream_id_raw = payload.get("stream_id")
+    stream_id = str(stream_id_raw).strip() if stream_id_raw is not None else ""
+    if not stream_id:
+        return jsonify({"error": "stream_id is required"}), 400
+
+    conf = settings.get(stream_id)
+    if not isinstance(conf, dict):
+        return jsonify({"error": f"No stream '{stream_id}' found"}), 404
+
+    ensure_ai_defaults(conf)
+    ensure_picsum_defaults(conf)
+
+    incoming_settings = payload.get("settings") or payload.get(PICSUM_SETTINGS_KEY) or {}
+    sanitized = _sanitize_picsum_settings(incoming_settings, defaults=conf.get(PICSUM_SETTINGS_KEY))
+    if not sanitized.get("seed"):
+        sanitized["seed"] = _generate_picsum_seed()
+
+    image_url = build_picsum_url(
+        sanitized["width"],
+        sanitized["height"],
+        sanitized["blur"],
+        bool(sanitized.get("grayscale")),
+        sanitized.get("seed"),
+    )
+
+    conf[PICSUM_SETTINGS_KEY] = deepcopy(sanitized)
+    conf["selected_image"] = image_url
+    conf["selected_media_kind"] = "image"
+    conf["media_mode"] = MEDIA_MODE_PICSUM
+    conf["mode"] = MEDIA_MODE_PICSUM
+
+    runtime_thumbnail = _update_stream_runtime_state(
+        stream_id,
+        path=image_url,
+        kind="image",
+        media_mode=MEDIA_MODE_PICSUM,
+        source="picsum_refresh",
+    )
+
+    save_settings(settings)
+
+    refresh_payload = {"stream_id": stream_id, "config": conf, "tags": get_global_tags()}
+    socketio.emit("refresh", refresh_payload)
+
+    stream_update_payload = {
+        "stream_id": stream_id,
+        "mode": MEDIA_MODE_PICSUM,
+        "media_mode": MEDIA_MODE_PICSUM,
+        "status": "playing",
+        "media": {
+            "path": image_url,
+            "kind": "image",
+            "stream_url": None,
+        },
+        "duration": None,
+        "position": 0.0,
+        "started_at": None,
+        "is_paused": True,
+        "server_time": time.time(),
+        "thumbnail": runtime_thumbnail or _get_runtime_thumbnail_payload(stream_id),
+    }
+    socketio.emit(STREAM_UPDATE_EVENT, stream_update_payload)
+
+    response = {
+        "stream_id": stream_id,
+        "url": image_url,
+        "settings": sanitized,
+    }
+    return jsonify(response)
 
 
 @app.route("/settings/ai-defaults", methods=["GET"])

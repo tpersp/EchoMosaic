@@ -3782,7 +3782,8 @@
     const blurNumeric = clamp(parseInt(raw.blur, 10) || PICSUM_DEFAULTS.blur, PICSUM_LIMITS.blur.min, PICSUM_LIMITS.blur.max);
     const grayscaleValue = typeof raw.grayscale === 'string' ? raw.grayscale === 'true' : !!raw.grayscale;
     const seedRaw = typeof raw.seed === 'string' ? raw.seed.trim() : '';
-    const seedValue = seedRaw ? seedRaw.slice(0, 64) : null;
+    const sanitizedSeed = seedRaw ? seedRaw.replace(/[^A-Za-z0-9_.-]/g, '').slice(0, 64) : '';
+    const seedValue = sanitizedSeed || null;
     return {
       width: widthNumeric,
       height: heightNumeric,
@@ -3855,50 +3856,36 @@
       throw new Error('Stream id unavailable');
     }
     const settings = collectPicsumSettings(card);
-    const params = new URLSearchParams({
-      width: String(settings.width),
-      height: String(settings.height),
+    const response = await fetch('/picsum/refresh', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        stream_id: streamId,
+        settings,
+      }),
     });
-    if (settings.blur) {
-      params.set('blur', String(settings.blur));
-    }
-    if (settings.grayscale) {
-      params.set('grayscale', '1');
-    }
-    if (settings.seed) {
-      params.set('seed', settings.seed);
-    }
-    const endpoint = `/picsum/fetch?${params.toString()}`;
-    const response = await fetch(endpoint);
     let data = null;
     try {
       data = await response.json();
     } catch (err) {
       data = null;
     }
-    if (!response.ok || !data || !data.image_url) {
+    if (!response.ok || !data || !data.url) {
       const detail = data && data.error ? data.error : `Request failed (${response.status})`;
       throw new Error(detail);
     }
-    const sanitized = normalizePicsumSettings(data);
+    const sanitized = normalizePicsumSettings(data.settings || data);
     applyPicsumSettings(card, sanitized);
-    const imageUrl = data.image_url;
+    const imageUrl = data.url;
     card.dataset.selectedPath = imageUrl || '';
     card.dataset.selectedKind = 'image';
+    card.dataset.mediaMode = 'picsum';
     const display = card.querySelector('.selected-image-display');
     if (display) {
       display.textContent = imageUrl || 'None';
     }
-    const savePayload = {
-      media_mode: 'picsum',
-      mode: 'picsum',
-      selected_image: imageUrl,
-      selected_media_kind: 'image',
-      picsum_settings: sanitized,
-    };
-    await saveSettings(streamId, savePayload);
     await refreshThumbnail(card, streamId, { force: true });
-    setPicsumStatus(card, 'Image updated');
+    setPicsumStatus(card, 'Picsum image updated');
     showNotification(`Fetched Picsum image for ${streamId}`);
     return data;
   }

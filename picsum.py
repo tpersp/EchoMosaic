@@ -1,8 +1,8 @@
-"""Picsum Photos integration for EchoMosaic.
+"""Picsum Photos integration helpers for EchoMosaic.
 
-This module exposes a lightweight Flask blueprint that returns parameterized
-Picsum image URLs. The dashboard can request new images without embedding URL
-construction logic throughout the app.
+This module exposes a lightweight Flask blueprint (legacy) and helper
+functions so the rest of the project can construct consistent Picsum URLs
+without duplicating sanitisation logic.
 """
 
 from __future__ import annotations
@@ -14,6 +14,11 @@ from typing import Any, Dict, Optional, Tuple
 from urllib.parse import quote
 
 from flask import Blueprint, jsonify, request
+
+__all__ = [
+    "register_picsum_routes",
+    "build_picsum_url",
+]
 
 DEFAULT_WIDTH = 1920
 DEFAULT_HEIGHT = 1080
@@ -64,7 +69,7 @@ def _normalize_seed(value: Any) -> Optional[str]:
     return sanitized[:64]
 
 
-def _build_picsum_url(width: int, height: int, blur: int, grayscale: bool, seed: Optional[str]) -> str:
+def build_picsum_url(width: int, height: int, blur: int, grayscale: bool, seed: Optional[str]) -> str:
     if seed:
         base = f"https://picsum.photos/seed/{quote(seed, safe='')}/{width}/{height}"
     else:
@@ -110,7 +115,7 @@ def fetch_picsum_image():
     if cached:
         return jsonify(cached)
 
-    image_url = _build_picsum_url(width, height, blur, grayscale, seed)
+    image_url = build_picsum_url(width, height, blur, grayscale, seed)
     payload = {
         "source": "picsum",
         "image_url": image_url,
