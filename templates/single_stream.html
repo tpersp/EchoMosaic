@@ -305,6 +305,12 @@ if (!VALID_QUALITIES.has(imageQuality)) {
 const qualityOverride = queryQuality;
 // Request downsized images based on real display size so browsers avoid downloading full-resolution assets.
 function computeSizedImageUrl(path, container) {
+  if (!path) {
+    return '';
+  }
+  if (/^(https?:)?\/\//i.test(path) || path.startsWith('data:')) {
+    return path;
+  }
   const base = `/stream/image/${path}`;
   if (imageQuality !== 'auto') {
     const params = new URLSearchParams({ size: imageQuality });
@@ -882,6 +888,17 @@ async function render(config) {
     } else {
       container.textContent = 'Stream URL not configured';
     }
+    return;
+  }
+
+  if (mediaMode === 'picsum') {
+    const imageUrl = config && typeof config.selected_image === 'string' ? config.selected_image : '';
+    if (!imageUrl) {
+      container.textContent = 'No Picsum image fetched yet';
+      updateBackdropSource('');
+      return;
+    }
+    await displaySingleImage(imageUrl, container);
     return;
   }
 

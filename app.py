@@ -37,6 +37,7 @@ except Exception:
 from flask import Flask, jsonify, send_file, request, render_template, redirect, url_for
 from flask_socketio import SocketIO, join_room, leave_room
 from stablehorde import StableHorde, StableHordeError, StableHordeCancelled
+from picsum import register_picsum_routes
 from update_helpers import backup_user_state, restore_user_state
 
 try:
@@ -46,6 +47,7 @@ except Exception:  # pragma: no cover - yt_dlp is optional at import-time
 
 app = Flask(__name__, static_folder="static", static_url_path="/static")
 socketio = SocketIO(app)
+register_picsum_routes(app)
 
 logger = logging.getLogger(__name__)
 
@@ -150,17 +152,20 @@ MEDIA_MODE_IMAGE = "image"
 MEDIA_MODE_VIDEO = "video"
 MEDIA_MODE_LIVESTREAM = "livestream"
 MEDIA_MODE_AI = AI_MODE
+MEDIA_MODE_PICSUM = "picsum"
 MEDIA_MODE_CHOICES = {
     MEDIA_MODE_IMAGE,
     MEDIA_MODE_VIDEO,
     MEDIA_MODE_LIVESTREAM,
     MEDIA_MODE_AI,
+    MEDIA_MODE_PICSUM,
 }
 MEDIA_MODE_VARIANTS = {
     MEDIA_MODE_IMAGE: {"random", "specific"},
     MEDIA_MODE_VIDEO: {"random", "specific"},
     MEDIA_MODE_LIVESTREAM: {"livestream"},
     MEDIA_MODE_AI: {AI_MODE},
+    MEDIA_MODE_PICSUM: {MEDIA_MODE_PICSUM},
 }
 
 NSFW_KEYWORD = "nsfw"
@@ -459,6 +464,74 @@ def ensure_background_defaults(conf: Dict[str, Any]) -> None:
     amount_raw = conf.get("background_blur_amount", 50)
     amount_val = _coerce_int(amount_raw, 50)
     conf["background_blur_amount"] = max(0, min(100, amount_val))
+
+
+PICSUM_SETTINGS_KEY = "picsum_settings"
+PICSUM_DEFAULT_WIDTH = 1920
+PICSUM_DEFAULT_HEIGHT = 1080
+PICSUM_MIN_DIMENSION = 16
+PICSUM_MAX_DIMENSION = 4096
+PICSUM_MIN_BLUR = 0
+PICSUM_MAX_BLUR = 10
+PICSUM_DEFAULT_BLUR = 0
+
+
+def default_picsum_settings() -> Dict[str, Any]:
+    return {
+        "width": PICSUM_DEFAULT_WIDTH,
+        "height": PICSUM_DEFAULT_HEIGHT,
+        "blur": PICSUM_DEFAULT_BLUR,
+        "grayscale": False,
+        "seed": None,
+    }
+
+
+def _normalize_picsum_seed(value: Any) -> Optional[str]:
+    if not isinstance(value, str):
+        return None
+    cleaned = value.strip()
+    if not cleaned:
+        return None
+    sanitized = re.sub(r"[^A-Za-z0-9_.-]", "", cleaned)
+    if not sanitized:
+        return None
+    return sanitized[:64]
+
+
+def _sanitize_picsum_settings(
+    value: Any, defaults: Optional[Dict[str, Any]] = None
+) -> Dict[str, Any]:
+    baseline = deepcopy(defaults) if defaults else default_picsum_settings()
+    if not isinstance(value, dict):
+        return baseline
+    width_default = baseline.get("width", PICSUM_DEFAULT_WIDTH)
+    height_default = baseline.get("height", PICSUM_DEFAULT_HEIGHT)
+    blur_default = baseline.get("blur", PICSUM_DEFAULT_BLUR)
+    grayscale_default = bool(baseline.get("grayscale", False))
+    seed_default = baseline.get("seed")
+
+    width_val = _coerce_int(value.get("width"), width_default)
+    height_val = _coerce_int(value.get("height"), height_default)
+    blur_val = _coerce_int(value.get("blur"), blur_default)
+    grayscale_val = _coerce_bool(value.get("grayscale"), grayscale_default)
+    seed_val = _normalize_picsum_seed(value.get("seed"))
+    result = {
+        "width": max(PICSUM_MIN_DIMENSION, min(PICSUM_MAX_DIMENSION, width_val)),
+        "height": max(PICSUM_MIN_DIMENSION, min(PICSUM_MAX_DIMENSION, height_val)),
+        "blur": max(PICSUM_MIN_BLUR, min(PICSUM_MAX_BLUR, blur_val)),
+        "grayscale": bool(grayscale_val),
+        "seed": seed_val if seed_val is not None else seed_default if seed_default else None,
+    }
+    return result
+
+
+def ensure_picsum_defaults(conf: Dict[str, Any]) -> None:
+    defaults = default_picsum_settings()
+    current = conf.get(PICSUM_SETTINGS_KEY)
+    if isinstance(current, dict):
+        conf[PICSUM_SETTINGS_KEY] = _sanitize_picsum_settings(current, defaults)
+    else:
+        conf[PICSUM_SETTINGS_KEY] = deepcopy(defaults)
 
 
 def _normalize_tag_name(value: Any) -> Optional[str]:
@@ -777,6 +850,7 @@ def default_stream_config():
         TAG_KEY: [],
         "background_blur_enabled": False,
         "background_blur_amount": 50,
+        PICSUM_SETTINGS_KEY: default_picsum_settings(),
         AI_SETTINGS_KEY: default_ai_settings(),
         AI_STATE_KEY: default_ai_state(),
         "_ai_customized": False,
@@ -791,7 +865,7 @@ def _sanitize_imported_stream_config(stream_id: str, raw_conf: Any) -> Dict[str,
         conf[key] = deepcopy(value) if isinstance(value, (dict, list)) else value
     mode_raw = conf.get('mode')
     mode = mode_raw.strip().lower() if isinstance(mode_raw, str) else conf['mode']
-    if mode not in {'random', 'specific', 'livestream', AI_MODE}:
+    if mode not in {'random', 'specific', 'livestream', AI_MODE, MEDIA_MODE_PICSUM}:
         mode = conf['mode']
     conf['mode'] = mode
     folder_raw = conf.get('folder')
@@ -875,6 +949,8 @@ def _sanitize_imported_stream_config(stream_id: str, raw_conf: Any) -> Dict[str,
                 state_defaults[key] = ai_state_raw[key]
     conf[AI_STATE_KEY] = state_defaults
     conf['_ai_customized'] = not _ai_settings_match_defaults(conf[AI_SETTINGS_KEY], defaults=AI_FALLBACK_DEFAULTS)
+    picsum_raw = conf.get(PICSUM_SETTINGS_KEY)
+    conf[PICSUM_SETTINGS_KEY] = _sanitize_picsum_settings(picsum_raw, defaults=default_picsum_settings())
     ensure_background_defaults(conf)
     return conf
 
@@ -1045,6 +1121,7 @@ def import_settings():
         conf.pop('_ai_customized', None)
         ensure_background_defaults(conf)
         ensure_ai_defaults(conf)
+        ensure_picsum_defaults(conf)
 
     ensure_settings_integrity(settings)
     save_settings(settings)
@@ -1357,6 +1434,7 @@ def _update_ai_state(stream_id: str, updates: Dict[str, Any], *, persist: bool =
     if not conf:
         return {}
     ensure_ai_defaults(conf)
+    ensure_picsum_defaults(conf)
     state = conf[AI_STATE_KEY]
     state.update(updates)
     if persist:
@@ -1640,6 +1718,7 @@ def _run_ai_generation(stream_id: str, options: Dict[str, Any], cancel_event: Op
     conf = settings.get(stream_id)
     if conf:
         ensure_ai_defaults(conf)
+        ensure_picsum_defaults(conf)
         conf[AI_SETTINGS_KEY] = _sanitize_ai_settings(options, conf[AI_SETTINGS_KEY])
         conf[AI_SETTINGS_KEY]['save_output'] = persist
         conf['_ai_customized'] = not _ai_settings_match_defaults(conf[AI_SETTINGS_KEY])
@@ -1695,6 +1774,8 @@ def _infer_media_mode(conf: Dict[str, Any]) -> str:
         return MEDIA_MODE_AI
     if mode == "livestream":
         return MEDIA_MODE_LIVESTREAM
+    if mode == MEDIA_MODE_PICSUM:
+        return MEDIA_MODE_PICSUM
 
     selected_kind_raw = conf.get("selected_media_kind")
     selected_kind = selected_kind_raw.strip().lower() if isinstance(selected_kind_raw, str) else ""
@@ -1866,9 +1947,9 @@ class StreamPlaybackState:
 
         media_mode_raw = conf.get("media_mode")
         new_media_mode = media_mode_raw.strip().lower() if isinstance(media_mode_raw, str) else ""
-        if new_media_mode not in (MEDIA_MODE_IMAGE, MEDIA_MODE_VIDEO):
+        if new_media_mode not in MEDIA_MODE_CHOICES:
             inferred = _infer_media_mode(conf)
-            if inferred in (MEDIA_MODE_IMAGE, MEDIA_MODE_VIDEO):
+            if inferred in MEDIA_MODE_CHOICES:
                 new_media_mode = inferred
             else:
                 new_media_mode = MEDIA_MODE_IMAGE
@@ -2623,9 +2704,18 @@ def _render_thumbnail_image(snapshot: Dict[str, Any]) -> Tuple[Image.Image, bool
     image_obj: Optional[Image.Image] = None
     placeholder = False
     if kind == "image" and path:
-        media_path = _resolve_media_path(path)
-        if media_path is not None:
-            image_obj = _create_thumbnail_image(media_path)
+        if isinstance(path, str) and path.startswith(("http://", "https://")):
+            remote_image = _load_remote_image(path)
+            if remote_image is not None:
+                try:
+                    image_obj = _compose_thumbnail(remote_image)
+                except Exception as exc:  # pragma: no cover - best effort rendering
+                    logger.debug("Remote thumbnail compose failed for %s: %s", path, exc)
+                    image_obj = None
+        else:
+            media_path = _resolve_media_path(path)
+            if media_path is not None:
+                image_obj = _create_thumbnail_image(media_path)
     elif kind == "video" and path:
         media_path = _resolve_media_path(path)
         if media_path is not None:
@@ -2683,6 +2773,8 @@ def _compute_thumbnail_snapshot(stream_id: str) -> Optional[Dict[str, Any]]:
         kind = 'video'
     elif media_mode == MEDIA_MODE_AI:
         kind = 'image'
+    elif media_mode == MEDIA_MODE_PICSUM:
+        kind = 'image'
     else:
         kind = kind or 'image'
     placeholder = False
@@ -2692,6 +2784,7 @@ def _compute_thumbnail_snapshot(stream_id: str) -> Optional[Dict[str, Any]]:
         MEDIA_MODE_LIVESTREAM: 'Live',
         MEDIA_MODE_VIDEO: 'Video',
         MEDIA_MODE_AI: 'AI',
+        MEDIA_MODE_PICSUM: 'Picsum',
     }
     badge = badge_map.get(media_mode, 'Image')
     return {
@@ -2800,6 +2893,7 @@ for k, v in list(settings.items()):
         if v.get("image_quality") not in IMAGE_QUALITY_CHOICES:
             v["image_quality"] = "auto"
         ensure_ai_defaults(v)
+        ensure_picsum_defaults(v)
         ensure_background_defaults(v)
         ensure_tag_defaults(v)
         mode_value = v.get("video_playback_mode")
@@ -2835,7 +2929,10 @@ for k, v in list(settings.items()):
             current_mode_raw = v.get("mode")
             current_mode = current_mode_raw.strip().lower() if isinstance(current_mode_raw, str) else ""
             allowed = MEDIA_MODE_VARIANTS.get(media_mode, {"random", "specific"})
-            desired_mode = current_mode if current_mode in allowed else "random"
+            if current_mode in allowed:
+                desired_mode = current_mode
+            else:
+                desired_mode = "random" if "random" in allowed else next(iter(sorted(allowed)))
         v["media_mode"] = media_mode
         v["mode"] = desired_mode
         if media_mode == MEDIA_MODE_VIDEO and desired_mode == "specific":
@@ -3254,6 +3351,7 @@ def get_stream_settings(stream_id):
         return jsonify({"error": f"No stream '{stream_id}' found"}), 404
     conf = settings[stream_id]
     ensure_ai_defaults(conf)
+    ensure_picsum_defaults(conf)
     ensure_background_defaults(conf)
     ensure_tag_defaults(conf)
     return jsonify(conf)
@@ -3283,6 +3381,7 @@ def update_stream_settings(stream_id):
     data = request.get_json(silent=True) or {}
     conf = settings[stream_id]
     ensure_ai_defaults(conf)
+    ensure_picsum_defaults(conf)
     previous_mode = conf.get("mode")
 
     # We'll add new keys for YouTube: "yt_cc", "yt_mute", "yt_quality"
@@ -3359,6 +3458,17 @@ def update_stream_settings(stream_id):
                 conf[key] = normalized
             else:
                 conf[key] = val
+
+    if PICSUM_SETTINGS_KEY in data:
+        conf[PICSUM_SETTINGS_KEY] = _sanitize_picsum_settings(
+            data.get(PICSUM_SETTINGS_KEY),
+            defaults=conf.get(PICSUM_SETTINGS_KEY),
+        )
+    else:
+        conf[PICSUM_SETTINGS_KEY] = _sanitize_picsum_settings(
+            conf.get(PICSUM_SETTINGS_KEY),
+            defaults=default_picsum_settings(),
+        )
 
     media_mode = conf.get("media_mode")
     if isinstance(media_mode, str):
@@ -3448,6 +3558,7 @@ def update_ai_defaults():
         if stream_id.startswith("_") or not isinstance(conf, dict):
             continue
         ensure_ai_defaults(conf)
+        ensure_picsum_defaults(conf)
         if not conf.get("_ai_customized", False):
             conf[AI_SETTINGS_KEY] = deepcopy(new_defaults)
             conf["_ai_customized"] = False
@@ -3651,6 +3762,7 @@ def _queue_ai_generation(stream_id: str, ai_settings: Dict[str, Any], *, trigger
         raise AutoGenerationError(f"No stream '{stream_id}' found")
 
     ensure_ai_defaults(conf)
+    ensure_picsum_defaults(conf)
     sanitized = _sanitize_ai_settings(ai_settings, conf[AI_SETTINGS_KEY])
     prompt = str(sanitized.get('prompt') or '').strip()
     if not prompt:
@@ -3748,6 +3860,7 @@ class AutoGenerateScheduler:
             self.remove(stream_id)
             return
         ensure_ai_defaults(conf)
+        ensure_picsum_defaults(conf)
         ai_settings = conf[AI_SETTINGS_KEY]
         mode_raw = ai_settings.get('auto_generate_mode')
         mode_value = mode_raw.strip().lower() if isinstance(mode_raw, str) else 'off'
@@ -3800,6 +3913,7 @@ class AutoGenerateScheduler:
         if not isinstance(conf, dict):
             return
         ensure_ai_defaults(conf)
+        ensure_picsum_defaults(conf)
         state = conf[AI_STATE_KEY]
         changed = False
         for key, value in updates.items():
@@ -3827,6 +3941,7 @@ class AutoGenerateScheduler:
             self.remove(stream_id)
             return
         ensure_ai_defaults(conf)
+        ensure_picsum_defaults(conf)
         ai_settings = conf[AI_SETTINGS_KEY]
         mode_raw = ai_settings.get('auto_generate_mode')
         mode_value = mode_raw.strip().lower() if isinstance(mode_raw, str) else 'off'

@@ -99,6 +99,7 @@
         <!-- Mode Selection (moved to top) -->
         {% set media_mode = conf.media_mode|default('image') %}
         {% set mode_value = conf.mode|default('random') %}
+        {% set picsum = conf.picsum_settings or {} %}
         <div class="form-row mode-row">
           <label for="mode-category-{{ stream_id }}">Mode</label>
           <div class="mode-selectors">
@@ -106,6 +107,7 @@
               <option value="image" {% if media_mode == 'image' %}selected{% endif %}>Image / GIF</option>
               <option value="video" {% if media_mode == 'video' %}selected{% endif %}>Video</option>
               <option value="livestream" {% if media_mode == 'livestream' %}selected{% endif %}>URL / Embed</option>
+              <option value="picsum" {% if media_mode == 'picsum' %}selected{% endif %}>Picsum Photos</option>
               <option value="ai" {% if media_mode == 'ai' %}selected{% endif %}>AI Images</option>
             </select>
             <div class="mode-variant-wrapper">
@@ -226,6 +228,42 @@
               <input id="stream-url-{{ stream_id }}" type="text" class="stream-url-input" data-stream="{{ stream_id }}" value="{{ conf.stream_url if conf.stream_url else '' }}" placeholder="https://example.com/">
               <span class="url-type-badge" aria-live="polite"></span>
               <span class="embed-status-badge" aria-live="polite"></span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Picsum Settings -->
+        <div class="form-row picsum-row" {% if media_mode != 'picsum' %} style="display:none;" {% endif %}>
+          <label for="picsum-width-{{ stream_id }}">Picsum</label>
+          <div class="picsum-config" data-stream="{{ stream_id }}">
+            <div class="picsum-grid">
+              <div class="picsum-field">
+                <label for="picsum-width-{{ stream_id }}">Width</label>
+                <input id="picsum-width-{{ stream_id }}" type="number" class="picsum-width" min="16" max="4096" step="1" data-default="1920" value="{{ picsum.width|default(1920) }}">
+              </div>
+              <div class="picsum-field">
+                <label for="picsum-height-{{ stream_id }}">Height</label>
+                <input id="picsum-height-{{ stream_id }}" type="number" class="picsum-height" min="16" max="4096" step="1" data-default="1080" value="{{ picsum.height|default(1080) }}">
+              </div>
+              <div class="picsum-field">
+                <label for="picsum-blur-{{ stream_id }}">Blur</label>
+                <input id="picsum-blur-{{ stream_id }}" type="number" class="picsum-blur" min="0" max="10" step="1" data-default="0" value="{{ picsum.blur|default(0) }}">
+              </div>
+              <div class="picsum-field picsum-checkbox">
+                <label class="toggle inline" title="Return grayscale images">
+                  <input type="checkbox" class="picsum-grayscale" {% if picsum.grayscale %}checked{% endif %}>
+                  <span class="toggle-switch" aria-hidden="true"></span>
+                  <span class="toggle-label">Grayscale</span>
+                </label>
+              </div>
+              <div class="picsum-field picsum-seed">
+                <label for="picsum-seed-{{ stream_id }}">Seed</label>
+                <input id="picsum-seed-{{ stream_id }}" type="text" class="picsum-seed" maxlength="64" placeholder="Optional" value="{{ picsum.seed or '' }}">
+              </div>
+            </div>
+            <div class="picsum-actions">
+              <button type="button" class="picsum-fetch-btn" data-stream="{{ stream_id }}">Fetch Image</button>
+              <span class="picsum-status" aria-live="polite"></span>
             </div>
           </div>
         </div>
@@ -2043,6 +2081,13 @@
         volumeSlider.value = String(Math.round(pct));
       }
     }
+    if (conf.picsum_settings !== undefined) {
+      applyPicsumSettings(card, conf.picsum_settings);
+      const mediaMode = (conf.media_mode || card.dataset.mediaMode || '').toLowerCase();
+      if (mediaMode === 'picsum') {
+        setPicsumStatus(card, '');
+      }
+    }
     if (conf.ai_state) {
       if (Array.isArray(conf.ai_state.images)) {
         renderAiResults(card, conf.ai_state.images);
@@ -3500,7 +3545,8 @@
           const modeVariantSelect = card.querySelector('.mode-select');
           const urlInputEl = card.querySelector('.stream-url-input');
           let updatedMediaMode = (modeCategorySelect ? modeCategorySelect.value : (card.dataset.mediaMode || 'image')).toLowerCase();
-          let updatedMode = modeVariantSelect ? (modeVariantSelect.value || '').toLowerCase() : ((updatedMediaMode === 'livestream' || updatedMediaMode === 'ai') ? updatedMediaMode : 'random');
+          const variantlessModes = new Set(['livestream', 'ai', 'picsum']);
+          let updatedMode = modeVariantSelect ? (modeVariantSelect.value || '').toLowerCase() : (variantlessModes.has(updatedMediaMode) ? updatedMediaMode : 'random');
 
           if (data.new_config && (data.new_config.selected_image !== undefined || data.new_config.selected_media_kind !== undefined)) {
             const selectedPath = data.new_config.selected_image || "";
@@ -3586,11 +3632,19 @@
               updatedMode = normalizedMode;
             }
           }
-          if (modeVariantSelect && updatedMode) {
-            modeVariantSelect.value = updatedMode;
+          if (modeVariantSelect) {
+            if (updatedMode === 'random' || updatedMode === 'specific') {
+              modeVariantSelect.value = updatedMode;
+            }
           }
-          const effectiveMode = updatedMode || ((updatedMediaMode === 'livestream' || updatedMediaMode === 'ai') ? updatedMediaMode : 'random');
+          const effectiveMode = updatedMode || (variantlessModes.has(updatedMediaMode) ? updatedMediaMode : 'random');
           applyModeState(card, updatedMediaMode, effectiveMode, urlInputEl ? urlInputEl.value : '');
+          if (data.new_config && data.new_config.picsum_settings !== undefined) {
+            applyPicsumSettings(card, data.new_config.picsum_settings);
+            if (updatedMediaMode === 'picsum') {
+              setPicsumStatus(card, '');
+            }
+          }
 
           const aiSettings = data.new_config && data.new_config.ai_settings;
           if (aiSettings) {
@@ -3698,6 +3752,157 @@
     }
   }
 
+  const PICSUM_LIMITS = Object.freeze({
+    width: { min: 16, max: 4096, default: 1920 },
+    height: { min: 16, max: 4096, default: 1080 },
+    blur: { min: 0, max: 10, default: 0 },
+  });
+
+  const PICSUM_DEFAULTS = Object.freeze({
+    width: PICSUM_LIMITS.width.default,
+    height: PICSUM_LIMITS.height.default,
+    blur: PICSUM_LIMITS.blur.default,
+    grayscale: false,
+    seed: null,
+  });
+
+  function clamp(value, min, max) {
+    if (!Number.isFinite(value)) {
+      return min;
+    }
+    return Math.min(Math.max(value, min), max);
+  }
+
+  function normalizePicsumSettings(raw) {
+    if (!raw || typeof raw !== 'object') {
+      return { ...PICSUM_DEFAULTS };
+    }
+    const widthNumeric = clamp(parseInt(raw.width, 10) || PICSUM_DEFAULTS.width, PICSUM_LIMITS.width.min, PICSUM_LIMITS.width.max);
+    const heightNumeric = clamp(parseInt(raw.height, 10) || PICSUM_DEFAULTS.height, PICSUM_LIMITS.height.min, PICSUM_LIMITS.height.max);
+    const blurNumeric = clamp(parseInt(raw.blur, 10) || PICSUM_DEFAULTS.blur, PICSUM_LIMITS.blur.min, PICSUM_LIMITS.blur.max);
+    const grayscaleValue = typeof raw.grayscale === 'string' ? raw.grayscale === 'true' : !!raw.grayscale;
+    const seedRaw = typeof raw.seed === 'string' ? raw.seed.trim() : '';
+    const seedValue = seedRaw ? seedRaw.slice(0, 64) : null;
+    return {
+      width: widthNumeric,
+      height: heightNumeric,
+      blur: blurNumeric,
+      grayscale: grayscaleValue,
+      seed: seedValue,
+    };
+  }
+
+  function collectPicsumSettings(card) {
+    const config = card.querySelector('.picsum-config');
+    if (!config) {
+      return { ...PICSUM_DEFAULTS };
+    }
+    const widthInput = config.querySelector('.picsum-width');
+    const heightInput = config.querySelector('.picsum-height');
+    const blurInput = config.querySelector('.picsum-blur');
+    const grayscaleInput = config.querySelector('.picsum-grayscale');
+    const seedInput = config.querySelector('.picsum-seed');
+    const payload = {
+      width: widthInput ? widthInput.value : PICSUM_DEFAULTS.width,
+      height: heightInput ? heightInput.value : PICSUM_DEFAULTS.height,
+      blur: blurInput ? blurInput.value : PICSUM_DEFAULTS.blur,
+      grayscale: grayscaleInput ? grayscaleInput.checked : PICSUM_DEFAULTS.grayscale,
+      seed: seedInput ? seedInput.value : PICSUM_DEFAULTS.seed,
+    };
+    return normalizePicsumSettings(payload);
+  }
+
+  function applyPicsumSettings(card, settings) {
+    const normalized = normalizePicsumSettings(settings);
+    const config = card.querySelector('.picsum-config');
+    if (!config) {
+      return normalized;
+    }
+    const widthInput = config.querySelector('.picsum-width');
+    const heightInput = config.querySelector('.picsum-height');
+    const blurInput = config.querySelector('.picsum-blur');
+    const grayscaleInput = config.querySelector('.picsum-grayscale');
+    const seedInput = config.querySelector('.picsum-seed');
+    if (widthInput) widthInput.value = normalized.width;
+    if (heightInput) heightInput.value = normalized.height;
+    if (blurInput) blurInput.value = normalized.blur;
+    if (grayscaleInput) grayscaleInput.checked = normalized.grayscale;
+    if (seedInput) seedInput.value = normalized.seed || '';
+    return normalized;
+  }
+
+  function setPicsumStatus(card, message, isError = false) {
+    const statusEl = card.querySelector('.picsum-status');
+    if (!statusEl) {
+      return;
+    }
+    statusEl.textContent = message || '';
+    statusEl.classList.toggle('is-error', !!isError);
+  }
+
+  function savePicsumSettings(card, opts = {}) {
+    const streamId = card.dataset.stream;
+    if (!streamId) {
+      return Promise.resolve();
+    }
+    const payload = { picsum_settings: collectPicsumSettings(card) };
+    return saveSettings(streamId, payload, opts);
+  }
+
+  async function fetchPicsumImageForCard(card) {
+    const streamId = card.dataset.stream;
+    if (!streamId) {
+      throw new Error('Stream id unavailable');
+    }
+    const settings = collectPicsumSettings(card);
+    const params = new URLSearchParams({
+      width: String(settings.width),
+      height: String(settings.height),
+    });
+    if (settings.blur) {
+      params.set('blur', String(settings.blur));
+    }
+    if (settings.grayscale) {
+      params.set('grayscale', '1');
+    }
+    if (settings.seed) {
+      params.set('seed', settings.seed);
+    }
+    const endpoint = `/picsum/fetch?${params.toString()}`;
+    const response = await fetch(endpoint);
+    let data = null;
+    try {
+      data = await response.json();
+    } catch (err) {
+      data = null;
+    }
+    if (!response.ok || !data || !data.image_url) {
+      const detail = data && data.error ? data.error : `Request failed (${response.status})`;
+      throw new Error(detail);
+    }
+    const sanitized = normalizePicsumSettings(data);
+    applyPicsumSettings(card, sanitized);
+    const imageUrl = data.image_url;
+    card.dataset.selectedPath = imageUrl || '';
+    card.dataset.selectedKind = 'image';
+    const display = card.querySelector('.selected-image-display');
+    if (display) {
+      display.textContent = imageUrl || 'None';
+    }
+    const savePayload = {
+      media_mode: 'picsum',
+      mode: 'picsum',
+      selected_image: imageUrl,
+      selected_media_kind: 'image',
+      picsum_settings: sanitized,
+    };
+    await saveSettings(streamId, savePayload);
+    await refreshThumbnail(card, streamId, { force: true });
+    setPicsumStatus(card, 'Image updated');
+    showNotification(`Fetched Picsum image for ${streamId}`);
+    return data;
+  }
+
   async function refreshFoldersForCard(card, hideNsfw) {
     const folderSelect = card.querySelector('.folder-select');
     if (!folderSelect) {
@@ -3790,6 +3995,7 @@
     const isVideo = normalizedMedia === 'video';
     const isLivestream = normalizedMedia === 'livestream';
     const isAi = normalizedMedia === 'ai';
+    const isPicsum = normalizedMedia === 'picsum';
     const isRandom = normalizedMode === 'random';
     const isSpecific = normalizedMode === 'specific';
 
@@ -3811,6 +4017,7 @@
     const backgroundRow = card.querySelector('.background-row');
     const aiSection = card.querySelector('.ai-generator');
     const aiSummary = card.querySelector('.ai-summary');
+    const picsumRow = card.querySelector('.picsum-row');
 
     const showVariant = isImage || isVideo;
     if (variantWrapper) {
@@ -3858,13 +4065,14 @@
     if (summaryUpdater) summaryUpdater();
 
     if (selectedRow) {
-      const showSelected = (isSpecific && (isImage || isVideo)) || isAi;
+      const showSelected = (isSpecific && (isImage || isVideo)) || isAi || isPicsum;
       selectedRow.style.display = showSelected ? '' : 'none';
     }
     if (folderRow) folderRow.style.display = (isImage || isVideo) ? '' : 'none';
-    if (nsfwRow) nsfwRow.style.display = isLivestream ? 'none' : '';
-    if (qualityRow) qualityRow.style.display = (isLivestream || isVideo) ? 'none' : '';
+    if (nsfwRow) nsfwRow.style.display = (isLivestream || isPicsum) ? 'none' : '';
+    if (qualityRow) qualityRow.style.display = (isLivestream || isVideo || isPicsum) ? 'none' : '';
     if (backgroundRow) backgroundRow.style.display = (isLivestream || isVideo) ? 'none' : '';
+    if (picsumRow) picsumRow.style.display = isPicsum ? '' : 'none';
 
     if (videoModeSelect) {
       if (isVideo && isRandom) {
@@ -4076,8 +4284,56 @@
         });
         backgroundSlider.addEventListener('change', e => {
           const amount = Number(e.target.value);
-          saveSettings(streamId, { background_blur_amount: amount });
-        });
+      saveSettings(streamId, { background_blur_amount: amount });
+    });
+  }
+      const picsumConfig = card.querySelector('.picsum-config');
+      if (picsumConfig) {
+        const widthInput = picsumConfig.querySelector('.picsum-width');
+        const heightInput = picsumConfig.querySelector('.picsum-height');
+        const blurInput = picsumConfig.querySelector('.picsum-blur');
+        const grayscaleInput = picsumConfig.querySelector('.picsum-grayscale');
+        const seedInput = picsumConfig.querySelector('.picsum-seed');
+        const fetchBtn = picsumConfig.querySelector('.picsum-fetch-btn');
+        const maybeSave = () => {
+          if ((card.dataset.mediaMode || '').toLowerCase() !== 'picsum') {
+            return;
+          }
+          const normalized = collectPicsumSettings(card);
+          applyPicsumSettings(card, normalized);
+          savePicsumSettings(card);
+        };
+        if (widthInput) widthInput.addEventListener('change', maybeSave);
+        if (heightInput) heightInput.addEventListener('change', maybeSave);
+        if (blurInput) blurInput.addEventListener('change', maybeSave);
+        if (grayscaleInput) grayscaleInput.addEventListener('change', maybeSave);
+        if (seedInput) {
+          seedInput.addEventListener('change', maybeSave);
+          seedInput.addEventListener('blur', maybeSave);
+        }
+        if (fetchBtn) {
+          fetchBtn.addEventListener('click', async () => {
+            if ((card.dataset.mediaMode || '').toLowerCase() !== 'picsum') {
+              showNotification('Switch to Picsum mode to fetch images');
+              return;
+            }
+            if (fetchBtn.disabled) {
+              return;
+            }
+            setPicsumStatus(card, 'Fetching...');
+            fetchBtn.disabled = true;
+            try {
+              await fetchPicsumImageForCard(card);
+            } catch (err) {
+              console.error('Picsum fetch failed', err);
+              const message = err && err.message ? err.message : 'Failed to fetch Picsum image';
+              setPicsumStatus(card, message, true);
+              showNotification(message);
+            } finally {
+              fetchBtn.disabled = false;
+            }
+          });
+        }
       }
       const videoModeSelect = card.querySelector('.video-mode-select');
       if (videoModeSelect) {
@@ -4142,14 +4398,17 @@
         modeCategorySelect.addEventListener('change', e => {
           const mediaMode = (e.target.value || 'image').toLowerCase();
           card.dataset.mediaMode = mediaMode;
-          let nextMode = (modeSelect && !modeSelect.disabled) ? (modeSelect.value || 'random').toLowerCase() : 'random';
+          let nextMode;
           if (mediaMode === 'image' || mediaMode === 'video') {
+            nextMode = (modeSelect && !modeSelect.disabled) ? (modeSelect.value || 'random').toLowerCase() : 'random';
             if (nextMode !== 'random' && nextMode !== 'specific') {
               nextMode = 'random';
               if (modeSelect) modeSelect.value = nextMode;
             }
           } else if (mediaMode === 'livestream') {
             nextMode = 'livestream';
+          } else if (mediaMode === 'picsum') {
+            nextMode = 'picsum';
           } else {
             nextMode = 'ai';
           }
@@ -4171,6 +4430,9 @@
               qualitySelect.value = 'auto';
               payload.yt_quality = 'auto';
             }
+          } else if (mediaMode === 'picsum') {
+            payload.picsum_settings = collectPicsumSettings(card);
+            setPicsumStatus(card, '');
           }
           saveSettings(streamId, payload);
           applyModeState(card, mediaMode, nextMode, getStreamUrl());
@@ -4184,6 +4446,10 @@
       if (modeSelect) {
         modeSelect.addEventListener('change', e => {
           const mediaMode = getCurrentMediaMode();
+          if (mediaMode === 'picsum') {
+            applyModeState(card, mediaMode, 'picsum', getStreamUrl());
+            return;
+          }
           const mode = (e.target.value || 'random').toLowerCase();
           const payload = { media_mode: mediaMode, mode };
           if ((mediaMode === 'image' || mediaMode === 'video') && mode === 'random') {

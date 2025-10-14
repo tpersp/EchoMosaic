@@ -4,9 +4,6 @@ A running list of ideas and future improvements. Add new items anywhere below.
 
 ## Active Ideas
 - [ ] Stream real-time update logs via Socket.IO instead of the current client-side animation.
-- [ ] "Slideshow sync": sync transitions across all streams (for example, they all change every 10 seconds together) to prevent random offsets when multiple screens are visible at once.
-- [ ] Low-bandwidth mode: automatically reduce image resolution and caching behaviour for remote access.
-- [ ] Add server-side rendering as an option so everyone who opens the site sees the same frame at the same time. This should be controlled at the group level (a single-stream group covers the one-off case).
 - [ ] Add system monitoring to surface CPU usage, memory usage (used/max), GPU usage (if available), storage available for media, and other useful info.
 - [x] Implement a better rollback feature that lets admins mark a restore point so the server can always roll back to a known good state on demand.
 
@@ -17,7 +14,7 @@ A running list of ideas and future improvements. Add new items anywhere below.
 - [ ] [2025-09-08] Enhance group management and stream ordering. Persist layouts server-side, allow drag-and-drop reordering, and offer options to clone or share groups.
 - [ ] [2025-09-08] Improve error handling and user feedback. When an image or stream URL is missing, surface clear messages in the UI instead of generic JSON errors.
 - [ ] [2025-09-08] Add configurable logging and monitoring. Operations like `yt-dlp` calls and update scripts either fail silently or log to the console; configurable log levels and rotating file logs would help.
-- [ ] Add a page and function similar to `stablehorde.py` that can pull images from https://picsum.photos/ with the available options exposed in the UI.
+- [x] Add a page and function similar to `stablehorde.py` that can pull images from https://picsum.photos/ with the available options exposed in the UI.
 - [ ] Add a page and function similar to `stablehorde.py` that can pull images from the https://www.pexels.com/api/ with the available options exposed in the UI.
 
 ## Implemented / Completed Ideas
@@ -40,6 +37,7 @@ A running list of ideas and future improvements. Add new items anywhere below.
 - [x] [2025-09-21] Expand Stable Horde controls with LoRA stacks, post-processing chains, and worker preference toggles directly in the dashboard.
 - [x] [2025-09-21] Move AI generator controls into a modal window and surface per-stream summaries on the dashboard.
 - [x] Show a live thumbnail preview for each stream's current content directly on the dashboard so you can see all streams at a glance before opening them.
+- [x] Low-bandwidth mode: automatically reduce image resolution and caching behaviour for remote access.
 
 Notes
 - Use checkboxes to track status (unchecked = planned, checked = done).
