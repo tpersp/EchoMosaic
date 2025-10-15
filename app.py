@@ -3537,11 +3537,20 @@ def update_stream_settings(stream_id):
                 conf[key] = val
 
     if PICSUM_SETTINGS_KEY in data:
+        incoming_picsum = data.get(PICSUM_SETTINGS_KEY)
         conf[PICSUM_SETTINGS_KEY] = _sanitize_picsum_settings(
-            data.get(PICSUM_SETTINGS_KEY),
+            incoming_picsum,
             defaults=conf.get(PICSUM_SETTINGS_KEY),
         )
-        conf["_picsum_seed_custom"] = bool(conf[PICSUM_SETTINGS_KEY].get("seed"))
+        if isinstance(incoming_picsum, dict) and "seed" in incoming_picsum:
+            seed_candidate = incoming_picsum.get("seed")
+            if isinstance(seed_candidate, str):
+                seed_flag = bool(seed_candidate.strip())
+            else:
+                seed_flag = bool(seed_candidate)
+            conf["_picsum_seed_custom"] = seed_flag
+        elif "_picsum_seed_custom" not in conf:
+            conf["_picsum_seed_custom"] = False
     else:
         conf[PICSUM_SETTINGS_KEY] = _sanitize_picsum_settings(
             conf.get(PICSUM_SETTINGS_KEY),
