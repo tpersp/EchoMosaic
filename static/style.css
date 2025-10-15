@@ -115,6 +115,67 @@ textarea:focus {
 a {
   color: var(--accent);
 }
+
+.system-monitor {
+  display: grid;
+  gap: 0.75rem;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  margin-bottom: 1rem;
+  padding: 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-alt);
+}
+
+.system-monitor .monitor-item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.system-monitor .monitor-label {
+  font-size: 0.85rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.system-monitor .monitor-subtext {
+  font-size: 0.75rem;
+  color: var(--text);
+  opacity: 0.7;
+  min-height: 1em;
+}
+
+.system-monitor .monitor-bar {
+  position: relative;
+  height: 8px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--border);
+  overflow: hidden;
+}
+
+.system-monitor .monitor-bar-fill {
+  position: absolute;
+  inset: 0;
+  width: 0%;
+  background: var(--accent);
+  transition: width 0.3s ease;
+}
+
+.system-monitor .monitor-value {
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.system-monitor .monitor-item.is-disabled .monitor-bar-fill {
+  width: 0%;
+}
+
+.system-monitor .monitor-item.is-disabled {
+  opacity: 0.55;
+}
 /* Layout rules specific to the dashboard */
 
 .controls {

@@ -21,6 +21,38 @@
     {% endfor %}
   </datalist>
 
+  <section class="system-monitor" id="system-monitor" role="status" aria-live="polite" hidden>
+    <div class="monitor-item" data-monitor="cpu">
+      <span class="monitor-label">CPU</span>
+      <div class="monitor-bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+        <div class="monitor-bar-fill"></div>
+      </div>
+      <span class="monitor-value">--%</span>
+    </div>
+    <div class="monitor-item" data-monitor="memory">
+      <span class="monitor-label">RAM</span>
+      <div class="monitor-bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+        <div class="monitor-bar-fill"></div>
+      </div>
+      <span class="monitor-value">--</span>
+    </div>
+    <div class="monitor-item" data-monitor="gpu" hidden>
+      <span class="monitor-label">GPU</span>
+      <div class="monitor-bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+        <div class="monitor-bar-fill"></div>
+      </div>
+      <span class="monitor-value">--%</span>
+    </div>
+    <div class="monitor-item" data-monitor="disk">
+      <span class="monitor-label">Storage</span>
+      <div class="monitor-subtext" data-monitor-path></div>
+      <div class="monitor-bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+        <div class="monitor-bar-fill"></div>
+      </div>
+      <span class="monitor-value">--</span>
+    </div>
+  </section>
+
   <!-- Group Manager Card -->
   <div class="stream-card" id="group-manager">
     <div class="card-header">
@@ -678,6 +710,138 @@
   const newTagInput = document.getElementById('new-tag-input');
   const createTagBtn = document.getElementById('create-tag-btn');
   const tagDatalist = document.getElementById('global-tag-options');
+  const systemMonitor = document.getElementById('system-monitor');
+  const systemMonitorElements = systemMonitor ? {
+    cpu: systemMonitor.querySelector('[data-monitor="cpu"]'),
+    memory: systemMonitor.querySelector('[data-monitor="memory"]'),
+    gpu: systemMonitor.querySelector('[data-monitor="gpu"]'),
+    disk: systemMonitor.querySelector('[data-monitor="disk"]'),
+  } : null;
+  const SYSTEM_MONITOR_POLL_MS = 10000;
+  let systemMonitorIntervalId = null;
+
+  function normalizeNumber(value) {
+    return typeof value === 'number' && Number.isFinite(value) ? value : null;
+  }
+
+  function formatDecimal(value, fractionDigits = 1) {
+    if (!Number.isFinite(value)) return '--';
+    return Number(value).toFixed(fractionDigits).replace(/\.0+$/, '');
+  }
+
+  function updateMonitorItem(item, percent, displayText) {
+    if (!item) return;
+    const bar = item.querySelector('.monitor-bar');
+    const fill = item.querySelector('.monitor-bar-fill');
+    const valueEl = item.querySelector('.monitor-value');
+    if (valueEl && typeof displayText === 'string') {
+      valueEl.textContent = displayText;
+    }
+    const hasPercent = typeof percent === 'number' && Number.isFinite(percent);
+    item.classList.toggle('is-disabled', !hasPercent);
+    if (!bar) return;
+    if (hasPercent) {
+      const clamped = Math.max(0, Math.min(percent, 100));
+      bar.setAttribute('aria-valuenow', clamped.toFixed(1));
+      if (fill) fill.style.width = `${clamped}%`;
+    } else {
+      bar.removeAttribute('aria-valuenow');
+      if (fill) fill.style.width = '0%';
+    }
+  }
+
+  function updateSystemMonitor(data) {
+    if (!systemMonitor || !systemMonitorElements) return;
+
+    let visibleMetric = false;
+    const cpuPercent = normalizeNumber(data && data.cpu_percent);
+    if (cpuPercent !== null) {
+      visibleMetric = true;
+    }
+    updateMonitorItem(systemMonitorElements.cpu, cpuPercent, cpuPercent !== null ? `${formatDecimal(cpuPercent)}%` : '--%');
+
+    const memoryUsed = normalizeNumber(data && data.memory_used);
+    const memoryTotal = normalizeNumber(data && data.memory_total);
+    let memoryPercent = normalizeNumber(data && data.memory_percent);
+    if (memoryPercent === null && memoryUsed !== null && memoryTotal !== null && memoryTotal > 0) {
+      memoryPercent = (memoryUsed / memoryTotal) * 100;
+    }
+    let memoryDisplay = '--';
+    if (memoryUsed !== null && memoryTotal !== null && memoryPercent !== null) {
+      visibleMetric = true;
+      memoryDisplay = `${formatDecimal(memoryUsed)} / ${formatDecimal(memoryTotal)} GB (${formatDecimal(memoryPercent, 0)}%)`;
+    } else if (memoryPercent !== null) {
+      visibleMetric = true;
+      memoryDisplay = `${formatDecimal(memoryPercent)}%`;
+    }
+    updateMonitorItem(systemMonitorElements.memory, memoryPercent, memoryDisplay);
+
+    if (systemMonitorElements.gpu) {
+      const gpuPercent = normalizeNumber(data && data.gpu_percent);
+      if (gpuPercent !== null) {
+        systemMonitorElements.gpu.hidden = false;
+        visibleMetric = true;
+        updateMonitorItem(systemMonitorElements.gpu, gpuPercent, `${formatDecimal(gpuPercent)}%`);
+      } else {
+        systemMonitorElements.gpu.hidden = true;
+        updateMonitorItem(systemMonitorElements.gpu, null, '--%');
+      }
+    }
+
+    const diskItem = systemMonitorElements.disk;
+    if (diskItem) {
+      const diskUsed = normalizeNumber(data && data.disk_used);
+      const diskTotal = normalizeNumber(data && data.disk_total);
+      let diskPercent = normalizeNumber(data && data.disk_percent);
+      if (diskPercent === null && diskUsed !== null && diskTotal !== null && diskTotal > 0) {
+        diskPercent = (diskUsed / diskTotal) * 100;
+      }
+      let diskDisplay = '--';
+      if (diskUsed !== null && diskTotal !== null && diskPercent !== null) {
+        visibleMetric = true;
+        diskDisplay = `${formatDecimal(diskUsed)} / ${formatDecimal(diskTotal)} GB (${formatDecimal(diskPercent, 0)}%)`;
+      } else if (diskPercent !== null) {
+        visibleMetric = true;
+        diskDisplay = `${formatDecimal(diskPercent)}%`;
+      }
+      updateMonitorItem(diskItem, diskPercent, diskDisplay);
+      const pathEl = diskItem.querySelector('[data-monitor-path]');
+      if (pathEl) {
+        const diskPath = data && typeof data.disk_path === 'string' ? data.disk_path : '';
+        pathEl.textContent = diskPath;
+        pathEl.hidden = !diskPath;
+      }
+    }
+
+    systemMonitor.hidden = !visibleMetric;
+  }
+
+  async function fetchSystemMonitorStats() {
+    if (!systemMonitor) return;
+    try {
+      const response = await fetch('/api/system_stats', { cache: 'no-store' });
+      if (!response.ok) {
+        throw new Error(`Request failed with status ${response.status}`);
+      }
+      const payload = await response.json();
+      updateSystemMonitor(payload || {});
+    } catch (err) {
+      console.debug('System stats fetch failed', err);
+    }
+  }
+
+  function startSystemMonitor() {
+    if (!systemMonitor) return;
+    fetchSystemMonitorStats();
+    if (systemMonitorIntervalId !== null) {
+      clearInterval(systemMonitorIntervalId);
+    }
+    systemMonitorIntervalId = window.setInterval(fetchSystemMonitorStats, SYSTEM_MONITOR_POLL_MS);
+  }
+
+  if (systemMonitor) {
+    startSystemMonitor();
+  }
 
   // Build a set of taken stream name slugs for client-side validation
   const takenSlugs = {};

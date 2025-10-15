@@ -43,6 +43,7 @@ from picsum import (
     configure_socketio,
 )
 from update_helpers import backup_user_state, restore_user_state
+from system_monitor import get_system_stats
 
 try:
     from yt_dlp import YoutubeDL  # type: ignore[import]
@@ -5033,6 +5034,12 @@ def update_view():
 @app.route("/health")
 def health():
     return jsonify({"status": "ok"})
+
+
+@app.route("/api/system_stats", methods=["GET"])
+def system_stats():
+    stats = get_system_stats()
+    return jsonify(stats)
 
 
 # --- Stream groups and metadata ---
