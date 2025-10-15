@@ -3637,29 +3637,6 @@ def _refresh_picsum_stream(
     sanitized = _sanitize_picsum_settings(source_settings, defaults=defaults)
     result_settings = deepcopy(sanitized)
 
-    incoming_seed_raw = ""
-    if isinstance(incoming_settings, dict) and "seed" in incoming_settings:
-        raw_value = incoming_settings.get("seed")
-        if isinstance(raw_value, str):
-            incoming_seed_raw = raw_value.strip()
-        elif raw_value is None:
-            incoming_seed_raw = ""
-        else:
-            incoming_seed_raw = str(raw_value).strip()
-
-    requested_seed = _normalize_picsum_seed(incoming_seed_raw)
-    stored_seed = _normalize_picsum_seed(defaults.get("seed"))
-    stored_seed_custom = bool(conf.get("_picsum_seed_custom"))
-
-    if requested_seed is not None:
-        seed_candidate = requested_seed
-    elif isinstance(incoming_settings, dict):
-        seed_candidate = None
-    elif stored_seed_custom and stored_seed:
-        seed_candidate = stored_seed
-    else:
-        seed_candidate = None
-
     assignment = assign_new_picsum_to_stream(
         stream_id,
         {
@@ -3667,7 +3644,6 @@ def _refresh_picsum_stream(
             "height": sanitized["height"],
             "blur": sanitized["blur"],
             "grayscale": bool(sanitized.get("grayscale")),
-            "seed": seed_candidate,
         },
     )
     normalized_params = assignment["params"]
@@ -3740,6 +3716,8 @@ def _broadcast_picsum_update(
         "mode": MEDIA_MODE_PICSUM,
         "media_mode": MEDIA_MODE_PICSUM,
         "status": "playing",
+        "seed": seed_value,
+        "seed_custom": seed_custom,
         "media": {
             "path": image_url,
             "kind": "image",
@@ -3778,10 +3756,6 @@ def refresh_picsum_image():
         if not isinstance(incoming_settings_raw, dict):
             incoming_settings_raw = None
     incoming_settings = dict(incoming_settings_raw) if incoming_settings_raw is not None else None
-    if "seed" in payload:
-        if incoming_settings is None:
-            incoming_settings = {}
-        incoming_settings["seed"] = payload.get("seed")
 
     result = _refresh_picsum_stream(stream_id, incoming_settings=incoming_settings)
     if result is None:

@@ -146,9 +146,7 @@ def assign_new_picsum_to_stream(stream_id: str, params: Dict[str, Any]) -> Dict[
     if not stream_id:
         raise ValueError("stream_id is required")
     params = dict(params or {})
-    normalized_seed = _normalize_seed(params.get("seed"))
-    seed_custom = normalized_seed is not None
-    seed = normalized_seed if seed_custom else secrets.token_hex(6)
+    seed = secrets.token_hex(6)
     params.update({
         "width": _coerce_int(params.get("width"), DEFAULT_WIDTH),
         "height": _coerce_int(params.get("height"), DEFAULT_HEIGHT),
@@ -161,7 +159,7 @@ def assign_new_picsum_to_stream(stream_id: str, params: Dict[str, Any]) -> Dict[
     state.update({
         "current_media": url,
         "last_seed": seed,
-        "seed_custom": seed_custom,
+        "seed_custom": False,
         "last_updated": time.time(),
     })
     # Defer emitting socket events to the host application so the payload can
@@ -169,7 +167,7 @@ def assign_new_picsum_to_stream(stream_id: str, params: Dict[str, Any]) -> Dict[
     return {
         "url": url,
         "seed": seed,
-        "seed_custom": seed_custom,
+        "seed_custom": False,
         "params": params,
         "state": dict(state),
     }

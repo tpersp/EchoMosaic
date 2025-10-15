@@ -71,7 +71,7 @@
   <div id="dashboard-grid" class="dashboard-grid">
     {# Generate a card for each stream dynamically #}
 {% for stream_id, conf in stream_settings.items() %}
-    <div class="stream-card" data-stream="{{ stream_id }}" data-hide-nsfw="{{ "true" if conf.hide_nsfw|default(False) else "false" }}" data-tags='{{ (conf.tags|default([]))|tojson }}' data-selected-path="{{ conf.selected_image or '' }}" data-selected-kind="{{ conf.selected_media_kind or '' }}" data-video-mode="{{ conf.video_playback_mode|default('duration') }}" data-video-volume="{{ conf.video_volume|default(1.0) }}" data-media-mode="{{ conf.media_mode|default('image') }}" data-picsum-seed="{{ conf.picsum_settings.seed if conf.picsum_settings and conf.picsum_settings.seed is not none else '' }}" data-picsum-seed-custom="{{ 'true' if conf._picsum_seed_custom|default(False) else 'false' }}">
+    <div class="stream-card" data-stream="{{ stream_id }}" data-hide-nsfw="{{ "true" if conf.hide_nsfw|default(False) else "false" }}" data-tags='{{ (conf.tags|default([]))|tojson }}' data-selected-path="{{ conf.selected_image or '' }}" data-selected-kind="{{ conf.selected_media_kind or '' }}" data-video-mode="{{ conf.video_playback_mode|default('duration') }}" data-video-volume="{{ conf.video_volume|default(1.0) }}" data-media-mode="{{ conf.media_mode|default('image') }}" data-picsum-seed="{{ conf.picsum_settings.seed if conf.picsum_settings and conf.picsum_settings.seed is not none else '' }}">
       <div class="card-header">
         <div class="title-row">
           <h2><a class="stream-link" href="{{ url_for('render_stream', name=(conf.label if conf.label else stream_id)|slugify) }}" target="_blank">{{ conf.label if conf.label else stream_id|capitalize }}</a></h2>
@@ -100,7 +100,6 @@
         {% set media_mode = conf.media_mode|default('image') %}
         {% set mode_value = conf.mode|default('random') %}
         {% set picsum = conf.picsum_settings or {} %}
-        {% set picsum_seed_custom = conf._picsum_seed_custom|default(False) %}
         <div class="form-row mode-row">
           <label for="mode-category-{{ stream_id }}">Mode</label>
           <div class="mode-selectors">
@@ -236,7 +235,7 @@
         <!-- Picsum Settings -->
         <div class="form-row picsum-row" {% if media_mode != 'picsum' %} style="display:none;" {% endif %}>
           <label for="picsum-width-{{ stream_id }}">Picsum</label>
-          <div class="picsum-config" data-stream="{{ stream_id }}" data-seed-custom="{{ 'true' if picsum_seed_custom else 'false' }}">
+          <div class="picsum-config" data-stream="{{ stream_id }}" data-current-seed="{{ picsum.seed|default('') }}">
             <div class="picsum-grid">
               <div class="picsum-field">
                 <label for="picsum-width-{{ stream_id }}">Width</label>
@@ -257,9 +256,12 @@
                   <span class="toggle-label">Grayscale</span>
                 </label>
               </div>
-              <div class="picsum-field picsum-seed">
-                <label for="picsum-seed-{{ stream_id }}">Seed</label>
-                <input id="picsum-seed-{{ stream_id }}" type="text" class="picsum-seed" maxlength="64" placeholder="Optional" value="{{ picsum.seed|default('') }}">
+              <div class="picsum-field picsum-seed-display">
+                <label>Current Seed</label>
+                <div class="picsum-seed-value">
+                  <code class="picsum-current-seed" aria-live="polite">{{ picsum.seed|default('—') }}</code>
+                  <button type="button" class="picsum-seed-copy" data-stream="{{ stream_id }}" data-seed="{{ picsum.seed|default('') }}" {% if not picsum.seed %}disabled{% endif %}>Copy</button>
+                </div>
               </div>
             </div>
             {% set picsum_auto_mode = (picsum.auto_mode or 'off')|lower %}
@@ -288,7 +290,6 @@
             <div class="picsum-actions">
               <button type="button" class="picsum-fetch-btn" data-stream="{{ stream_id }}">Fetch Image</button>
               <span class="picsum-status" aria-live="polite" hidden></span>
-              <span class="picsum-current-seed" aria-live="polite" {% if not picsum.seed %}hidden{% endif %}>{% if picsum.seed %}Current seed: {{ picsum.seed }}{% endif %}</span>
             </div>
           </div>
         </div>
@@ -2107,8 +2108,7 @@
       }
     }
     if (conf.picsum_settings !== undefined) {
-      const seedCustom = Boolean(conf._picsum_seed_custom);
-      applyPicsumSettings(card, conf.picsum_settings, { seedWasCustom: seedCustom });
+      applyPicsumSettings(card, conf.picsum_settings);
       const mediaMode = (conf.media_mode || card.dataset.mediaMode || '').toLowerCase();
       if (mediaMode === 'picsum') {
         setPicsumStatus(card, '');
@@ -3666,8 +3666,7 @@
           const effectiveMode = updatedMode || (variantlessModes.has(updatedMediaMode) ? updatedMediaMode : 'random');
           applyModeState(card, updatedMediaMode, effectiveMode, urlInputEl ? urlInputEl.value : '');
           if (data.new_config && data.new_config.picsum_settings !== undefined) {
-            const seedCustom = Boolean(data.new_config._picsum_seed_custom);
-            applyPicsumSettings(card, data.new_config.picsum_settings, { seedWasCustom: seedCustom });
+            applyPicsumSettings(card, data.new_config.picsum_settings);
             if (updatedMediaMode === 'picsum') {
               setPicsumStatus(card, '');
             }
@@ -3806,6 +3805,36 @@
     return Math.min(Math.max(value, min), max);
   }
 
+  async function copyTextToClipboard(text) {
+    const value = typeof text === 'string' ? text : '';
+    if (!value) {
+      return false;
+    }
+    if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+      try {
+        await navigator.clipboard.writeText(value);
+        return true;
+      } catch (err) {
+        console.debug('Clipboard write failed, falling back', err);
+      }
+    }
+    const textarea = document.createElement('textarea');
+    textarea.value = value;
+    textarea.setAttribute('readonly', '');
+    textarea.style.position = 'absolute';
+    textarea.style.left = '-9999px';
+    document.body.appendChild(textarea);
+    textarea.select();
+    let succeeded = false;
+    try {
+      succeeded = document.execCommand('copy');
+    } catch (err) {
+      succeeded = false;
+    }
+    document.body.removeChild(textarea);
+    return succeeded;
+  }
+
   function normalizePicsumSettings(raw) {
     if (!raw || typeof raw !== 'object') {
       return { ...PICSUM_DEFAULTS };
@@ -3814,30 +3843,11 @@
     const heightNumeric = clamp(parseInt(raw.height, 10) || PICSUM_DEFAULTS.height, PICSUM_LIMITS.height.min, PICSUM_LIMITS.height.max);
     const blurNumeric = clamp(parseInt(raw.blur, 10) || PICSUM_DEFAULTS.blur, PICSUM_LIMITS.blur.min, PICSUM_LIMITS.blur.max);
     const grayscaleValue = typeof raw.grayscale === 'string' ? raw.grayscale === 'true' : !!raw.grayscale;
-    const seedRawValue =
-      typeof raw.seed === 'string'
-        ? raw.seed.trim()
-        : raw.seed == null
-          ? ''
-          : String(raw.seed).trim();
+    const seedRawValue = typeof raw.seed === 'string' ? raw.seed.trim() : '';
     const limitedSeed = seedRawValue ? seedRawValue.slice(0, 64) : '';
-    const currentSeedRaw =
-      typeof raw._current_seed === 'string'
-        ? raw._current_seed.trim()
-        : raw._current_seed == null
-          ? ''
-          : String(raw._current_seed).trim();
-    const limitedCurrentSeed = currentSeedRaw ? currentSeedRaw.slice(0, 64) : '';
-    const seedCustomRaw =
-      typeof raw.seed_custom === 'boolean'
-        ? raw.seed_custom
-        : typeof raw._picsum_seed_custom === 'boolean'
-          ? raw._picsum_seed_custom
-          : Boolean(raw._picsum_seed_custom);
-    const submittedSeed = limitedSeed;
-    const displaySeed = limitedSeed || limitedCurrentSeed;
-    const seedValue = submittedSeed ? submittedSeed : null;
-    const seedCustom = typeof seedCustomRaw === 'boolean' ? seedCustomRaw : Boolean(seedValue);
+    const displaySeed = limitedSeed || '';
+    const seedValue = limitedSeed || null;
+    const seedCustom = false;
     const autoModeRaw = typeof raw.auto_mode === 'string' ? raw.auto_mode.trim().toLowerCase() : PICSUM_DEFAULTS.auto_mode;
     const autoMode = ['off', 'timer', 'clock'].includes(autoModeRaw) ? autoModeRaw : 'off';
     let autoIntervalValue = parseFloat(raw.auto_interval_value);
@@ -3876,33 +3886,19 @@
     const heightInput = config.querySelector('.picsum-height');
     const blurInput = config.querySelector('.picsum-blur');
     const grayscaleInput = config.querySelector('.picsum-grayscale');
-    const seedInput = config.querySelector('.picsum-seed');
     const autoModeSelect = config.querySelector('.picsum-auto-mode');
     const autoIntervalInput = config.querySelector('.picsum-auto-interval');
     const autoTimeInput = config.querySelector('.picsum-auto-time');
-    const seedRaw = seedInput ? seedInput.value : '';
-    const seedValue = typeof seedRaw === 'string' ? seedRaw.trim() : '';
-    const seedNormalized = seedValue ? seedValue.slice(0, 64) : '';
-    const previousSeed = typeof config.dataset.currentSeed === 'string' ? config.dataset.currentSeed : (config.dataset.currentSeed || '');
-    const previousCustom = config.dataset.seedCustom === 'true';
-    let seedCustom = seedNormalized.length > 0;
-    if (seedCustom && !previousCustom && seedNormalized === previousSeed) {
-      seedCustom = false;
-    }
     const autoModeRaw = autoModeSelect ? autoModeSelect.value : (config.dataset.autoMode || 'off');
     const autoMode = typeof autoModeRaw === 'string' ? autoModeRaw.trim().toLowerCase() : 'off';
     const autoIntervalRaw = autoIntervalInput ? parseFloat(autoIntervalInput.value) : Number(config.dataset.autoIntervalValue || PICSUM_DEFAULTS.auto_interval_value);
     const autoTimeRaw = autoTimeInput ? autoTimeInput.value : (config.dataset.autoClockTime || '');
     const autoUnitRaw = config.dataset.autoIntervalUnit || 'minutes';
-    const currentSeedForPayload = seedCustom ? seedNormalized : previousSeed;
     const payload = {
       width: widthInput ? widthInput.value : PICSUM_DEFAULTS.width,
       height: heightInput ? heightInput.value : PICSUM_DEFAULTS.height,
       blur: blurInput ? blurInput.value : PICSUM_DEFAULTS.blur,
       grayscale: grayscaleInput ? grayscaleInput.checked : PICSUM_DEFAULTS.grayscale,
-      seed: seedCustom ? seedNormalized : null,
-      seed_custom: seedCustom,
-      _current_seed: currentSeedForPayload,
       auto_mode: ['timer', 'clock'].includes(autoMode) ? autoMode : 'off',
       auto_interval_value: Number.isFinite(autoIntervalRaw) && autoIntervalRaw > 0 ? autoIntervalRaw : PICSUM_DEFAULTS.auto_interval_value,
       auto_interval_unit: ['minutes', 'hours'].includes(autoUnitRaw) ? autoUnitRaw : 'minutes',
@@ -3921,47 +3917,43 @@
     const heightInput = config.querySelector('.picsum-height');
     const blurInput = config.querySelector('.picsum-blur');
     const grayscaleInput = config.querySelector('.picsum-grayscale');
-    const seedInput = config.querySelector('.picsum-seed');
     const seedDisplay = config.querySelector('.picsum-current-seed');
+    const seedCopyBtn = config.querySelector('.picsum-seed-copy');
     const autoModeSelect = config.querySelector('.picsum-auto-mode');
     const autoIntervalInput = config.querySelector('.picsum-auto-interval');
     const autoTimeInput = config.querySelector('.picsum-auto-time');
     const autoSummary = config.querySelector('.picsum-auto-summary');
     const autoLast = config.querySelector('.picsum-auto-last');
     const autoNext = config.querySelector('.picsum-auto-next');
-    const normalizedSeedCustom = typeof normalized.seed_custom === 'boolean'
-      ? normalized.seed_custom
-      : Boolean(normalized.seed || normalized.seed_display);
-    const seedWasCustom = typeof opts.seedWasCustom === 'boolean'
-      ? opts.seedWasCustom
-      : normalizedSeedCustom;
-    const displaySeed = typeof normalized.seed_display === 'string'
-      ? normalized.seed_display
-      : (typeof normalized.seed === 'string' ? normalized.seed : '');
+    const preserveSeedDisplay = Boolean(opts.preserveSeedDisplay);
+    const normalizedSeed =
+      typeof normalized.seed_display === 'string' && normalized.seed_display.trim()
+        ? normalized.seed_display.trim()
+        : (typeof normalized.seed === 'string' ? normalized.seed.trim() : '');
+    const existingSeed =
+      typeof config.dataset.currentSeed === 'string' && config.dataset.currentSeed
+        ? config.dataset.currentSeed
+        : '';
+    const displaySeed = normalizedSeed || (preserveSeedDisplay ? existingSeed : '');
 
     if (widthInput) widthInput.value = normalized.width;
     if (heightInput) heightInput.value = normalized.height;
     if (blurInput) blurInput.value = normalized.blur;
     if (grayscaleInput) grayscaleInput.checked = normalized.grayscale;
 
-    if (seedInput) {
-      if (opts.keepSeedInput) {
-        // Leave user input untouched (used while typing).
-      } else if (opts.resetSeedInput) {
-        seedInput.value = '';
-      } else {
-        seedInput.value = displaySeed || '';
-      }
-    }
     if (seedDisplay) {
       if (displaySeed) {
-        seedDisplay.textContent = `Current seed: ${displaySeed}`;
-        seedDisplay.hidden = false;
+        seedDisplay.textContent = displaySeed;
+        seedDisplay.classList.remove('is-empty');
       } else {
-        seedDisplay.textContent = '';
-        seedDisplay.hidden = true;
+        seedDisplay.textContent = '—';
+        seedDisplay.classList.add('is-empty');
       }
-      seedDisplay.dataset.custom = seedWasCustom ? 'true' : 'false';
+      seedDisplay.dataset.seed = displaySeed || '';
+    }
+    if (seedCopyBtn) {
+      seedCopyBtn.disabled = !displaySeed;
+      seedCopyBtn.dataset.seed = displaySeed || '';
     }
 
     if (autoModeSelect) {
@@ -4003,14 +3995,12 @@
       autoSummary.hidden = !hasInfo;
     }
 
-    config.dataset.seedCustom = seedWasCustom ? 'true' : 'false';
     config.dataset.currentSeed = displaySeed || '';
     config.dataset.autoMode = normalized.auto_mode || 'off';
     config.dataset.autoIntervalValue = normalized.auto_interval_value;
     config.dataset.autoIntervalUnit = normalized.auto_interval_unit || 'minutes';
     config.dataset.autoClockTime = normalized.auto_clock_time || '';
     card.dataset.picsumSeed = displaySeed || '';
-    card.dataset.picsumSeedCustom = seedWasCustom ? 'true' : 'false';
     return normalized;
   }
   function updatePicsumAutoVisibility(config, mode) {
@@ -4065,7 +4055,6 @@
       throw new Error('Stream id unavailable');
     }
     const settings = collectPicsumSettings(card);
-    const requestedSeed = typeof settings.seed === 'string' && settings.seed.trim() ? settings.seed.trim() : '';
     const response = await fetch('/picsum/refresh', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -4085,23 +4074,19 @@
       throw new Error(detail);
     }
     const sanitized = normalizePicsumSettings(data.settings || data);
-    const seedCustom = typeof data.seed_custom === 'boolean' ? data.seed_custom : Boolean(requestedSeed);
-    applyPicsumSettings(card, sanitized, {
-      seedWasCustom: seedCustom,
-    });
+    applyPicsumSettings(card, sanitized);
     const imageUrl = data.url;
     card.dataset.selectedPath = imageUrl || '';
     card.dataset.selectedKind = 'image';
     card.dataset.mediaMode = 'picsum';
-    card.dataset.picsumSeedCustom = seedCustom ? 'true' : 'false';
     const display = card.querySelector('.selected-image-display');
     if (display) {
       display.textContent = imageUrl || 'None';
     }
     await refreshThumbnail(card, streamId, { force: true });
     const activeSeed = (sanitized.seed_display || sanitized.seed || '').trim();
-    const seedSuffix = activeSeed ? ` (${activeSeed})` : '';
-    setPicsumStatus(card, seedCustom ? `Picsum updated with custom seed${seedSuffix}` : `Picsum updated with random seed${seedSuffix}`);
+    const statusSeed = activeSeed ? ` (seed ${activeSeed})` : '';
+    setPicsumStatus(card, `Picsum image refreshed${statusSeed}`);
     showNotification(`Fetched Picsum image for ${streamId}`);
     return data;
   }
@@ -4495,16 +4480,16 @@
         });
         backgroundSlider.addEventListener('change', e => {
           const amount = Number(e.target.value);
-      saveSettings(streamId, { background_blur_amount: amount });
-    });
-  }
+          saveSettings(streamId, { background_blur_amount: amount });
+        });
+      }
       const picsumConfig = card.querySelector('.picsum-config');
       if (picsumConfig) {
         const widthInput = picsumConfig.querySelector('.picsum-width');
         const heightInput = picsumConfig.querySelector('.picsum-height');
         const blurInput = picsumConfig.querySelector('.picsum-blur');
         const grayscaleInput = picsumConfig.querySelector('.picsum-grayscale');
-        const seedInput = picsumConfig.querySelector('.picsum-seed');
+        const seedCopyBtn = picsumConfig.querySelector('.picsum-seed-copy');
         const autoModeSelect = picsumConfig.querySelector('.picsum-auto-mode');
         const autoIntervalInput = picsumConfig.querySelector('.picsum-auto-interval');
         const autoTimeInput = picsumConfig.querySelector('.picsum-auto-time');
@@ -4514,10 +4499,7 @@
             return;
           }
           const normalized = collectPicsumSettings(card);
-          const seedCustom = Boolean(normalized.seed_custom);
-          applyPicsumSettings(card, normalized, {
-            seedWasCustom: seedCustom,
-          });
+          applyPicsumSettings(card, normalized, { preserveSeedDisplay: true });
           setPicsumStatus(card, 'Saving...');
           savePicsumSettings(card)
             .then(() => setPicsumStatus(card, ''))
@@ -4530,10 +4512,6 @@
         if (heightInput) heightInput.addEventListener('change', maybeSave);
         if (blurInput) blurInput.addEventListener('change', maybeSave);
         if (grayscaleInput) grayscaleInput.addEventListener('change', maybeSave);
-        if (seedInput) {
-          seedInput.addEventListener('change', maybeSave);
-          seedInput.addEventListener('blur', maybeSave);
-        }
         if (autoModeSelect) {
           autoModeSelect.addEventListener('change', e => {
             updatePicsumAutoVisibility(picsumConfig, e.target.value);
@@ -4568,6 +4546,25 @@
               showNotification(message);
             } finally {
               fetchBtn.disabled = false;
+            }
+          });
+        }
+        if (seedCopyBtn) {
+          seedCopyBtn.addEventListener('click', async () => {
+            const activeSeed =
+              seedCopyBtn.dataset.seed ||
+              picsumConfig.dataset.currentSeed ||
+              card.dataset.picsumSeed ||
+              '';
+            if (!activeSeed) {
+              showNotification('No Picsum seed available to copy');
+              return;
+            }
+            const copied = await copyTextToClipboard(activeSeed);
+            if (copied) {
+              showNotification(`Copied Picsum seed ${activeSeed}`);
+            } else {
+              showNotification(`Picsum seed: ${activeSeed}`);
             }
           });
         }
