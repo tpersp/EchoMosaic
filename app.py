@@ -3541,6 +3541,7 @@ def update_stream_settings(stream_id):
             data.get(PICSUM_SETTINGS_KEY),
             defaults=conf.get(PICSUM_SETTINGS_KEY),
         )
+        conf["_picsum_seed_custom"] = bool(conf[PICSUM_SETTINGS_KEY].get("seed"))
     else:
         conf[PICSUM_SETTINGS_KEY] = _sanitize_picsum_settings(
             conf.get(PICSUM_SETTINGS_KEY),
@@ -3639,9 +3640,13 @@ def _refresh_picsum_stream(
     if seed_was_custom:
         seed_value = incoming_seed_raw
     else:
-        if conf.get("_picsum_seed_custom") and existing_seed:
-            seed_value = existing_seed
-            seed_was_custom = True
+        if existing_seed:
+            if conf.get("_picsum_seed_custom"):
+                seed_value = existing_seed
+                seed_was_custom = True
+            else:
+                seed_value = _generate_picsum_seed()
+                seed_was_custom = False
         else:
             seed_value = _generate_picsum_seed()
             seed_was_custom = False
@@ -4266,7 +4271,8 @@ class PicsumAutoScheduler:
             return
         with self._lock:
             self._next_run[stream_id] = next_dt.timestamp()
-        picsum["next_auto_trigger"] = next_dt.replace(microsecond=0).isoformat() + "Z"
+        utc_iso = datetime.utcfromtimestamp(next_dt.timestamp()).replace(microsecond=0).isoformat() + "Z"
+        picsum["next_auto_trigger"] = utc_iso
 
     def _compute_next_datetime(
         self,
@@ -4286,13 +4292,13 @@ class PicsumAutoScheduler:
             unit_seconds = AUTO_GENERATE_INTERVAL_UNITS.get(unit, AUTO_GENERATE_INTERVAL_UNITS[PICSUM_DEFAULT_INTERVAL_UNIT])
             seconds = max(60.0, interval_value * unit_seconds)
             target_ts = reference_ts + seconds
-            return datetime.utcfromtimestamp(target_ts)
+            return datetime.fromtimestamp(target_ts)
         if mode == "clock":
             clock_value = _normalize_clock_time(picsum.get("auto_clock_time"))
             if not clock_value:
                 return None
             hour, minute = map(int, clock_value.split(":"))
-            base_dt = datetime.utcfromtimestamp(reference_ts)
+            base_dt = datetime.fromtimestamp(reference_ts)
             target = base_dt.replace(hour=hour, minute=minute, second=0, microsecond=0)
             if target <= base_dt:
                 target += timedelta(days=1)

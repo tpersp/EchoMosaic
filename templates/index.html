@@ -3858,10 +3858,11 @@
     const autoIntervalInput = config.querySelector('.picsum-auto-interval');
     const autoTimeInput = config.querySelector('.picsum-auto-time');
     const seedRaw = seedInput ? seedInput.value : '';
-    const autoModeRaw = autoModeSelect ? autoModeSelect.value : 'off';
+    const autoModeRaw = autoModeSelect ? autoModeSelect.value : (config.dataset.autoMode || 'off');
     const autoMode = typeof autoModeRaw === 'string' ? autoModeRaw.trim().toLowerCase() : 'off';
-    const autoIntervalRaw = autoIntervalInput ? parseFloat(autoIntervalInput.value) : PICSUM_DEFAULTS.auto_interval_value;
-    const autoTimeRaw = autoTimeInput ? autoTimeInput.value : '';
+    const autoIntervalRaw = autoIntervalInput ? parseFloat(autoIntervalInput.value) : Number(config.dataset.autoIntervalValue || PICSUM_DEFAULTS.auto_interval_value);
+    const autoTimeRaw = autoTimeInput ? autoTimeInput.value : (config.dataset.autoClockTime || '');
+    const autoUnitRaw = config.dataset.autoIntervalUnit || 'minutes';
     const payload = {
       width: widthInput ? widthInput.value : PICSUM_DEFAULTS.width,
       height: heightInput ? heightInput.value : PICSUM_DEFAULTS.height,
@@ -3870,7 +3871,7 @@
       seed: typeof seedRaw === 'string' ? seedRaw.trim() : '',
       auto_mode: ['timer', 'clock'].includes(autoMode) ? autoMode : 'off',
       auto_interval_value: Number.isFinite(autoIntervalRaw) && autoIntervalRaw > 0 ? autoIntervalRaw : PICSUM_DEFAULTS.auto_interval_value,
-      auto_interval_unit: 'minutes',
+      auto_interval_unit: ['minutes', 'hours'].includes(autoUnitRaw) ? autoUnitRaw : 'minutes',
       auto_clock_time: typeof autoTimeRaw === 'string' && /^\d{2}:\d{2}$/.test(autoTimeRaw.trim()) ? autoTimeRaw.trim() : '',
     };
     return normalizePicsumSettings(payload);
@@ -3967,6 +3968,7 @@
     config.dataset.currentSeed = normalized.seed || '';
     config.dataset.autoMode = normalized.auto_mode || 'off';
     config.dataset.autoIntervalValue = normalized.auto_interval_value;
+    config.dataset.autoIntervalUnit = normalized.auto_interval_unit || 'minutes';
     config.dataset.autoClockTime = normalized.auto_clock_time || '';
     card.dataset.picsumSeed = normalized.seed || '';
     card.dataset.picsumSeedCustom = seedWasCustom ? 'true' : 'false';
