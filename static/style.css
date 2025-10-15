@@ -125,12 +125,16 @@ a {
   border: 1px solid var(--border);
   border-radius: 6px;
   background: var(--surface-alt);
+  align-items: stretch;
+  grid-auto-rows: 1fr;
 }
 
 .system-monitor .monitor-item {
   display: flex;
   flex-direction: column;
   gap: 0.35rem;
+  justify-content: space-between;
+  height: 100%;
 }
 
 .system-monitor .monitor-label {
@@ -144,7 +148,13 @@ a {
   font-size: 0.75rem;
   color: var(--text);
   opacity: 0.7;
-  min-height: 1em;
+  min-height: 1.2em;
+  line-height: 1.2;
+}
+
+.system-monitor .monitor-subtext[hidden] {
+  display: block !important;
+  visibility: hidden;
 }
 
 .system-monitor .monitor-bar {
@@ -167,6 +177,7 @@ a {
 .system-monitor .monitor-value {
   font-size: 0.9rem;
   font-weight: 600;
+  line-height: 1.2;
 }
 
 .system-monitor .monitor-item.is-disabled .monitor-bar-fill {
@@ -175,6 +186,11 @@ a {
 
 .system-monitor .monitor-item.is-disabled {
   opacity: 0.55;
+}
+
+.system-monitor .monitor-item > * {
+  margin: 0;
+  padding: 0;
 }
 /* Layout rules specific to the dashboard */
 
