@@ -7,10 +7,11 @@ without duplicating sanitisation logic.
 
 from __future__ import annotations
 
+import secrets
 import re
 import time
 from dataclasses import dataclass
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, Optional, Tuple, Union
 from urllib.parse import quote
 
 from flask import Blueprint, jsonify, request
@@ -18,6 +19,9 @@ from flask import Blueprint, jsonify, request
 __all__ = [
     "register_picsum_routes",
     "build_picsum_url",
+    "assign_new_picsum_to_stream",
+    "configure_socketio",
+    "STREAM_STATE",
 ]
 
 DEFAULT_WIDTH = 1920
@@ -40,6 +44,8 @@ class _CacheEntry:
 
 
 _CACHE: Dict[Tuple[int, int, int, bool, Optional[str]], _CacheEntry] = {}
+STREAM_STATE: Dict[str, Dict[str, Any]] = {}
+_socketio: Any = None
 
 
 def _coerce_int(value: Any, default: int) -> int:
@@ -57,19 +63,44 @@ def _coerce_bool(value: Any, default: bool = False) -> bool:
     return default
 
 
+def configure_socketio(socketio: Any) -> None:
+    """
+    Allow the host application to provide a SocketIO instance that can be reused
+    without creating circular imports.
+    """
+    global _socketio
+    _socketio = socketio
+
+
 def _normalize_seed(value: Any) -> Optional[str]:
     if not isinstance(value, str):
         return None
     cleaned = value.strip()
     if not cleaned:
         return None
-    sanitized = re.sub(r"[^A-Za-z0-9_.-]", "", cleaned)
-    if not sanitized:
-        return None
-    return sanitized[:64]
+    return cleaned[:64]
 
 
-def build_picsum_url(width: int, height: int, blur: int, grayscale: bool, seed: Optional[str]) -> str:
+def build_picsum_url(
+    width: Union[int, Dict[str, Any]],
+    height: Optional[int] = None,
+    blur: Optional[int] = None,
+    grayscale: Optional[bool] = None,
+    seed: Optional[str] = None,
+) -> str:
+    if isinstance(width, dict) and height is None and blur is None and grayscale is None:
+        params = width
+        width = _coerce_int(params.get("width"), DEFAULT_WIDTH)
+        height = _coerce_int(params.get("height"), DEFAULT_HEIGHT)
+        blur = _coerce_int(params.get("blur"), DEFAULT_BLUR)
+        grayscale = _coerce_bool(params.get("grayscale"), False)
+        seed = params.get("seed")
+    else:
+        assert height is not None and blur is not None and grayscale is not None
+    width = _coerce_int(width, DEFAULT_WIDTH)
+    height = _coerce_int(height, DEFAULT_HEIGHT)
+    blur = _coerce_int(blur, DEFAULT_BLUR)
+    grayscale = _coerce_bool(grayscale, False)
     if seed:
         base = f"https://picsum.photos/seed/{quote(seed, safe='')}/{width}/{height}"
     else:
@@ -96,6 +127,52 @@ def _get_cached_payload(key: Tuple[int, int, int, bool, Optional[str]]) -> Optio
 
 def _store_cache(key: Tuple[int, int, int, bool, Optional[str]], payload: Dict[str, Any]) -> None:
     _CACHE[key] = _CacheEntry(payload=dict(payload), expires_at=time.time() + CACHE_TTL_SECONDS)
+
+
+def _get_stream_state(stream_id: str) -> Dict[str, Any]:
+    state = STREAM_STATE.get(stream_id)
+    if state is None:
+        state = {
+            "current_media": None,
+            "last_seed": None,
+            "seed_custom": False,
+            "last_updated": None,
+        }
+        STREAM_STATE[stream_id] = state
+    return state
+
+
+def assign_new_picsum_to_stream(stream_id: str, params: Dict[str, Any]) -> Dict[str, Any]:
+    if not stream_id:
+        raise ValueError("stream_id is required")
+    params = dict(params or {})
+    normalized_seed = _normalize_seed(params.get("seed"))
+    seed_custom = normalized_seed is not None
+    seed = normalized_seed if seed_custom else secrets.token_hex(6)
+    params.update({
+        "width": _coerce_int(params.get("width"), DEFAULT_WIDTH),
+        "height": _coerce_int(params.get("height"), DEFAULT_HEIGHT),
+        "blur": max(MIN_BLUR, min(MAX_BLUR, _coerce_int(params.get("blur"), DEFAULT_BLUR))),
+        "grayscale": _coerce_bool(params.get("grayscale"), False),
+        "seed": seed,
+    })
+    url = build_picsum_url(params)
+    state = _get_stream_state(stream_id)
+    state.update({
+        "current_media": url,
+        "last_seed": seed,
+        "seed_custom": seed_custom,
+        "last_updated": time.time(),
+    })
+    # Defer emitting socket events to the host application so the payload can
+    # include additional fields required by clients.
+    return {
+        "url": url,
+        "seed": seed,
+        "seed_custom": seed_custom,
+        "params": params,
+        "state": dict(state),
+    }
 
 
 @_bp.route("/picsum/fetch", methods=["GET"])

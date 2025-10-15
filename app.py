@@ -37,7 +37,11 @@ except Exception:
 from flask import Flask, jsonify, send_file, request, render_template, redirect, url_for
 from flask_socketio import SocketIO, join_room, leave_room
 from stablehorde import StableHorde, StableHordeError, StableHordeCancelled
-from picsum import register_picsum_routes, build_picsum_url
+from picsum import (
+    register_picsum_routes,
+    assign_new_picsum_to_stream,
+    configure_socketio,
+)
 from update_helpers import backup_user_state, restore_user_state
 
 try:
@@ -47,6 +51,7 @@ except Exception:  # pragma: no cover - yt_dlp is optional at import-time
 
 app = Flask(__name__, static_folder="static", static_url_path="/static")
 socketio = SocketIO(app)
+configure_socketio(socketio)
 register_picsum_routes(app)
 
 logger = logging.getLogger(__name__)
@@ -502,10 +507,7 @@ def _normalize_picsum_seed(value: Any) -> Optional[str]:
     cleaned = value.strip()
     if not cleaned:
         return None
-    sanitized = re.sub(r"[^A-Za-z0-9_.-]", "", cleaned)
-    if not sanitized:
-        return None
-    return sanitized[:64]
+    return cleaned[:64]
 
 
 def _sanitize_picsum_settings(
@@ -530,13 +532,14 @@ def _sanitize_picsum_settings(
     height_val = _coerce_int(value.get("height"), height_default)
     blur_val = _coerce_int(value.get("blur"), blur_default)
     grayscale_val = _coerce_bool(value.get("grayscale"), grayscale_default)
+    seed_in_payload = "seed" in value
     seed_val = _normalize_picsum_seed(value.get("seed"))
     result = {
         "width": max(PICSUM_MIN_DIMENSION, min(PICSUM_MAX_DIMENSION, width_val)),
         "height": max(PICSUM_MIN_DIMENSION, min(PICSUM_MAX_DIMENSION, height_val)),
         "blur": max(PICSUM_MIN_BLUR, min(PICSUM_MAX_BLUR, blur_val)),
         "grayscale": bool(grayscale_val),
-        "seed": seed_val if seed_val is not None else seed_default if seed_default else None,
+        "seed": seed_val if seed_in_payload else seed_default,
     }
     auto_mode_raw = value.get("auto_mode")
     auto_mode = str(auto_mode_raw).strip().lower() if isinstance(auto_mode_raw, str) else auto_mode_default
@@ -600,10 +603,6 @@ def ensure_picsum_defaults(conf: Dict[str, Any]) -> None:
         conf["_picsum_seed_custom"] = False
     else:
         conf["_picsum_seed_custom"] = bool(conf["_picsum_seed_custom"])
-
-
-def _generate_picsum_seed() -> str:
-    return secrets.token_hex(6)
 
 
 def _normalize_tag_name(value: Any) -> Optional[str]:
@@ -3648,34 +3647,53 @@ def _refresh_picsum_stream(
         else:
             incoming_seed_raw = str(raw_value).strip()
 
-    existing_seed = str(sanitized.get("seed") or "").strip()
+    requested_seed = _normalize_picsum_seed(incoming_seed_raw)
+    stored_seed = _normalize_picsum_seed(defaults.get("seed"))
+    stored_seed_custom = bool(conf.get("_picsum_seed_custom"))
 
-    seed_was_custom = bool(incoming_seed_raw)
-    if seed_was_custom:
-        seed_value = incoming_seed_raw
+    if requested_seed is not None:
+        seed_candidate = requested_seed
+    elif isinstance(incoming_settings, dict):
+        seed_candidate = None
+    elif stored_seed_custom and stored_seed:
+        seed_candidate = stored_seed
     else:
-        if existing_seed:
-            if conf.get("_picsum_seed_custom"):
-                seed_value = existing_seed
-                seed_was_custom = True
-            else:
-                seed_value = _generate_picsum_seed()
-                seed_was_custom = False
-        else:
-            seed_value = _generate_picsum_seed()
-            seed_was_custom = False
+        seed_candidate = None
 
-    seed_value = (seed_value or "").strip()
-    result_settings["seed"] = seed_value
-    sanitized["seed"] = seed_value
-    result_settings["seed_custom"] = seed_was_custom
+    assignment = assign_new_picsum_to_stream(
+        stream_id,
+        {
+            "width": sanitized["width"],
+            "height": sanitized["height"],
+            "blur": sanitized["blur"],
+            "grayscale": bool(sanitized.get("grayscale")),
+            "seed": seed_candidate,
+        },
+    )
+    normalized_params = assignment["params"]
+    seed_value = assignment["seed"]
+    seed_was_custom = bool(assignment["seed_custom"])
+    image_url = assignment["url"]
 
-    image_url = build_picsum_url(
-        sanitized["width"],
-        sanitized["height"],
-        sanitized["blur"],
-        bool(sanitized.get("grayscale")),
-        sanitized.get("seed"),
+    sanitized.update(
+        {
+            "width": normalized_params["width"],
+            "height": normalized_params["height"],
+            "blur": normalized_params["blur"],
+            "grayscale": normalized_params["grayscale"],
+            "seed": seed_value,
+            "seed_custom": seed_was_custom,
+        }
+    )
+    result_settings.update(
+        {
+            "width": normalized_params["width"],
+            "height": normalized_params["height"],
+            "blur": normalized_params["blur"],
+            "grayscale": normalized_params["grayscale"],
+            "seed": seed_value,
+            "seed_custom": seed_was_custom,
+        }
     )
 
     conf[PICSUM_SETTINGS_KEY] = deepcopy(sanitized)
@@ -3754,7 +3772,17 @@ def refresh_picsum_image():
     ensure_ai_defaults(conf)
     ensure_picsum_defaults(conf)
 
-    incoming_settings = payload.get("settings") or payload.get(PICSUM_SETTINGS_KEY) or {}
+    incoming_settings_raw = payload.get("settings")
+    if not isinstance(incoming_settings_raw, dict):
+        incoming_settings_raw = payload.get(PICSUM_SETTINGS_KEY)
+        if not isinstance(incoming_settings_raw, dict):
+            incoming_settings_raw = None
+    incoming_settings = dict(incoming_settings_raw) if incoming_settings_raw is not None else None
+    if "seed" in payload:
+        if incoming_settings is None:
+            incoming_settings = {}
+        incoming_settings["seed"] = payload.get("seed")
+
     result = _refresh_picsum_stream(stream_id, incoming_settings=incoming_settings)
     if result is None:
         return jsonify({"error": f"No stream '{stream_id}' found"}), 404
@@ -3783,6 +3811,7 @@ def refresh_picsum_image():
         "stream_id": stream_id,
         "url": result["url"],
         "settings": sanitized,
+        "seed": sanitized.get("seed"),
         "seed_custom": bool(result.get("seed_custom")),
     }
     return jsonify(response)
