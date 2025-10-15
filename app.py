@@ -3542,14 +3542,19 @@ def update_stream_settings(stream_id):
             incoming_picsum,
             defaults=conf.get(PICSUM_SETTINGS_KEY),
         )
-        if isinstance(incoming_picsum, dict) and "seed" in incoming_picsum:
-            seed_candidate = incoming_picsum.get("seed")
-            if isinstance(seed_candidate, str):
-                seed_flag = bool(seed_candidate.strip())
-            else:
-                seed_flag = bool(seed_candidate)
-            conf["_picsum_seed_custom"] = seed_flag
-        elif "_picsum_seed_custom" not in conf:
+        if isinstance(incoming_picsum, dict):
+            seed_flag: Optional[bool] = None
+            if "seed_custom" in incoming_picsum:
+                seed_flag = bool(incoming_picsum.get("seed_custom"))
+            elif "seed" in incoming_picsum:
+                seed_candidate = incoming_picsum.get("seed")
+                if isinstance(seed_candidate, str):
+                    seed_flag = bool(seed_candidate.strip())
+                else:
+                    seed_flag = bool(seed_candidate)
+            if seed_flag is not None:
+                conf["_picsum_seed_custom"] = seed_flag
+        if "_picsum_seed_custom" not in conf:
             conf["_picsum_seed_custom"] = False
     else:
         conf[PICSUM_SETTINGS_KEY] = _sanitize_picsum_settings(
@@ -3663,6 +3668,7 @@ def _refresh_picsum_stream(
     seed_value = (seed_value or "").strip()
     result_settings["seed"] = seed_value
     sanitized["seed"] = seed_value
+    result_settings["seed_custom"] = seed_was_custom
 
     image_url = build_picsum_url(
         sanitized["width"],
@@ -3673,6 +3679,7 @@ def _refresh_picsum_stream(
     )
 
     conf[PICSUM_SETTINGS_KEY] = deepcopy(sanitized)
+    conf[PICSUM_SETTINGS_KEY]["seed_custom"] = seed_was_custom
     conf["_picsum_seed_custom"] = seed_was_custom
     conf["selected_image"] = image_url
     conf["selected_media_kind"] = "image"
