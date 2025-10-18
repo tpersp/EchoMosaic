@@ -173,8 +173,15 @@ class MediaManager:
         if not alias:
             return VirtualPath(alias=None, relative=Path(remainder.strip("/")))
         if alias not in self._roots:
-            raise MediaManagerError("Unknown media root", code="not_found", status=404)
-        remainder_path = Path(remainder.strip("/"))
+            lowered = alias.lower()
+            for key in self._roots.keys():
+                if key.lower() == lowered:
+                    alias = key
+                    break
+            else:
+                raise MediaManagerError(f"Unknown media root '{alias}'", code="not_found", status=404)
+        remainder = remainder.strip("/")
+        remainder_path = Path(remainder)
         return VirtualPath(alias=alias, relative=remainder_path)
 
     def _resolve(self, virtual_path: ListablePath) -> Tuple[MediaRoot, Path]:
