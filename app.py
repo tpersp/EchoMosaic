@@ -44,6 +44,7 @@ from picsum import (
 )
 from update_helpers import backup_user_state, restore_user_state
 from system_monitor import get_system_stats
+import config_manager
 
 try:
     from yt_dlp import YoutubeDL  # type: ignore[import]
@@ -58,8 +59,7 @@ register_picsum_routes(app)
 logger = logging.getLogger(__name__)
 
 SETTINGS_FILE = "settings.json"
-CONFIG_FILE = "config.json"
-IMAGE_DIR = "/mnt/viewers"  # Adjust if needed
+CONFIG_FILE = config_manager.CONFIG_FILE.name
 
 BACKUP_DIRNAME = "backups"
 RESTORE_POINT_DIRNAME = "restorepoints"
@@ -140,10 +140,6 @@ STABLE_HORDE_MAX_LORAS = 4
 STABLE_HORDE_CLIP_SKIP_RANGE = (1, 12)
 STABLE_HORDE_STRENGTH_RANGE = (0.0, 1.0)
 STABLE_HORDE_DENOISE_RANGE = (0.01, 1.0)
-
-IMAGE_DIR_PATH = Path(IMAGE_DIR)
-
-THUMBNAIL_CACHE_DIR = IMAGE_DIR_PATH / THUMBNAIL_SUBDIR
 try:
     IMAGE_THUMBNAIL_FILTER = Image.Resampling.LANCZOS  # type: ignore[attr-defined]
 except AttributeError:  # Pillow < 9.1
@@ -174,10 +170,103 @@ MEDIA_MODE_VARIANTS = {
     MEDIA_MODE_PICSUM: {MEDIA_MODE_PICSUM},
 }
 
+CONFIG: Dict[str, Any] = config_manager.load_config()
+config_manager.validate_media_paths(CONFIG.get("MEDIA_PATHS", []))
+MEDIA_ROOTS = config_manager.build_media_roots(CONFIG.get("MEDIA_PATHS", []))
+if not MEDIA_ROOTS:
+    default_path = Path(os.path.abspath("./media"))
+    default_alias = default_path.name or "media"
+    MEDIA_ROOTS = [
+        config_manager.MediaRoot(alias=default_alias, path=default_path, display_name=default_alias)
+    ]
+
+AVAILABLE_MEDIA_ROOTS: List[config_manager.MediaRoot] = []
+for candidate_root in MEDIA_ROOTS:
+    try:
+        if candidate_root.path.exists() and candidate_root.path.is_dir() and os.access(candidate_root.path, os.R_OK):
+            AVAILABLE_MEDIA_ROOTS.append(candidate_root)
+    except OSError:
+        continue
+
+if not AVAILABLE_MEDIA_ROOTS:
+    fallback_root = MEDIA_ROOTS[0]
+    try:
+        fallback_root.path.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        logger.warning("Unable to prepare fallback media directory %s: %s", fallback_root.path, exc)
+    AVAILABLE_MEDIA_ROOTS = [fallback_root]
+
+MEDIA_ROOT_LOOKUP = {root.alias: root for root in MEDIA_ROOTS}
+PRIMARY_MEDIA_ROOT = AVAILABLE_MEDIA_ROOTS[0]
+THUMBNAIL_CACHE_DIR = PRIMARY_MEDIA_ROOT.path / THUMBNAIL_SUBDIR
+
 NSFW_KEYWORD = "nsfw"
 
 # Cache image paths per folder so we can serve repeated requests without rescanning the disk.
 IMAGE_CACHE: Dict[str, Dict[str, Any]] = {}
+
+
+def _media_root_available(root: config_manager.MediaRoot) -> bool:
+    try:
+        return root.path.exists() and root.path.is_dir() and os.access(root.path, os.R_OK)
+    except OSError:
+        return False
+
+
+def _build_virtual_media_path(alias: str, relative: Union[str, Path]) -> str:
+    relative_text = str(relative).replace("\\", "/")
+    relative_text = relative_text.lstrip("./")
+    return f"{alias}/{relative_text}" if relative_text else alias
+
+
+def _split_virtual_media_path(value: Union[str, Path]) -> Tuple[str, str]:
+    if isinstance(value, Path):
+        value = value.as_posix()
+    if not value:
+        return PRIMARY_MEDIA_ROOT.alias, ""
+    text = str(value).strip()
+    if not text:
+        return PRIMARY_MEDIA_ROOT.alias, ""
+    if os.path.isabs(text):
+        resolved = Path(text).resolve()
+        for root in MEDIA_ROOTS:
+            try:
+                rel_path = resolved.relative_to(root.path.resolve())
+                return root.alias, rel_path.as_posix()
+            except ValueError:
+                continue
+        return PRIMARY_MEDIA_ROOT.alias, resolved.as_posix()
+    normalized = text.replace("\\", "/").strip("/")
+    if not normalized:
+        return PRIMARY_MEDIA_ROOT.alias, ""
+    parts = normalized.split("/", 1)
+    alias = parts[0]
+    remainder = parts[1] if len(parts) > 1 else ""
+    if alias in MEDIA_ROOT_LOOKUP:
+        return alias, remainder
+    return PRIMARY_MEDIA_ROOT.alias, normalized
+
+
+def _resolve_virtual_media_path(virtual_path: Union[str, Path]) -> Optional[Path]:
+    alias, relative = _split_virtual_media_path(virtual_path)
+    root = MEDIA_ROOT_LOOKUP.get(alias)
+    if root is None:
+        return None
+    candidate = (root.path / relative).resolve()
+    try:
+        candidate.relative_to(root.path.resolve())
+    except ValueError:
+        return None
+    return candidate
+
+
+def _virtualize_path(path: Union[str, Path]) -> str:
+    alias, relative = _split_virtual_media_path(path)
+    if relative and os.path.isabs(relative):
+        return Path(relative).as_posix()
+    if relative.startswith("../"):
+        return Path(relative).as_posix()
+    return _build_virtual_media_path(alias, relative)
 
 def _ensure_thumbnail_dir() -> Optional[Path]:
     """Create the thumbnail cache directory if possible; return the path when ready."""
@@ -709,54 +798,92 @@ playback_manager: Optional["StreamPlaybackManager"] = None
 
 def _normalize_folder_key(folder: Optional[str]) -> str:
     """Normalize request folder values into the cache key used internally."""
-    if not folder or folder in ("all", "."):
+    if folder is None:
         return "all"
-    return folder.replace("\\", "/")
+    normalized = str(folder).strip()
+    if normalized in {"", "all", "."}:
+        return "all"
+    return normalized.replace("\\", "/").strip("/")
 
 
-def _resolve_folder_path(folder_key: str) -> str:
-    """Return the absolute filesystem path for a cache key."""
-    return IMAGE_DIR if folder_key == "all" else os.path.join(IMAGE_DIR, folder_key)
-
-
-def _scan_folder_for_cache(folder_key: str) -> Tuple[List[Dict[str, str]], Dict[str, float]]:
-    """Scan a folder on disk and build the cached payload for it."""
-    target_dir = _resolve_folder_path(folder_key)
-    dir_markers: Dict[str, float] = {}
+def _resolve_folder_path(folder_key: str) -> Optional[Tuple[config_manager.MediaRoot, Path]]:
+    """Return the media root and absolute filesystem path for a cache key."""
+    if folder_key == "all":
+        return None
+    alias, relative = _split_virtual_media_path(folder_key)
+    root = MEDIA_ROOT_LOOKUP.get(alias)
+    if root is None:
+        return None
+    target_dir = (root.path / relative).resolve()
     try:
-        dir_markers[target_dir] = os.stat(target_dir).st_mtime
+        target_dir.relative_to(root.path.resolve())
+    except ValueError:
+        logger.debug("Rejected folder key '%s' because it escapes media root '%s'", folder_key, root.path)
+        return None
+    return root, target_dir
+
+
+def _scan_root_for_cache(
+    root: config_manager.MediaRoot,
+    base_path: Path,
+) -> Tuple[List[Dict[str, str]], Dict[str, float]]:
+    dir_markers: Dict[str, float] = {}
+    base_key = os.fspath(base_path)
+    try:
+        dir_markers[base_key] = os.stat(base_path).st_mtime
     except FileNotFoundError:
-        dir_markers[target_dir] = 0.0
+        dir_markers[base_key] = 0.0
         return [], dir_markers
     except OSError:
-        dir_markers[target_dir] = 0.0
+        dir_markers[base_key] = 0.0
         return [], dir_markers
 
     media: List[Dict[str, str]] = []
-    images: List[str] = []
-    for root, _, files in os.walk(target_dir):
-        if root != target_dir:
+    for walk_root, _, files in os.walk(base_path):
+        walk_path = Path(walk_root)
+        walk_key = os.fspath(walk_path)
+        if walk_path != base_path:
             try:
-                dir_markers[root] = os.stat(root).st_mtime
+                dir_markers[walk_key] = os.stat(walk_path).st_mtime
             except OSError:
-                # If a directory becomes unavailable, surface that as a change on the next poll.
-                dir_markers[root] = time.time()
+                dir_markers[walk_key] = time.time()
         for file_name in files:
             ext = os.path.splitext(file_name)[1].lower()
-            if ext in MEDIA_EXTENSIONS:
-                rel_path = os.path.relpath(os.path.join(root, file_name), IMAGE_DIR)
-                normalized = rel_path.replace("\\", "/")
-                kind = "video" if ext in VIDEO_EXTENSIONS else "image"
-                media.append({
-                    "path": normalized,
-                    "kind": kind,
-                    "extension": ext,
-                })
-                if kind == "image":
-                    images.append(normalized)
-    images.sort(key=str.lower)
+            if ext not in MEDIA_EXTENSIONS:
+                continue
+            candidate_path = walk_path / file_name
+            try:
+                relative_path = candidate_path.resolve().relative_to(root.path.resolve())
+            except Exception:
+                continue
+            virtual_path = _build_virtual_media_path(root.alias, relative_path.as_posix())
+            kind = "video" if ext in VIDEO_EXTENSIONS else "image"
+            media.append({
+                "path": virtual_path,
+                "kind": kind,
+                "extension": ext,
+            })
     media.sort(key=lambda item: item["path"].lower())
     return media, dir_markers
+
+
+def _scan_folder_for_cache(folder_key: str) -> Tuple[List[Dict[str, str]], Dict[str, float]]:
+    """Scan configured media directories and build the cached payload for a folder key."""
+    if folder_key == "all":
+        combined_media: List[Dict[str, str]] = []
+        combined_markers: Dict[str, float] = {}
+        for root in AVAILABLE_MEDIA_ROOTS:
+            media_entries, dir_markers = _scan_root_for_cache(root, root.path)
+            combined_media.extend(media_entries)
+            combined_markers.update(dir_markers)
+        combined_media.sort(key=lambda item: item["path"].lower())
+        return combined_media, combined_markers
+
+    resolved = _resolve_folder_path(folder_key)
+    if resolved is None:
+        return [], {}
+    root, target_dir = resolved
+    return _scan_root_for_cache(root, target_dir)
 
 
 def _directory_markers_changed(markers: Dict[str, float]) -> bool:
@@ -809,44 +936,18 @@ def refresh_image_cache(folder: str = "all", force: bool = False) -> List[str]:
 
 def initialize_image_cache() -> None:
     """Warm the cache for the root folder and any existing subfolders on startup."""
-    all_images = refresh_image_cache("all", force=True)
-    if not os.path.isdir(IMAGE_DIR):
-        return
-
-    with IMAGE_CACHE_LOCK:
-        all_entry = IMAGE_CACHE.get("all")
-        if not all_entry:
-            return
-        base_markers = dict(all_entry.get("dir_markers", {}))
-        base_updated = all_entry.get("last_updated", time.time())
-        all_media = [dict(item) for item in all_entry.get("media", [])]
-
-    for root, _, _ in os.walk(IMAGE_DIR):
-        rel = os.path.relpath(root, IMAGE_DIR)
-        if rel == ".":
+    refresh_image_cache("all", force=True)
+    for root in AVAILABLE_MEDIA_ROOTS:
+        refresh_image_cache(root.alias, force=True)
+        try:
+            with os.scandir(root.path) as scan:
+                for entry in scan:
+                    if not entry.is_dir():
+                        continue
+                    folder_key = _build_virtual_media_path(root.alias, entry.name)
+                    refresh_image_cache(folder_key, force=True)
+        except OSError:
             continue
-        folder_key = rel.replace("\\", "/")
-        folder_root = _resolve_folder_path(folder_key)
-        folder_images = [img for img in all_images if img.startswith(f"{folder_key}/")]
-        folder_media = [item for item in all_media if item.get("path", "").startswith(f"{folder_key}/")]
-        folder_markers = {
-            path: mtime
-            for path, mtime in base_markers.items()
-            if path == folder_root or path.startswith(folder_root + os.sep)
-        }
-        if folder_root not in folder_markers:
-            try:
-                folder_markers[folder_root] = os.stat(folder_root).st_mtime
-            except OSError:
-                folder_markers[folder_root] = 0.0
-        entry = {
-            "images": folder_images,
-            "media": folder_media,
-            "dir_markers": folder_markers,
-            "last_updated": base_updated,
-        }
-        with IMAGE_CACHE_LOCK:
-            IMAGE_CACHE[folder_key] = entry
 
 
 initialize_image_cache()
@@ -1747,13 +1848,8 @@ def import_settings():
 
 
 
-def load_config():
-    if os.path.exists(CONFIG_FILE):
-        with open(CONFIG_FILE, "r") as f:
-            return json.load(f)
-    return {}
-
-config_data = load_config()
+def load_config() -> Dict[str, Any]:
+    return config_manager.load_config()
 
 
 def _coerce_float(value, default):
@@ -1874,28 +1970,28 @@ def _sanitize_loras(value):
     return cleaned
 
 
-AI_DEFAULT_MODEL = config_data.get("AI_DEFAULT_MODEL", AI_DEFAULT_MODEL) or AI_DEFAULT_MODEL
-AI_DEFAULT_SAMPLER = config_data.get("AI_DEFAULT_SAMPLER", AI_DEFAULT_SAMPLER) or AI_DEFAULT_SAMPLER
-AI_DEFAULT_WIDTH = _coerce_int(config_data.get("AI_DEFAULT_WIDTH"), AI_DEFAULT_WIDTH)
-AI_DEFAULT_HEIGHT = _coerce_int(config_data.get("AI_DEFAULT_HEIGHT"), AI_DEFAULT_HEIGHT)
-AI_DEFAULT_STEPS = _coerce_int(config_data.get("AI_DEFAULT_STEPS"), AI_DEFAULT_STEPS)
-AI_DEFAULT_CFG = _coerce_float(config_data.get("AI_DEFAULT_CFG"), AI_DEFAULT_CFG)
-AI_DEFAULT_SAMPLES = _coerce_int(config_data.get("AI_DEFAULT_SAMPLES"), AI_DEFAULT_SAMPLES)
-AI_OUTPUT_SUBDIR = config_data.get("AI_OUTPUT_SUBDIR", AI_OUTPUT_SUBDIR) or AI_OUTPUT_SUBDIR
-AI_TEMP_SUBDIR = config_data.get("AI_TEMP_SUBDIR", AI_TEMP_SUBDIR) or AI_TEMP_SUBDIR
-AI_DEFAULT_PERSIST = _coerce_bool(config_data.get("AI_DEFAULT_PERSIST"), AI_DEFAULT_PERSIST)
-AI_POLL_INTERVAL = _coerce_float(config_data.get("AI_POLL_INTERVAL"), AI_POLL_INTERVAL)
-AI_TIMEOUT = _coerce_float(config_data.get("AI_TIMEOUT"), AI_TIMEOUT)
+AI_DEFAULT_MODEL = CONFIG.get("AI_DEFAULT_MODEL", AI_DEFAULT_MODEL) or AI_DEFAULT_MODEL
+AI_DEFAULT_SAMPLER = CONFIG.get("AI_DEFAULT_SAMPLER", AI_DEFAULT_SAMPLER) or AI_DEFAULT_SAMPLER
+AI_DEFAULT_WIDTH = _coerce_int(CONFIG.get("AI_DEFAULT_WIDTH"), AI_DEFAULT_WIDTH)
+AI_DEFAULT_HEIGHT = _coerce_int(CONFIG.get("AI_DEFAULT_HEIGHT"), AI_DEFAULT_HEIGHT)
+AI_DEFAULT_STEPS = _coerce_int(CONFIG.get("AI_DEFAULT_STEPS"), AI_DEFAULT_STEPS)
+AI_DEFAULT_CFG = _coerce_float(CONFIG.get("AI_DEFAULT_CFG"), AI_DEFAULT_CFG)
+AI_DEFAULT_SAMPLES = _coerce_int(CONFIG.get("AI_DEFAULT_SAMPLES"), AI_DEFAULT_SAMPLES)
+AI_OUTPUT_SUBDIR = CONFIG.get("AI_OUTPUT_SUBDIR", AI_OUTPUT_SUBDIR) or AI_OUTPUT_SUBDIR
+AI_TEMP_SUBDIR = CONFIG.get("AI_TEMP_SUBDIR", AI_TEMP_SUBDIR) or AI_TEMP_SUBDIR
+AI_DEFAULT_PERSIST = _coerce_bool(CONFIG.get("AI_DEFAULT_PERSIST"), AI_DEFAULT_PERSIST)
+AI_POLL_INTERVAL = _coerce_float(CONFIG.get("AI_POLL_INTERVAL"), AI_POLL_INTERVAL)
+AI_TIMEOUT = _coerce_float(CONFIG.get("AI_TIMEOUT"), AI_TIMEOUT)
 
-LIVE_HLS_ASYNC = _coerce_bool(config_data.get("LIVE_HLS_ASYNC"), LIVE_HLS_ASYNC)
-HLS_TTL_SECS = max(60, _coerce_int(config_data.get("LIVE_HLS_TTL_SECS"), HLS_TTL_SECS))
-MAX_HLS_WORKERS = max(1, _coerce_int(config_data.get("LIVE_HLS_MAX_WORKERS"), MAX_HLS_WORKERS))
-HLS_ERROR_RETRY_SECS = max(5, _coerce_int(config_data.get("LIVE_HLS_ERROR_RETRY_SECS"), HLS_ERROR_RETRY_SECS))
+LIVE_HLS_ASYNC = _coerce_bool(CONFIG.get("LIVE_HLS_ASYNC"), LIVE_HLS_ASYNC)
+HLS_TTL_SECS = max(60, _coerce_int(CONFIG.get("LIVE_HLS_TTL_SECS"), HLS_TTL_SECS))
+MAX_HLS_WORKERS = max(1, _coerce_int(CONFIG.get("LIVE_HLS_MAX_WORKERS"), MAX_HLS_WORKERS))
+HLS_ERROR_RETRY_SECS = max(5, _coerce_int(CONFIG.get("LIVE_HLS_ERROR_RETRY_SECS"), HLS_ERROR_RETRY_SECS))
 HLS_ERROR_RETRY_SECS = min(HLS_ERROR_RETRY_SECS, HLS_TTL_SECS)
 
 
-AI_OUTPUT_ROOT = _ensure_dir(Path(IMAGE_DIR) / AI_OUTPUT_SUBDIR)
-AI_TEMP_ROOT = _ensure_dir(Path(IMAGE_DIR) / AI_TEMP_SUBDIR)
+AI_OUTPUT_ROOT = _ensure_dir(PRIMARY_MEDIA_ROOT.path / AI_OUTPUT_SUBDIR)
+AI_TEMP_ROOT = _ensure_dir(PRIMARY_MEDIA_ROOT.path / AI_TEMP_SUBDIR)
 
 try:
     stable_horde_client = StableHorde(
@@ -1956,15 +2052,12 @@ atexit.register(_shutdown_hls_executor)
 
 
 def _relative_image_path(path: Union[Path, str]) -> str:
-    p = Path(path)
     try:
-        rel = p.relative_to(IMAGE_DIR_PATH)
-    except ValueError:
-        try:
-            rel = p.resolve().relative_to(IMAGE_DIR_PATH.resolve())
-        except Exception:  # pragma: no cover - fallback path
-            return p.as_posix()
-    return rel.as_posix()
+        resolved = Path(path).resolve()
+    except Exception:
+        resolved = Path(path)
+    virtual = _virtualize_path(resolved)
+    return virtual
 
 
 def _cleanup_temp_outputs(stream_id: str) -> None:
@@ -2460,15 +2553,8 @@ def _runtime_timestamp_to_iso(ts: Optional[float]) -> Optional[str]:
 def _resolve_media_path(rel_path: Optional[str]) -> Optional[Path]:
     if not rel_path:
         return None
-    base_root = IMAGE_DIR_PATH.resolve()
-    try:
-        target = (base_root / rel_path).resolve()
-        target.relative_to(base_root)
-    except (ValueError, RuntimeError):
-        return None
-    except FileNotFoundError:
-        return None
-    if not target.exists():
+    target = _resolve_virtual_media_path(rel_path)
+    if target is None or not target.exists():
         return None
     return target
 
@@ -3535,16 +3621,30 @@ def _parse_truthy(value: Any) -> bool:
 
 
 def get_subfolders(hide_nsfw: bool = False) -> List[str]:
-    subfolders = ["all"]
-    if os.path.isdir(IMAGE_DIR):
-        for root, dirs, _ in os.walk(IMAGE_DIR):
-            for d in dirs:
-                rel_path = os.path.relpath(os.path.join(root, d), IMAGE_DIR)
-                normalized = rel_path.replace("\\", "/")
-                if hide_nsfw and _path_contains_nsfw(normalized):
-                    continue
-                subfolders.append(rel_path)
-            break
+    subfolders: List[str] = []
+    seen: Set[str] = set()
+
+    def _add(value: str) -> None:
+        if value not in seen:
+            seen.add(value)
+            subfolders.append(value)
+
+    _add("all")
+    for root in AVAILABLE_MEDIA_ROOTS:
+        if hide_nsfw and _path_contains_nsfw(root.alias):
+            continue
+        _add(root.alias)
+        try:
+            with os.scandir(root.path) as scan:
+                for entry in scan:
+                    if not entry.is_dir():
+                        continue
+                    folder_key = _build_virtual_media_path(root.alias, entry.name)
+                    if hide_nsfw and _path_contains_nsfw(folder_key):
+                        continue
+                    _add(folder_key)
+        except OSError:
+            continue
     return subfolders
 
 
@@ -5996,19 +6096,16 @@ def _send_video_response(path: Union[str, Path]):
 
 @app.route("/stream/image/<path:image_path>")
 def serve_image(image_path):
-    full_path = Path(IMAGE_DIR_PATH) / image_path
-    if not full_path.exists():
+    full_path = _resolve_virtual_media_path(image_path)
+    if full_path is None or not full_path.exists():
         return "Not found", 404
     return _send_image_response(full_path)
 
 
 @app.route("/stream/video/<path:video_path>")
 def serve_video(video_path):
-    base_root = IMAGE_DIR_PATH.resolve()
-    target_path = (base_root / video_path).resolve()
-    try:
-        target_path.relative_to(base_root)
-    except ValueError:
+    target_path = _resolve_virtual_media_path(video_path)
+    if target_path is None:
         return "Invalid path", 400
     if not target_path.exists() or not target_path.is_file():
         return "Not found", 404

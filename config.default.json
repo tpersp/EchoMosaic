@@ -1,0 +1,25 @@
+{
+  "INSTALL_DIR": "/opt/echomosaic",
+  "SERVICE_NAME": "echomosaic.service",
+  "UPDATE_BRANCH": "main",
+  "API_KEY": "",
+  "AI_DEFAULT_MODEL": "stable_diffusion",
+  "AI_DEFAULT_SAMPLER": "k_euler",
+  "AI_DEFAULT_WIDTH": 512,
+  "AI_DEFAULT_HEIGHT": 512,
+  "AI_DEFAULT_STEPS": 30,
+  "AI_DEFAULT_CFG": 7.5,
+  "AI_DEFAULT_SAMPLES": 1,
+  "AI_OUTPUT_SUBDIR": "ai_generated",
+  "AI_TEMP_SUBDIR": "_ai_temp",
+  "AI_DEFAULT_PERSIST": true,
+  "AI_POLL_INTERVAL": 5.0,
+  "AI_TIMEOUT": 0.0,
+  "LIVE_HLS_ASYNC": true,
+  "LIVE_HLS_TTL_SECS": 3600,
+  "LIVE_HLS_MAX_WORKERS": 3,
+  "LIVE_HLS_ERROR_RETRY_SECS": 30,
+  "MEDIA_PATHS": [
+    "./media"
+  ]
+}
