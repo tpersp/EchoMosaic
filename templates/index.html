@@ -106,10 +106,24 @@
   <div id="dashboard-grid" class="dashboard-grid">
     {# Generate a card for each stream dynamically #}
 {% for stream_id, conf in stream_settings.items() %}
-    <div class="stream-card" data-stream="{{ stream_id }}" data-hide-nsfw="{{ "true" if conf.hide_nsfw|default(False) else "false" }}" data-tags='{{ (conf.tags|default([]))|tojson }}' data-selected-path="{{ conf.selected_image or '' }}" data-selected-kind="{{ conf.selected_media_kind or '' }}" data-video-mode="{{ conf.video_playback_mode|default('duration') }}" data-video-volume="{{ conf.video_volume|default(1.0) }}" data-media-mode="{{ conf.media_mode|default('image') }}" data-picsum-seed="{{ conf.picsum_settings.seed if conf.picsum_settings and conf.picsum_settings.seed is not none else '' }}">
+    {% set embed_meta = conf.embed_metadata if conf.embed_metadata else {} %}
+    {% set embed_title = embed_meta.title if embed_meta and embed_meta.title else '' %}
+    {% set embed_type = embed_meta.content_type if embed_meta and embed_meta.content_type else '' %}
+    {% set embed_provider = embed_meta.provider if embed_meta and embed_meta.provider else '' %}
+    <div class="stream-card" data-stream="{{ stream_id }}" data-hide-nsfw="{{ "true" if conf.hide_nsfw|default(False) else "false" }}" data-tags='{{ (conf.tags|default([]))|tojson }}' data-selected-path="{{ conf.selected_image or '' }}" data-selected-kind="{{ conf.selected_media_kind or '' }}" data-video-mode="{{ conf.video_playback_mode|default('duration') }}" data-video-volume="{{ conf.video_volume|default(1.0) }}" data-media-mode="{{ conf.media_mode|default('image') }}" data-picsum-seed="{{ conf.picsum_settings.seed if conf.picsum_settings and conf.picsum_settings.seed is not none else '' }}" data-embed-title="{{ embed_title }}" data-embed-type="{{ embed_type }}" data-embed-provider="{{ embed_provider }}">
       <div class="card-header">
-        <div class="title-row">
-          <h2><a class="stream-link" href="{{ url_for('render_stream', name=(conf.label if conf.label else stream_id)|slugify) }}" target="_blank">{{ conf.label if conf.label else stream_id|capitalize }}</a></h2>
+        <div class="card-header-info">
+          <div class="title-row">
+            <h2><a class="stream-link" href="{{ url_for('render_stream', name=(conf.label if conf.label else stream_id)|slugify) }}" target="_blank">{{ conf.label if conf.label else stream_id|capitalize }}</a></h2>
+          </div>
+          {% set type_badges = {'video': '🎥 Video', 'playlist': '🎵 Playlist', 'live': '🔴 Live'} %}
+          <div class="now-playing-line" data-stream="{{ stream_id }}" {% if not embed_title %}hidden{% endif %}>
+            <span class="now-playing-prefix">Now Playing:</span>
+            <span class="now-playing-title">{{ embed_title }}</span>
+            {% if embed_type %}
+            <span class="now-playing-type">{{ type_badges.get(embed_type, embed_type|capitalize) }}</span>
+            {% endif %}
+          </div>
         </div>
         <div class="card-menu" data-stream="{{ stream_id }}">
           <button class="menu-button" aria-haspopup="true" aria-expanded="false" title="More"><span class="burger"></span></button>
@@ -722,6 +736,11 @@
   } : null;
   const SYSTEM_MONITOR_POLL_MS = 10000;
   let systemMonitorIntervalId = null;
+  const NOW_PLAYING_LABELS = {
+    video: '🎥 Video',
+    playlist: '🎵 Playlist',
+    live: '🔴 Live',
+  };
 
   function normalizeNumber(value) {
     return typeof value === 'number' && Number.isFinite(value) ? value : null;
@@ -921,14 +940,55 @@
   }
 
   function findStreamCard(streamId) {
-    if (!streamId) return null;
-    const cards = document.querySelectorAll('.stream-card[data-stream]');
-    for (const card of cards) {
-      if (card.dataset.stream === streamId) {
-        return card;
+   if (!streamId) return null;
+   const cards = document.querySelectorAll('.stream-card[data-stream]');
+   for (const card of cards) {
+     if (card.dataset.stream === streamId) {
+       return card;
+     }
+   }
+   return null;
+ }
+
+  function updateNowPlaying(card, metadata) {
+    if (!card) return;
+    const line = card.querySelector('.now-playing-line');
+    const titleEl = line ? line.querySelector('.now-playing-title') : null;
+    const typeEl = line ? line.querySelector('.now-playing-type') : null;
+    const meta = metadata || {};
+    const title = typeof meta.title === 'string' ? meta.title.trim() : (card.dataset.embedTitle || '');
+    const rawType = typeof meta.content_type === 'string' ? meta.content_type.trim().toLowerCase() : (card.dataset.embedType || '').toLowerCase();
+    const provider = typeof meta.provider === 'string' ? meta.provider : (card.dataset.embedProvider || '');
+    card.dataset.embedTitle = title || '';
+    card.dataset.embedType = rawType || '';
+    card.dataset.embedProvider = provider || '';
+    if (!line) {
+      return;
+    }
+    if (title) {
+      line.hidden = false;
+      if (titleEl) {
+        titleEl.textContent = title;
+      }
+      if (typeEl) {
+        if (rawType) {
+          typeEl.hidden = false;
+          typeEl.textContent = NOW_PLAYING_LABELS[rawType] || (rawType.charAt(0).toUpperCase() + rawType.slice(1));
+        } else {
+          typeEl.hidden = true;
+          typeEl.textContent = '';
+        }
+      }
+    } else {
+      line.hidden = true;
+      if (titleEl) {
+        titleEl.textContent = '';
+      }
+      if (typeEl) {
+        typeEl.hidden = true;
+        typeEl.textContent = '';
       }
     }
-    return null;
   }
 
   function updateThumbnailUI(card, payload, options = {}) {
@@ -2257,6 +2317,12 @@
       if (resultsEl) {
         highlightAiSelection(resultsEl, selectedPath);
       }
+    }
+    if (conf.embed_metadata !== undefined) {
+      const meta = conf.embed_metadata && typeof conf.embed_metadata === 'object'
+        ? conf.embed_metadata
+        : { title: '', content_type: '', provider: '' };
+      updateNowPlaying(card, meta);
     }
     if (conf.video_playback_mode !== undefined) {
       const nextMode = (conf.video_playback_mode || 'duration').toLowerCase();
@@ -3754,6 +3820,12 @@
               highlightAiSelection(aiResults, selectedPath);
             }
           }
+          if (data.new_config && data.new_config.embed_metadata !== undefined) {
+            const meta = data.new_config.embed_metadata && typeof data.new_config.embed_metadata === 'object'
+              ? data.new_config.embed_metadata
+              : { title: '', content_type: '', provider: '' };
+            updateNowPlaying(card, meta);
+          }
           if (data.new_config && data.new_config.video_playback_mode !== undefined) {
             const nextMode = (data.new_config.video_playback_mode || 'duration').toLowerCase();
             card.dataset.videoMode = nextMode;
@@ -4354,6 +4426,16 @@
     const isRandom = normalizedMode === 'random';
     const isSpecific = normalizedMode === 'specific';
 
+    if (!isLivestream) {
+      updateNowPlaying(card, { title: '', content_type: '', provider: '' });
+    } else {
+      updateNowPlaying(card, {
+        title: card.dataset.embedTitle || '',
+        content_type: card.dataset.embedType || '',
+        provider: card.dataset.embedProvider || ''
+      });
+    }
+
     const durationDiv = card.querySelector('.duration-container');
     const shuffleChk = card.querySelector('.shuffle-chk');
     const shuffleLabel = shuffleChk ? shuffleChk.closest('label') : null;
@@ -4546,6 +4628,11 @@
       const streamId = card.dataset.stream;
       initThumbnail(card);
       if (streamId) {
+        updateNowPlaying(card, {
+          title: card.dataset.embedTitle || '',
+          content_type: card.dataset.embedType || '',
+          provider: card.dataset.embedProvider || ''
+        });
         attachTagEditor(card);
       }
       setupAiControls(card, streamId);

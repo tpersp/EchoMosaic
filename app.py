@@ -18,7 +18,7 @@ from pathlib import Path
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple, Union, Set
-from urllib.parse import quote, urlparse
+from urllib.parse import quote, urlparse, parse_qs
 
 from PIL import Image, ImageDraw, ImageFont
 
@@ -205,9 +205,383 @@ def _public_thumbnail_payload(record: Optional[Dict[str, Any]]) -> Optional[Dict
         return None
     payload = {k: v for k, v in record.items() if not k.startswith("_")}
     return payload or None
+
+
+def _sanitize_embed_metadata(raw: Any) -> Optional[Dict[str, Any]]:
+    if not isinstance(raw, dict):
+        return None
+    title = raw.get("title")
+    if isinstance(title, str):
+        title = title.strip() or None
+    else:
+        title = None
+    content_type = raw.get("content_type")
+    if isinstance(content_type, str):
+        lowered = content_type.strip().lower()
+        if lowered in {"video", "playlist", "live"}:
+            content_type = lowered
+        else:
+            content_type = None
+    else:
+        content_type = None
+    provider = raw.get("provider") or raw.get("provider_name")
+    if isinstance(provider, str):
+        provider = provider.strip() or None
+    else:
+        provider = None
+    video_id = raw.get("video_id")
+    if isinstance(video_id, str):
+        video_id = video_id.strip() or None
+    else:
+        video_id = None
+    playlist_id = raw.get("playlist_id")
+    if isinstance(playlist_id, str):
+        playlist_id = playlist_id.strip() or None
+    else:
+        playlist_id = None
+    start_index = raw.get("start_index")
+    if isinstance(start_index, int):
+        index_value = start_index
+    else:
+        try:
+            index_value = int(start_index)
+        except (TypeError, ValueError):
+            index_value = None
+    is_live_raw = raw.get("is_live")
+    is_live = bool(is_live_raw) if is_live_raw is not None else (content_type == "live")
+    canonical_url = raw.get("canonical_url") or raw.get("url")
+    if isinstance(canonical_url, str):
+        canonical_url = canonical_url.strip() or None
+    else:
+        canonical_url = None
+    thumbnail_url = raw.get("thumbnail_url")
+    if isinstance(thumbnail_url, str):
+        thumbnail_url = thumbnail_url.strip() or None
+    else:
+        thumbnail_url = None
+    author_name = raw.get("author_name")
+    if isinstance(author_name, str):
+        author_name = author_name.strip() or None
+    else:
+        author_name = None
+    fetched_at = raw.get("fetched_at")
+    if isinstance(fetched_at, str):
+        fetched_at = fetched_at.strip() or None
+    else:
+        fetched_at = None
+    meta = {
+        "title": title,
+        "content_type": content_type,
+        "provider": provider or "YouTube",
+        "video_id": video_id,
+        "playlist_id": playlist_id,
+        "start_index": index_value,
+        "is_live": bool(is_live),
+    }
+    if canonical_url:
+        meta["canonical_url"] = canonical_url
+    if thumbnail_url:
+        meta["thumbnail_url"] = thumbnail_url
+    if author_name:
+        meta["author_name"] = author_name
+    if fetched_at:
+        meta["fetched_at"] = fetched_at
+    return meta
+
+
+def _is_youtube_host(host: str) -> bool:
+    if not host:
+        return False
+    host = host.lower()
+    if host in YOUTUBE_DOMAINS:
+        return True
+    return any(host.endswith(f".{domain}") for domain in YOUTUBE_DOMAINS)
+
+
+def _is_youtube_url(url: Optional[str]) -> bool:
+    if not url or not isinstance(url, str):
+        return False
+    candidate = url.strip()
+    if not candidate:
+        return False
+    if "://" not in candidate:
+        candidate = f"https://{candidate}"
+    try:
+        parsed = urlparse(candidate)
+    except ValueError:
+        return False
+    return _is_youtube_host(parsed.netloc)
+
+
+def _parse_youtube_url_details(url: str) -> Optional[Dict[str, Any]]:
+    if not _is_youtube_url(url):
+        return None
+    candidate = url.strip()
+    if "://" not in candidate:
+        candidate = f"https://{candidate}"
+    try:
+        parsed = urlparse(candidate)
+    except ValueError:
+        return None
+    query_map = parse_qs(parsed.query or "")
+    segments = [segment for segment in parsed.path.split("/") if segment]
+    video_id: Optional[str] = None
+    playlist_id: Optional[str] = None
+    start_index: Optional[int] = None
+    start_seconds: Optional[int] = None
+
+    # Video ID detection across watch, embed, short, live and short URL formats.
+    if "v" in query_map and query_map["v"]:
+        video_id = query_map["v"][0]
+    elif parsed.netloc.endswith("youtu.be") and segments:
+        video_id = segments[0]
+    elif segments:
+        if segments[0] in {"embed", "shorts", "live"} and len(segments) > 1:
+            video_id = segments[1]
+        elif segments[0] == "watch" and len(segments) > 1:
+            video_id = segments[-1]
+
+    playlist_candidates = query_map.get("list")
+    if playlist_candidates:
+        playlist_id = playlist_candidates[0] or None
+
+    index_candidates = query_map.get("index")
+    if index_candidates:
+        try:
+            start_index = int(index_candidates[0])
+        except (TypeError, ValueError):
+            start_index = None
+
+    start_candidates = query_map.get("start")
+    if start_candidates:
+        try:
+            start_seconds = int(start_candidates[0])
+        except (TypeError, ValueError):
+            start_seconds = None
+
+    is_live = False
+    if segments and segments[0] == "live":
+        is_live = True
+    else:
+        live_candidate = query_map.get("live") or query_map.get("live_stream")
+        if live_candidate:
+            value = live_candidate[0]
+            if isinstance(value, str):
+                is_live = value.strip().lower() in {"1", "true", "yes", "live"}
+            else:
+                is_live = bool(value)
+
+    canonical_url = None
+    if playlist_id and not video_id:
+        canonical_url = f"https://www.youtube.com/playlist?list={playlist_id}"
+    else:
+        params = []
+        if video_id:
+            params.append(f"v={video_id}")
+        if playlist_id:
+            params.append(f"list={playlist_id}")
+        if start_index is not None:
+            params.append(f"index={start_index}")
+        if start_seconds is not None:
+            params.append(f"start={start_seconds}")
+        canonical_url = "https://www.youtube.com/watch"
+        if params:
+            canonical_url += f"?{'&'.join(params)}"
+
+    embed_base: str
+    if playlist_id:
+        embed_base = "https://www.youtube.com/embed/videoseries"
+    elif video_id:
+        embed_base = f"https://www.youtube.com/embed/{video_id}"
+    else:
+        embed_base = "https://www.youtube.com/embed/"
+
+    return {
+        "original_url": candidate,
+        "video_id": video_id,
+        "playlist_id": playlist_id,
+        "start_index": start_index,
+        "start_seconds": start_seconds,
+        "is_live": bool(is_live),
+        "canonical_url": canonical_url,
+        "embed_base": embed_base,
+        "host": parsed.netloc.lower(),
+        "path": parsed.path,
+        "query": query_map,
+    }
+
+
+def _youtube_cache_key(details: Dict[str, Any]) -> Tuple[str, ...]:
+    playlist_id = details.get("playlist_id") or ""
+    video_id = details.get("video_id") or ""
+    if playlist_id and video_id:
+        return ("playlist_video", playlist_id, video_id)
+    if playlist_id:
+        return ("playlist", playlist_id)
+    if video_id:
+        return ("video", video_id)
+    canonical = details.get("canonical_url") or details.get("original_url") or ""
+    return ("url", canonical)
+
+
+def _derive_youtube_content_type(
+    details: Dict[str, Any], oembed: Optional[Dict[str, Any]] = None
+) -> str:
+    if details.get("playlist_id"):
+        return "playlist"
+    if details.get("is_live"):
+        return "live"
+    if isinstance(oembed, dict):
+        raw_type = oembed.get("type")
+        if isinstance(raw_type, str):
+            lowered = raw_type.strip().lower()
+            if lowered in {"video", "playlist", "live"}:
+                if lowered == "playlist" and details.get("playlist_id"):
+                    return "playlist"
+                if lowered == "live":
+                    return "live"
+    title = ""
+    if isinstance(oembed, dict):
+        title_candidate = oembed.get("title")
+        if isinstance(title_candidate, str):
+            title = title_candidate.lower()
+    if " live " in f" {title} " or title.startswith("live "):
+        return "live"
+    return "video"
+
+
+def _build_youtube_metadata(
+    details: Dict[str, Any], oembed: Optional[Dict[str, Any]] = None
+) -> Dict[str, Any]:
+    metadata = {}
+    if isinstance(oembed, dict):
+        title = oembed.get("title")
+        if isinstance(title, str) and title.strip():
+            metadata["title"] = title.strip()
+        provider = oembed.get("provider_name")
+        if isinstance(provider, str) and provider.strip():
+            metadata["provider"] = provider.strip()
+        author = oembed.get("author_name")
+        if isinstance(author, str) and author.strip():
+            metadata["author_name"] = author.strip()
+        thumbnail = oembed.get("thumbnail_url")
+        if isinstance(thumbnail, str) and thumbnail.strip():
+            metadata["thumbnail_url"] = thumbnail.strip()
+        oembed_type = oembed.get("type")
+        if isinstance(oembed_type, str) and oembed_type.strip():
+            metadata["oembed_type"] = oembed_type.strip().lower()
+    if "provider" not in metadata:
+        metadata["provider"] = "YouTube"
+    metadata["video_id"] = details.get("video_id")
+    metadata["playlist_id"] = details.get("playlist_id")
+    metadata["start_index"] = details.get("start_index")
+    metadata["start_seconds"] = details.get("start_seconds")
+    metadata["canonical_url"] = details.get("canonical_url")
+    content_type = _derive_youtube_content_type(details, oembed)
+    metadata["content_type"] = content_type
+    metadata["is_live"] = content_type == "live"
+    return metadata
+
+
+def _youtube_oembed_lookup(
+    url: str,
+    details: Dict[str, Any],
+    *,
+    force: bool = False,
+) -> Optional[Dict[str, Any]]:
+    cache_key = _youtube_cache_key(details)
+    now = time.time()
+    with YOUTUBE_OEMBED_CACHE_LOCK:
+        cached = YOUTUBE_OEMBED_CACHE.get(cache_key)
+        if (
+            cached
+            and not force
+            and now - cached.get("timestamp", 0) < YOUTUBE_OEMBED_CACHE_TTL
+        ):
+            return dict(cached.get("data", {}))
+    if requests is None:
+        return _build_youtube_metadata(details, None)
+    try:
+        response = requests.get(
+            YOUTUBE_OEMBED_ENDPOINT,
+            params={"url": url, "format": "json"},
+            timeout=6,
+        )
+        response.raise_for_status()
+        payload = response.json()
+    except Exception as exc:
+        logger.debug("YouTube oEmbed lookup failed for %s: %s", url, exc)
+        with YOUTUBE_OEMBED_CACHE_LOCK:
+            cached = YOUTUBE_OEMBED_CACHE.get(cache_key)
+            if cached:
+                return dict(cached.get("data", {}))
+        return _build_youtube_metadata(details, None)
+
+    metadata = _build_youtube_metadata(details, payload)
+    timestamp = datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
+    metadata["fetched_at"] = timestamp
+    with YOUTUBE_OEMBED_CACHE_LOCK:
+        YOUTUBE_OEMBED_CACHE[cache_key] = {"data": dict(metadata), "timestamp": now}
+    return metadata
+
+
+def _set_runtime_embed_metadata(stream_id: str, metadata: Optional[Dict[str, Any]]) -> None:
+    if not stream_id or stream_id.startswith("_"):
+        return
+    with STREAM_RUNTIME_LOCK:
+        entry = STREAM_RUNTIME_STATE.setdefault(stream_id, {})
+        if metadata is None:
+            entry.pop("embed_metadata", None)
+        else:
+            entry["embed_metadata"] = dict(metadata)
+
+
+def _refresh_embed_metadata(
+    stream_id: str,
+    conf: Dict[str, Any],
+    *,
+    force: bool = False,
+) -> Optional[Dict[str, Any]]:
+    if not isinstance(conf, dict):
+        return None
+    media_mode_raw = conf.get("media_mode") or conf.get("mode")
+    media_mode = media_mode_raw.strip().lower() if isinstance(media_mode_raw, str) else ""
+    stream_url = conf.get("stream_url")
+
+    if media_mode not in {MEDIA_MODE_LIVESTREAM, "livestream"} or not stream_url:
+        conf["embed_metadata"] = None
+        _set_runtime_embed_metadata(stream_id, None)
+        return None
+
+    details = _parse_youtube_url_details(stream_url)
+    if details is None:
+        conf["embed_metadata"] = None
+        _set_runtime_embed_metadata(stream_id, None)
+        return None
+
+    metadata = _youtube_oembed_lookup(stream_url, details, force=force)
+    sanitized = _sanitize_embed_metadata(metadata or {})
+    conf["embed_metadata"] = sanitized
+    _set_runtime_embed_metadata(stream_id, sanitized)
+    return sanitized
 IMAGE_CACHE_LOCK = threading.Lock()
 STREAM_RUNTIME_STATE: Dict[str, Dict[str, Any]] = {}
 STREAM_RUNTIME_LOCK = threading.Lock()
+
+YOUTUBE_DOMAINS = {
+    "youtube.com",
+    "www.youtube.com",
+    "m.youtube.com",
+    "music.youtube.com",
+    "youtu.be",
+    "www.youtu.be",
+    "youtube-nocookie.com",
+    "www.youtube-nocookie.com",
+}
+YOUTUBE_OEMBED_ENDPOINT = "https://www.youtube.com/oembed"
+YOUTUBE_OEMBED_CACHE_TTL = 20 * 60  # 20 minutes
+YOUTUBE_OEMBED_CACHE: Dict[Tuple[str, ...], Dict[str, Any]] = {}
+YOUTUBE_OEMBED_CACHE_LOCK = threading.Lock()
 
 STREAM_PLAYBACK_HISTORY_LIMIT = 50
 STREAM_UPDATE_EVENT = "stream_update"
@@ -922,6 +1296,7 @@ def default_stream_config():
         TAG_KEY: [],
         "background_blur_enabled": False,
         "background_blur_amount": 50,
+        "embed_metadata": None,
         PICSUM_SETTINGS_KEY: default_picsum_settings(),
         "_picsum_seed_custom": False,
         AI_SETTINGS_KEY: default_ai_settings(),
@@ -1025,6 +1400,7 @@ def _sanitize_imported_stream_config(stream_id: str, raw_conf: Any) -> Dict[str,
     picsum_raw = conf.get(PICSUM_SETTINGS_KEY)
     conf[PICSUM_SETTINGS_KEY] = _sanitize_picsum_settings(picsum_raw, defaults=default_picsum_settings())
     conf['_picsum_seed_custom'] = bool(conf.get('_picsum_seed_custom', False))
+    conf["embed_metadata"] = _sanitize_embed_metadata(conf.get("embed_metadata"))
     ensure_background_defaults(conf)
     return conf
 
@@ -1821,6 +2197,14 @@ def _run_ai_generation(stream_id: str, options: Dict[str, Any], cancel_event: Op
 settings = load_settings()
 if ensure_settings_integrity(settings):
     save_settings(settings)
+# Normalize embed metadata placeholders for existing streams
+for stream_id, conf in list(settings.items()):
+    if not isinstance(stream_id, str) or stream_id.startswith("_"):
+        continue
+    if not isinstance(conf, dict):
+        continue
+    conf["embed_metadata"] = _sanitize_embed_metadata(conf.get("embed_metadata"))
+
 # Ensure global AI defaults exist and are sanitized
 raw_ai_defaults = settings.get("_ai_defaults") if isinstance(settings.get("_ai_defaults"), dict) else None
 settings["_ai_defaults"] = _sanitize_ai_settings(
@@ -3016,6 +3400,7 @@ for k, v in list(settings.items()):
             stream_url=v.get("stream_url"),
             source="startup",
         )
+        _set_runtime_embed_metadata(k, v.get("embed_metadata"))
 
 # Ensure notes key exists
 settings.setdefault("_notes", "")
@@ -3283,15 +3668,17 @@ def dashboard():
     folder_inventory = get_folder_inventory()
     subfolders = [item["name"] for item in folder_inventory]
     streams = {k: v for k, v in settings.items() if not k.startswith("_")}
-    for conf in streams.values():
-        if isinstance(conf, dict):
-            quality = conf.get("image_quality")
-            if not isinstance(quality, str) or quality.strip().lower() not in IMAGE_QUALITY_CHOICES:
-                conf["image_quality"] = "auto"
-            else:
-                conf["image_quality"] = quality.strip().lower()
-            ensure_background_defaults(conf)
-            ensure_tag_defaults(conf)
+    for stream_id, conf in streams.items():
+        if not isinstance(conf, dict):
+            continue
+        quality = conf.get("image_quality")
+        if not isinstance(quality, str) or quality.strip().lower() not in IMAGE_QUALITY_CHOICES:
+            conf["image_quality"] = "auto"
+        else:
+            conf["image_quality"] = quality.strip().lower()
+        ensure_background_defaults(conf)
+        ensure_tag_defaults(conf)
+        _refresh_embed_metadata(stream_id, conf)
     groups = sorted(list(settings.get("_groups", {}).keys()))
     return render_template(
         "index.html",
@@ -3312,10 +3699,12 @@ def dashboard():
 def mosaic_streams():
     # Dynamic global view: include all streams ("online" assumed as configured)
     streams = {k: v for k, v in settings.items() if not k.startswith("_")}
-    for conf in streams.values():
-        if isinstance(conf, dict):
-            ensure_background_defaults(conf)
-            ensure_tag_defaults(conf)
+    for stream_id, conf in streams.items():
+        if not isinstance(conf, dict):
+            continue
+        ensure_background_defaults(conf)
+        ensure_tag_defaults(conf)
+        _refresh_embed_metadata(stream_id, conf)
     return render_template("streams.html", stream_settings=streams)
 
 def _slugify(name: str) -> str:
@@ -3356,6 +3745,7 @@ def render_stream(name):
     conf["image_quality"] = config_quality
     ensure_background_defaults(conf)
     ensure_tag_defaults(conf)
+    _refresh_embed_metadata(key, conf)
     images = list_images(conf.get("folder", "all"), hide_nsfw=conf.get("hide_nsfw", False))
     requested_quality = (request.args.get("size") or "").strip().lower()
     if requested_quality and requested_quality not in IMAGE_QUALITY_CHOICES:
@@ -3457,6 +3847,9 @@ def update_stream_settings(stream_id):
     ensure_picsum_defaults(conf)
     previous_mode = conf.get("mode")
 
+    stream_url_changed = False
+    media_mode_changed = False
+
     # We'll add new keys for YouTube: "yt_cc", "yt_mute", "yt_quality"
     for key in ["mode", "folder", "selected_image", "duration", "shuffle", "stream_url",
                 "image_quality", "yt_cc", "yt_mute", "yt_quality", "label", "hide_nsfw",
@@ -3465,8 +3858,13 @@ def update_stream_settings(stream_id):
         if key in data:
             val = data[key]
             if key == "stream_url":
-                val = val.strip()
-                conf[key] = val if val and val.lower() != "none" else None
+                normalized_url = val.strip() if isinstance(val, str) else ""
+                conf[key] = normalized_url if normalized_url and normalized_url.lower() != "none" else None
+                stream_url_changed = True
+            elif key == "mode":
+                conf[key] = val
+                if isinstance(val, str) and val.strip().lower() == "livestream":
+                    media_mode_changed = True
             elif key == "label":
                 # Enforce unique label slug across streams (ignoring case/spacing)
                 new_label = (val or "").strip()
@@ -3520,6 +3918,7 @@ def update_stream_settings(stream_id):
                         conf["mode"] = AI_MODE
                     elif media_mode == MEDIA_MODE_LIVESTREAM:
                         conf["mode"] = "livestream"
+                    media_mode_changed = True
             elif key == "selected_image":
                 conf[key] = val
                 if "selected_media_kind" not in data:
@@ -3585,6 +3984,8 @@ def update_stream_settings(stream_id):
                 conf["video_playback_mode"] = "loop"
             elif conf["mode"] == "random" and conf.get("video_playback_mode") == "loop":
                 conf["video_playback_mode"] = "duration"
+
+    _refresh_embed_metadata(stream_id, conf, force=stream_url_changed or media_mode_changed)
 
     mode_requested = data.get("mode")
     if (
@@ -5109,24 +5510,44 @@ def stream_live():
         return jsonify({"error": "No live stream URL configured"}), 404
 
     lowered = stream_url.lower()
-    if "youtube.com" in lowered or "youtu.be" in lowered:
-        embed_id = None
-        if "watch?v=" in stream_url:
-            try:
-                embed_id = stream_url.split("watch?v=")[1].split("&")[0].split("#")[0]
-            except Exception:
-                embed_id = None
-        elif "youtu.be/" in stream_url:
-            try:
-                embed_id = stream_url.split("youtu.be/")[1].split("?")[0].split("&")[0]
-            except Exception:
-                embed_id = None
-        return jsonify({
+    youtube_details = _parse_youtube_url_details(stream_url)
+    if youtube_details:
+        if override_url is not None:
+            metadata = _youtube_oembed_lookup(stream_url, youtube_details, force=True)
+            sanitized_meta = _sanitize_embed_metadata(metadata or {})
+        else:
+            force_refresh = stream_conf.get("stream_url") != stream_url
+            sanitized_meta = _refresh_embed_metadata(stream_id, stream_conf, force=force_refresh)
+            if sanitized_meta is None:
+                metadata = _youtube_oembed_lookup(stream_url, youtube_details, force=force_refresh)
+                sanitized_meta = _sanitize_embed_metadata(metadata or {})
+                if sanitized_meta:
+                    stream_conf["embed_metadata"] = sanitized_meta
+                    _set_runtime_embed_metadata(stream_id, sanitized_meta)
+        content_type = (sanitized_meta or {}).get("content_type")
+        if not content_type:
+            if youtube_details.get("playlist_id"):
+                content_type = "playlist"
+            elif youtube_details.get("is_live"):
+                content_type = "live"
+            else:
+                content_type = "video"
+        response_payload: Dict[str, Any] = {
             "embed_type": "youtube",
-            "embed_id": embed_id,
+            "embed_id": youtube_details.get("video_id"),
+            "video_id": youtube_details.get("video_id"),
+            "playlist_id": youtube_details.get("playlist_id"),
+            "content_type": content_type,
+            "start_index": youtube_details.get("start_index"),
+            "start_seconds": youtube_details.get("start_seconds"),
+            "is_live": bool((sanitized_meta or {}).get("is_live") or youtube_details.get("is_live")),
+            "embed_base": youtube_details.get("embed_base"),
             "hls_url": None,
             "original_url": stream_url,
-        })
+        }
+        if sanitized_meta:
+            response_payload["metadata"] = sanitized_meta
+        return jsonify(response_payload)
 
     if "twitch.tv" in lowered:
         try:
