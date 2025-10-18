@@ -524,7 +524,11 @@ class MediaManager:
         height = height or int(width * 9 / 16)
         cache_key = self._cache_key(abs_path, width, height, stat_info.st_mtime)
         cache_dir = self._cache_dirs[root.alias]
-        cache_path = cache_dir / f"{cache_key}.jpg"
+        try:
+            cache_path = (cache_dir / f"{cache_key}.jpg").resolve()
+            cache_path.relative_to(cache_dir.resolve())
+        except (ValueError, OSError):
+            raise MediaManagerError("Invalid cache path", code="invalid_path", status=400)
         etag = f"W/\"{cache_key}\""
 
         if cache_path.exists():
