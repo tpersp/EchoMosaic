@@ -104,6 +104,21 @@ AI_TEMP_SUBDIR = "_ai_temp"
 AI_DEFAULT_PERSIST = True
 AI_POLL_INTERVAL = 5.0
 AI_TIMEOUT = 0.0
+INTERNAL_MEDIA_DIRS = {THUMBNAIL_SUBDIR, AI_TEMP_SUBDIR}
+IGNORED_MEDIA_PREFIX = "_"
+
+
+def _should_ignore_media_name(name: Optional[str]) -> bool:
+    """Return True when a media entry should be skipped (internal or leading underscore)."""
+    if not name:
+        return False
+    normalized = str(name).strip()
+    if not normalized:
+        return False
+    leaf = normalized.replace("\\", "/").rsplit("/", 1)[-1]
+    if leaf in INTERNAL_MEDIA_DIRS:
+        return True
+    return leaf.startswith(IGNORED_MEDIA_PREFIX)
 
 AUTO_GENERATE_MODES = {"off", "timer", "clock"}
 AUTO_GENERATE_INTERVAL_UNITS = {"minutes": 60.0, "hours": 3600.0}
@@ -849,7 +864,8 @@ def _scan_root_for_cache(
         return [], dir_markers
 
     media: List[Dict[str, str]] = []
-    for walk_root, _, files in os.walk(base_path):
+    for walk_root, dirnames, files in os.walk(base_path):
+        dirnames[:] = [name for name in dirnames if not _should_ignore_media_name(name)]
         walk_path = Path(walk_root)
         walk_key = os.fspath(walk_path)
         if walk_path != base_path:
@@ -858,6 +874,8 @@ def _scan_root_for_cache(
             except OSError:
                 dir_markers[walk_key] = time.time()
         for file_name in files:
+            if _should_ignore_media_name(file_name):
+                continue
             ext = os.path.splitext(file_name)[1].lower()
             if ext not in MEDIA_EXTENSIONS:
                 continue
@@ -952,6 +970,8 @@ def initialize_image_cache() -> None:
             with os.scandir(root.path) as scan:
                 for entry in scan:
                     if not entry.is_dir():
+                        continue
+                    if _should_ignore_media_name(entry.name):
                         continue
                     folder_key = _build_virtual_media_path(root.alias, entry.name)
                     refresh_image_cache(folder_key, force=True)
@@ -3647,6 +3667,8 @@ def get_subfolders(hide_nsfw: bool = False) -> List[str]:
                 for entry in scan:
                     if not entry.is_dir():
                         continue
+                    if _should_ignore_media_name(entry.name):
+                        continue
                     folder_key = _build_virtual_media_path(root.alias, entry.name)
                     if hide_nsfw and _path_contains_nsfw(folder_key):
                         continue
@@ -3662,8 +3684,13 @@ def get_folder_inventory(hide_nsfw: bool = False) -> List[Dict[str, Any]]:
         media_entries = list_media(name, hide_nsfw=hide_nsfw)
         has_images = any(entry.get("kind") == "image" for entry in media_entries)
         has_videos = any(entry.get("kind") == "video" for entry in media_entries)
+        if "/" in name:
+            display_name = name.split("/", 1)[1]
+        else:
+            display_name = name
         inventory.append({
             "name": name,
+            "display_name": display_name,
             "has_images": has_images,
             "has_videos": has_videos,
         })

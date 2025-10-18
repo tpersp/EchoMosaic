@@ -173,8 +173,9 @@
             {% endif %}
             {% for entry in folder_inventory %}
               {% set name = entry.name %}
+              {% set display_name = entry.display_name if entry.display_name is defined and entry.display_name else name %}
               {% if not (hide_nsfw and 'nsfw' in name|lower) %}
-                <option value="{{ name }}" title="{{ name }}" data-has-images="{{ 'true' if entry.has_images else 'false' }}" data-has-videos="{{ 'true' if entry.has_videos else 'false' }}"{% if current_folder == name %} selected{% endif %}>{{ name }}</option>
+                <option value="{{ name }}" title="{{ name }}" data-display-name="{{ display_name }}" data-has-images="{{ 'true' if entry.has_images else 'false' }}" data-has-videos="{{ 'true' if entry.has_videos else 'false' }}"{% if current_folder == name %} selected{% endif %}>{{ display_name }}</option>
               {% endif %}
             {% endfor %}
           </select>
@@ -4336,6 +4337,19 @@
     if (!folderSelect) {
       return null;
     }
+    const toDisplayName = (value) => {
+      if (value === null || value === undefined) {
+        return 'all';
+      }
+      const text = String(value).trim();
+      if (!text) {
+        return 'all';
+      }
+      if (!text.includes('/')) {
+        return text;
+      }
+      return text.split('/').slice(1).join('/');
+    };
     const url = hideNsfw ? '/folders?hide_nsfw=1' : '/folders';
     try {
       const response = await fetch(url);
@@ -4347,6 +4361,7 @@
         return null;
       }
       const assigned = folderSelect.dataset.currentFolder || 'all';
+      const assignedLabel = toDisplayName(assigned);
       const assignedLower = (assigned || '').toLowerCase();
       const hasAssigned = items.some(entry => entry && entry.name === assigned);
       const shouldShowPlaceholder = Boolean(hideNsfw) && assigned && assignedLower.includes('nsfw') && !hasAssigned;
@@ -4354,9 +4369,10 @@
       if (shouldShowPlaceholder) {
         const placeholder = document.createElement('option');
         placeholder.value = '__filtered__';
-        placeholder.textContent = `Filtered (${assigned})`;
+        placeholder.textContent = `Filtered (${assignedLabel})`;
         placeholder.title = assigned;
         placeholder.dataset.filtered = 'true';
+        placeholder.dataset.displayName = placeholder.textContent;
         placeholder.selected = true;
         frag.appendChild(placeholder);
       }
@@ -4365,13 +4381,15 @@
           return;
         }
         const name = String(entry.name);
+        const displayName = entry.display_name ? String(entry.display_name) : name;
         if (hideNsfw && name.toLowerCase().includes('nsfw')) {
           return;
         }
         const opt = document.createElement('option');
         opt.value = name;
         opt.title = name;
-        opt.textContent = name;
+        opt.textContent = displayName;
+        opt.dataset.displayName = displayName;
         opt.dataset.hasImages = entry.has_images ? 'true' : 'false';
         opt.dataset.hasVideos = entry.has_videos ? 'true' : 'false';
         if (!shouldShowPlaceholder && assigned === name) {
@@ -4383,20 +4401,22 @@
       let currentSelection = folderSelect.dataset.currentFolder || 'all';
       if (shouldShowPlaceholder) {
         folderSelect.value = '__filtered__';
-        folderSelect.title = assigned;
+        folderSelect.title = assignedLabel;
         folderSelect.dataset.currentFolder = assigned;
         currentSelection = assigned || 'all';
       } else {
         const selectedOption = folderSelect.options[folderSelect.selectedIndex];
         if (selectedOption) {
           folderSelect.dataset.currentFolder = selectedOption.value || 'all';
-          folderSelect.title = selectedOption.title || selectedOption.textContent || folderSelect.value;
+          const label = selectedOption.dataset.displayName || toDisplayName(selectedOption.value);
+          folderSelect.title = label;
           currentSelection = folderSelect.dataset.currentFolder;
         } else if (folderSelect.options.length) {
           const first = folderSelect.options[0];
           first.selected = true;
           folderSelect.dataset.currentFolder = first.value || 'all';
-          folderSelect.title = first.title || first.textContent || folderSelect.value;
+          const label = first.dataset.displayName || toDisplayName(first.value);
+          folderSelect.title = label;
           currentSelection = folderSelect.dataset.currentFolder;
         } else {
           folderSelect.dataset.currentFolder = 'all';
@@ -4654,19 +4674,36 @@
       // Folder change
       const folderSelect = card.querySelector('.folder-select');
       if (folderSelect) {
+        const resolveDisplay = (value) => {
+          if (value === null || value === undefined) {
+            return 'all';
+          }
+          const text = String(value).trim();
+          if (!text) {
+            return 'all';
+          }
+          if (!text.includes('/')) {
+            return text;
+          }
+          return text.split('/').slice(1).join('/');
+        };
         const initialOption = folderSelect.options[folderSelect.selectedIndex];
         const initialAssigned = folderSelect.dataset.currentFolder || (initialOption ? (initialOption.dataset.filtered === 'true' ? (initialOption.title || 'all') : (initialOption.value || 'all')) : 'all');
         folderSelect.dataset.currentFolder = initialAssigned || 'all';
         if (initialOption) {
-          folderSelect.title = initialOption.title || initialOption.textContent || folderSelect.value;
+          const label = initialOption.dataset.displayName || resolveDisplay(initialOption.value || folderSelect.value);
+          folderSelect.title = label;
         } else {
-          folderSelect.title = folderSelect.dataset.currentFolder || 'all';
+          folderSelect.title = resolveDisplay(folderSelect.dataset.currentFolder || 'all');
         }
         folderSelect.addEventListener('change', e => {
           const selectEl = e.target;
           if (selectEl.value === '__filtered__') {
             const filteredOption = selectEl.options[selectEl.selectedIndex];
-            selectEl.title = filteredOption ? (filteredOption.title || filteredOption.textContent || selectEl.title) : selectEl.title;
+            if (filteredOption) {
+              const label = filteredOption.dataset.displayName || filteredOption.textContent || filteredOption.title || selectEl.title;
+              selectEl.title = label;
+            }
             return;
           }
           const folder = selectEl.value || 'all';
@@ -4677,9 +4714,10 @@
           }
           const selectedOption = selectEl.options[selectEl.selectedIndex];
           if (selectedOption) {
-            selectEl.title = selectedOption.title || selectedOption.textContent || folder;
+            const label = selectedOption.dataset.displayName || selectedOption.textContent || selectedOption.title || folder;
+            selectEl.title = label;
           } else {
-            selectEl.title = folder;
+            selectEl.title = resolveDisplay(folder);
           }
           card.dataset.selectedPath = '';
           card.dataset.selectedKind = '';
