@@ -543,16 +543,25 @@ class MediaManager:
                 if cache_mtime >= stat_info.st_mtime:
                     return cache_path, stat_info.st_mtime, etag
             ext = abs_path.suffix.lower()
-            if ext in IMAGE_EXTENSIONS:
-                image = self._render_image(abs_path, width, height)
-            elif ext in VIDEO_EXTENSIONS:
-                image = self._render_video(abs_path, width, height)
-                if image is None:
-                    image = _generate_placeholder("Video")
-            else:
-                image = _generate_placeholder(ext.upper() if ext else "File")
+            try:
+                if ext in IMAGE_EXTENSIONS:
+                    image = self._render_image(abs_path, width, height)
+                elif ext in VIDEO_EXTENSIONS:
+                    image = self._render_video(abs_path, width, height)
+                    if image is None:
+                        image = _generate_placeholder("Video")
+                else:
+                    image = _generate_placeholder(ext.upper() if ext else "File")
+            except Exception as exc:  # pragma: no cover - defensive fallback
+                logger.exception("Thumbnail generation failed for %s: %s", abs_path, exc)
+                label = "Video" if ext in VIDEO_EXTENSIONS else (ext.upper() if ext else "File")
+                image = _generate_placeholder(label)
             cache_path.parent.mkdir(parents=True, exist_ok=True)
-            image.save(cache_path, "JPEG", quality=70)
+            try:
+                image.save(cache_path, "JPEG", quality=70)
+            except Exception as exc:  # pragma: no cover
+                logger.exception("Unable to persist thumbnail for %s: %s", abs_path, exc)
+                raise MediaManagerError("Unable to create thumbnail", code="thumbnail_failed", status=500)
         return cache_path, stat_info.st_mtime, etag
 
     def _cache_key(self, path: Path, width: int, height: int, mtime: float) -> str:
