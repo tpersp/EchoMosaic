@@ -107,7 +107,17 @@ def _generate_placeholder(label: str = "Preview") -> Image.Image:
         font = ImageFont.truetype("DejaVuSans.ttf", PLACEHOLDER_FONT_SIZE)
     except Exception:  # pragma: no cover - font availability varies
         font = ImageFont.load_default()
-    text_width, text_height = drawer.textsize(text, font=font)
+    try:
+        bbox = drawer.textbbox((0, 0), text, font=font)
+        text_width = bbox[2] - bbox[0]
+        text_height = bbox[3] - bbox[1]
+    except AttributeError:  # pragma: no cover - older/newer Pillow compatibility
+        if hasattr(font, "getbbox"):
+            bbox = font.getbbox(text)
+            text_width = bbox[2] - bbox[0]
+            text_height = bbox[3] - bbox[1]
+        else:
+            text_width, text_height = font.getsize(text)  # type: ignore[attr-defined]
     x = (PLACEHOLDER_SIZE[0] - text_width) / 2
     y = (PLACEHOLDER_SIZE[1] - text_height) / 2
     drawer.text((x, y), text, fill=PLACEHOLDER_FG, font=font)
