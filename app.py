@@ -948,7 +948,6 @@ def initialize_image_cache() -> None:
     """Warm the cache for the root folder and any existing subfolders on startup."""
     refresh_image_cache("all", force=True)
     for root in AVAILABLE_MEDIA_ROOTS:
-        refresh_image_cache(root.alias, force=True)
         try:
             with os.scandir(root.path) as scan:
                 for entry in scan:
@@ -3643,7 +3642,6 @@ def get_subfolders(hide_nsfw: bool = False) -> List[str]:
     for root in AVAILABLE_MEDIA_ROOTS:
         if hide_nsfw and _path_contains_nsfw(root.alias):
             continue
-        _add(root.alias)
         try:
             with os.scandir(root.path) as scan:
                 for entry in scan:
