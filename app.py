@@ -27,7 +27,7 @@ try:
 except Exception:
     cv2 = None
 
-from werkzeug.http import generate_etag, http_date
+from werkzeug.http import generate_etag, http_date, quote_etag
 
 try:
     import requests
@@ -3325,12 +3325,18 @@ def _generate_placeholder_thumbnail(label: str) -> Image.Image:
     font = ImageFont.load_default()
     text = (label or '').strip() or 'No Preview'
     text = text.upper()
+    bbox = None
     try:
         bbox = draw.textbbox((0, 0), text, font=font)
+    except AttributeError:
+        if hasattr(font, 'getbbox'):
+            bbox = font.getbbox(text)
+    if bbox:
         text_width = bbox[2] - bbox[0]
         text_height = bbox[3] - bbox[1]
-    except AttributeError:
-        text_width, text_height = draw.textsize(text, font=font)
+    else:
+        # Final fallback for very old Pillow where bbox helpers are unavailable.
+        text_width, text_height = font.getsize(text)  # type: ignore[attr-defined]
     x = max((DASHBOARD_THUMBNAIL_SIZE[0] - text_width) // 2, 4)
     y = max((DASHBOARD_THUMBNAIL_SIZE[1] - text_height) // 2, 4)
     draw.text((x, y), text, fill=(210, 210, 210), font=font)
@@ -3893,20 +3899,26 @@ def api_media_thumbnail():
         thumb_path, source_mtime, etag = MEDIA_MANAGER.get_thumbnail(path, width=width, height=height)
     except MediaManagerError as exc:
         return _media_error_response(exc)
+    etag_value = str(etag)
+    weak = False
+    if etag_value.startswith("W/"):
+        weak = True
+        etag_value = etag_value[2:]
+    etag_value = etag_value.strip('"')
+    quoted_etag = quote_etag(etag_value, weak=weak)
     incoming_etag = request.headers.get("If-None-Match")
-    if incoming_etag and incoming_etag == etag:
+    if incoming_etag and incoming_etag == quoted_etag:
         response = app.response_class(status=304)
-        response.headers["ETag"] = etag
+        response.headers["ETag"] = quoted_etag
         response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
         return response
     response = send_file(
         thumb_path,
         mimetype="image/jpeg",
         conditional=True,
-        etag=etag,
     )
     response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
-    response.headers["ETag"] = etag
+    response.headers["ETag"] = quoted_etag
     response.headers["Last-Modified"] = http_date(source_mtime)
     return response
 
