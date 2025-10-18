@@ -1704,8 +1704,9 @@
     const gdata = name ? (groups[name]||[]) : [];
     const initial = Array.isArray(gdata) ? gdata.slice() : ((gdata?.streams || []).slice());
     const order = Array.isArray(initial) ? initial.slice() : [];
-    const members = new Set(order);
     const gLayout = Array.isArray(gdata) ? {} : (gdata?.layout || {});
+    function uniqueMembers() { return Array.from(new Set(order)); }
+    function hasMember(id) { return order.includes(id); }
     const isNew = !name;
     const tile = makeEl('div', {class:'group-tile'}, []);
     const header = makeEl('div', {class:'tile-header'}, []);
@@ -1899,50 +1900,50 @@
     function candidates(query) {
       const q = (query||'').toLowerCase();
       return Object.keys(streamsMeta)
-        .filter(id => !members.has(id))
         .filter(id => labelOf(id).toLowerCase().includes(q))
         .sort((a,b) => labelOf(a).localeCompare(labelOf(b)));
     }
     function refreshTitleCount() {
-      const count = members.size;
+      const count = order.length;
       title.textContent = (tile.querySelector('.tile-name')?.value?.trim() || name || 'New Group') + ` (${count})`;
     }
     function refreshPipSelects() {
-      const mem = order.slice();
-      let mainSel = gLayout.pip_main && members.has(gLayout.pip_main) ? gLayout.pip_main : (mem[0] || '');
-      let pipSel = gLayout.pip_pip && members.has(gLayout.pip_pip) ? gLayout.pip_pip : (mem.find(x=>x!==mainSel) || '');
-      // ensure different
-      if (pipSel === mainSel) pipSel = mem.find(x=>x!==mainSel) || '';
+      const mem = uniqueMembers();
+      let mainSel = gLayout.pip_main && hasMember(gLayout.pip_main) ? gLayout.pip_main : (mem[0] || '');
+      let pipSel = gLayout.pip_pip && hasMember(gLayout.pip_pip) ? gLayout.pip_pip : ((mem.length > 1 ? mem[1] : mem[0]) || '');
       // fill main
       pipMain.innerHTML = '';
       mem.forEach(id => {
         const o = makeEl('option', {value:id}, [labelOf(id)]);
         if (id === mainSel) o.selected = true;
-        // prevent selecting pip in main as well
-        if (id === pipSel) o.disabled = true;
         pipMain.appendChild(o);
       });
-      // fill pip (disable main selection)
+      // fill pip selection
       pipPip.innerHTML = '';
       mem.forEach(id => {
         const o = makeEl('option', {value:id}, [labelOf(id)]);
         if (id === pipSel) o.selected = true;
-        if (id === mainSel) o.disabled = true;
         pipPip.appendChild(o);
       });
+      pipMain.value = mainSel || '';
+      pipPip.value = pipSel || '';
+      gLayout.pip_main = pipMain.value || null;
+      gLayout.pip_pip = pipPip.value || null;
       // corner and size
       Array.from(pipCorner.options).forEach(opt => opt.selected = (opt.value === (gLayout.pip_corner || 'bottom-right')));
       pipSize.value = gLayout.pip_size || 25;
     }
     function refreshFocusMainOptions() {
-      const mem = Array.from(members);
+      const mem = uniqueMembers();
       focusMain.innerHTML = '';
       mem.forEach(id => {
         const o = makeEl('option', {value:id}, [labelOf(id)]);
         focusMain.appendChild(o);
       });
-      const desired = gLayout.focus_main && members.has(gLayout.focus_main) ? gLayout.focus_main : (mem[0] || '');
+      const desired = gLayout.focus_main && hasMember(gLayout.focus_main) ? gLayout.focus_main : (mem[0] || '');
       Array.from(focusMain.options).forEach(o => o.selected = (o.value===desired));
+      focusMain.value = desired || '';
+      gLayout.focus_main = focusMain.value || null;
     }
     function updateLayoutVisibility() {
       const v = layoutSelect.value;
@@ -1974,7 +1975,7 @@
       if (v==='pip') return 2;
       return Infinity;
     }
-    let draggingId = null;
+    let draggingIndex = null;
     function refreshChips() {
       chips.innerHTML = '';
       const list = makeEl('ul', {class:'member-list'}, []);
@@ -1982,19 +1983,17 @@
       order.forEach((id, idx) => {
         const li = makeEl('li', {class:'member-item' + (idx >= cap ? ' overflow' : '')}, []);
         li.setAttribute('draggable', 'true');
-        li.dataset.id = id;
         const nameSpan = makeEl('span', {class:'member-name'}, [labelOf(id)]);
         const rm = makeEl('button', {class:'member-remove', title:'Remove'}, ['Remove']);
         rm.addEventListener('click', () => {
-          members.delete(id);
-          const i = order.indexOf(id); if (i>=0) order.splice(i,1);
+          order.splice(idx, 1);
           refreshDatalist();
           refreshChips();
           refreshPipSelects();
           refreshFocusMainOptions();
         });
         li.addEventListener('dragstart', (e) => {
-          draggingId = id;
+          draggingIndex = idx;
           try { e.dataTransfer.setData('text/plain', id); } catch {}
           e.dataTransfer.effectAllowed = 'move';
         });
@@ -2011,19 +2010,20 @@
         li.addEventListener('drop', (e) => {
           e.preventDefault();
           li.classList.remove('drag-over-top','drag-over-bottom');
-          const fromId = draggingId; draggingId = null;
-          if (!fromId || fromId === id) return;
-          const fromIdx = order.indexOf(fromId);
-          const targetIdx = order.indexOf(id);
-          if (fromIdx < 0 || targetIdx < 0) return;
+          if (draggingIndex === null || draggingIndex === idx) {
+            draggingIndex = null;
+            return;
+          }
+          const fromIdx = draggingIndex;
           const rect = li.getBoundingClientRect();
           const before = (e.clientY - rect.top) < rect.height/2;
-          // Remove from old spot
-          order.splice(fromIdx, 1);
-          // Recompute target index after removal
-          let insertAt = order.indexOf(id);
-          insertAt = before ? insertAt : insertAt + 1;
-          order.splice(insertAt, 0, fromId);
+          const item = order.splice(fromIdx, 1)[0];
+          let target = before ? idx : idx + 1;
+          if (fromIdx < target) target -= 1;
+          if (target < 0) target = 0;
+          if (target > order.length) target = order.length;
+          order.splice(target, 0, item);
+          draggingIndex = null;
           refreshChips();
           refreshPipSelects();
           refreshFocusMainOptions();
@@ -2031,7 +2031,7 @@
         li.addEventListener('dragend', () => {
           const els = list.querySelectorAll('.drag-over-top,.drag-over-bottom');
           els.forEach(el => el.classList.remove('drag-over-top','drag-over-bottom'));
-          draggingId = null;
+          draggingIndex = null;
         });
         li.appendChild(nameSpan);
         li.appendChild(rm);
@@ -2056,18 +2056,18 @@
       if (!q) return null;
       // try exact label match first
       const byLabel = candidates('').find(id => labelOf(id).toLowerCase() === q.toLowerCase());
-      if (byLabel && !members.has(byLabel)) return byLabel;
+      if (byLabel) return byLabel;
       // fallback: if only one candidate matches substring, use it
       const cands = candidates(q);
       if (cands.length === 1) return cands[0];
       // also allow exact id match
-      if (!members.has(q) && streamsMeta[q]) return q;
+      if (streamsMeta[q]) return q;
       return null;
     }
     addBtn.addEventListener('click', () => {
       const id = resolveSingleSelection();
       if (!id) return;
-      members.add(id); order.push(id);
+      order.push(id);
       combo.value = '';
       refreshDatalist();
       refreshChips();
@@ -2076,7 +2076,7 @@
     });
     addAllBtn.addEventListener('click', () => {
       const q = combo.value;
-      candidates(q).forEach(id => { members.add(id); order.push(id); });
+      candidates(q).forEach(id => { order.push(id); });
       combo.value = '';
       refreshDatalist();
       refreshChips();
@@ -2084,7 +2084,7 @@
       updateLayoutVisibility();
     });
     removeAllBtn.addEventListener('click', () => {
-      members.clear(); order.splice(0, order.length);
+      order.splice(0, order.length);
       combo.value = '';
       refreshDatalist();
       refreshChips();
@@ -2092,8 +2092,8 @@
       updateLayoutVisibility();
     });
     layoutSelect.addEventListener('change', updateLayoutVisibility);
-    pipMain.addEventListener('change', () => { gLayout.pip_main = pipMain.value; if (gLayout.pip_main === gLayout.pip_pip) { gLayout.pip_pip = Array.from(members).find(x=>x!==gLayout.pip_main) || ''; } refreshPipSelects(); });
-    pipPip.addEventListener('change', () => { gLayout.pip_pip = pipPip.value; if (gLayout.pip_main === gLayout.pip_pip) { gLayout.pip_main = Array.from(members).find(x=>x!==gLayout.pip_pip) || ''; } refreshPipSelects(); });
+    pipMain.addEventListener('change', () => { gLayout.pip_main = pipMain.value || null; refreshPipSelects(); });
+    pipPip.addEventListener('change', () => { gLayout.pip_pip = pipPip.value || null; refreshPipSelects(); });
     const btns = makeEl('div', {class:'tile-buttons'}, []);
     const save = makeEl('button', {class:'tile-save'}, ['Save']);
     const cancel = makeEl('button', {class:'tile-cancel'}, ['Cancel']);

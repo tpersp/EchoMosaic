@@ -1043,14 +1043,12 @@ def _sanitize_group_collection_for_import(raw_groups: Any, valid_streams: Set[st
             streams_raw = payload.get('streams')
             cleaned: List[str] = []
             if isinstance(streams_raw, (list, tuple)):
-                seen: Set[str] = set()
                 for entry in streams_raw:
                     if not isinstance(entry, str):
                         continue
                     candidate = entry.strip()
-                    if candidate in valid_streams and candidate not in seen:
+                    if candidate in valid_streams:
                         cleaned.append(candidate)
-                        seen.add(candidate)
             layout = _normalize_group_layout(payload.get('layout'))
             entry: Dict[str, Any] = {'streams': cleaned}
             if layout:
@@ -1058,14 +1056,12 @@ def _sanitize_group_collection_for_import(raw_groups: Any, valid_streams: Set[st
             sanitized[trimmed] = entry
         elif isinstance(payload, (list, tuple)):
             cleaned = []
-            seen: Set[str] = set()
             for entry in payload:
                 if not isinstance(entry, str):
                     continue
                 candidate = entry.strip()
-                if candidate in valid_streams and candidate not in seen:
+                if candidate in valid_streams:
                     cleaned.append(candidate)
-                    seen.add(candidate)
             sanitized[trimmed] = cleaned
     return sanitized
 
@@ -5638,8 +5634,36 @@ def stream_group(name):
         layout_conf = _normalize_group_layout(group_def.get("layout"))
     else:
         members = list(group_def)
-    streams = {k: settings[k] for k in members if k in settings}
-    return render_template("streams.html", stream_settings=streams, mosaic_settings=layout_conf)
+    member_ids = [m for m in members if m in settings]
+    unique_ids: List[str] = []
+    seen_ids: Set[str] = set()
+    for stream_id in member_ids:
+        if stream_id not in seen_ids:
+            seen_ids.add(stream_id)
+            unique_ids.append(stream_id)
+    stream_lookup = {stream_id: settings[stream_id] for stream_id in unique_ids}
+    stream_entries = [(stream_id, stream_lookup[stream_id]) for stream_id in member_ids]
+    focus_order = list(member_ids)
+    if layout_conf and layout_conf.get("layout") == "focus":
+        focus_main_id = layout_conf.get("focus_main")
+        if focus_main_id in stream_lookup:
+            reordered: List[str] = [focus_main_id]
+            skipped = False
+            for stream_id in member_ids:
+                if stream_id == focus_main_id and not skipped:
+                    skipped = True
+                    continue
+                reordered.append(stream_id)
+            focus_order = reordered
+    return render_template(
+        "streams.html",
+        stream_settings=stream_lookup,
+        stream_entries=stream_entries,
+        stream_order=member_ids,
+        unique_stream_ids=unique_ids,
+        focus_order=focus_order,
+        mosaic_settings=layout_conf,
+    )
 
 @socketio.on("stream_subscribe")
 def handle_stream_subscribe(payload):

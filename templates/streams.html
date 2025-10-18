@@ -8,7 +8,15 @@
 </head>
 <body>
 <!-- NOTE: Do not add headers/toolbars here; keep the streams view UI-free. -->
-{% set stream_items = stream_settings.items()|list %}
+{% set stream_lookup = stream_settings if stream_settings is defined else {} %}
+{% set stream_items = stream_entries if stream_entries is defined else stream_lookup.items()|list %}
+{% set order_ns = namespace(ids=[]) %}
+{% for stream_id, _ in stream_items %}
+  {% set _ = order_ns.ids.append(stream_id) %}
+{% endfor %}
+{% set stream_order_ids = stream_order if stream_order is defined else order_ns.ids %}
+{% set unique_ids = unique_stream_ids if unique_stream_ids is defined else stream_lookup.keys()|list %}
+{% set focus_ids = focus_order if focus_order is defined else stream_order_ids %}
 {% set stream_count = stream_items|length %}
 {% if mosaic_settings is defined and mosaic_settings %}
   {% set layout = mosaic_settings %}
@@ -28,20 +36,21 @@
   <div id="mosaic" class="mosaic-grid layout-{{ layout_type }}{% if layout_type == 'pip' %} corner-{{ layout.pip_corner|default('bottom-right') }}{% endif %}" data-stream-count="{{ stream_count }}"{% if style_parts %} style="{{ style_parts|join('; ') }}"{% endif %}>
     {% if stream_items %}
       {% if layout_type == 'pip' %}
-        {% set ids = stream_settings.keys()|list %}
-        {% set main_id = layout.pip_main if layout.pip_main in ids else (ids[0] if ids else None) %}
-        {% set alt_ids = ids|reject('equalto', main_id)|list %}
-        {% set pip_id = layout.pip_pip if layout.pip_pip in ids and layout.pip_pip != main_id else (alt_ids[0] if alt_ids else None) %}
+        {% set ids = stream_order_ids %}
+        {% set main_id = layout.pip_main if layout.pip_main in stream_lookup else (ids[0] if ids else None) %}
+        {% set pip_id = layout.pip_pip if layout.pip_pip in stream_lookup else (ids[1] if ids|length > 1 else (ids[0] if ids else None)) %}
         {% if main_id %}
         <div class="mosaic-cell main">
-          {% set conf = stream_settings[main_id] %}
+          {% set conf = stream_lookup[main_id] %}
           <iframe src="{{ url_for('render_stream', name=(conf.label if conf.label else main_id)|slugify) }}" allow="autoplay" loading="lazy" scrolling="no"></iframe>
         </div>
           {% if pip_id %}
+          {% set pip_conf = stream_lookup.get(pip_id) %}
+          {% if pip_conf %}
           <div class="mosaic-cell pip">
-            {% set pip_conf = stream_settings[pip_id] %}
             <iframe src="{{ url_for('render_stream', name=(pip_conf.label if pip_conf.label else pip_id)|slugify) }}" allow="autoplay" loading="lazy" scrolling="no"></iframe>
           </div>
+          {% endif %}
           {% endif %}
         {% else %}
           {% for stream_id, conf in stream_items %}
@@ -54,8 +63,7 @@
         {% set mode = layout.focus_mode or '1-5' %}
         {% if mode not in ['1-2', '1-3', '1-5'] %}{% set mode = '1-5' %}{% endif %}
         {% set pos = layout.focus_pos or ('right' if mode == '1-2' else ('bottom' if mode == '1-3' else 'bottom-right')) %}
-        {% set ids = stream_settings.keys()|list %}
-        {% set focus_candidate = layout.focus_main if layout.focus_main in ids else (ids[0] if ids else None) %}
+        {% set ids = focus_ids %}
         {% if mode == '1-2' %}
           {% set gcols = 2 %}{% set grows = 2 %}
           {% if pos == 'right' %}
@@ -85,19 +93,14 @@
           {% endif %}
           {% set slots = ['main','a','b','c','d','e'] %}
         {% endif %}
-        {% if focus_candidate %}
-          {% set ordered_ids = [focus_candidate] + (ids|reject('equalto', focus_candidate)|list) %}
-        {% else %}
-          {% set ordered_ids = ids %}
-        {% endif %}
-        {% set count = [slots|length, ordered_ids|length]|min %}
+        {% set count = [slots|length, ids|length]|min %}
         {% if count %}
         <div class="focus-grid" style="grid-template-columns:repeat({{gcols}},1fr);grid-template-rows:repeat({{grows}},1fr);grid-template-areas:{% for row in areas %}'{{ row|join(' ') }}'{% if not loop.last %} {% endif %}{% endfor %};">
           {% for i in range(count) %}
-            {% set stream_id = ordered_ids[i] %}
+            {% set stream_id = ids[i] %}
             {% set area = slots[i] %}
-            {% if stream_id in stream_settings %}
-            {% set conf = stream_settings[stream_id] %}
+            {% if stream_id in stream_lookup %}
+            {% set conf = stream_lookup[stream_id] %}
             <div class="mosaic-cell" style="grid-area: {{ area }};">
               <iframe src="{{ url_for('render_stream', name=(conf.label if conf.label else stream_id)|slugify) }}" allow="autoplay" loading="lazy" scrolling="no"></iframe>
             </div>
