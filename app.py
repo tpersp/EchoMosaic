@@ -424,6 +424,60 @@ def _youtube_cache_key(details: Dict[str, Any]) -> Tuple[str, ...]:
     return ("url", canonical)
 
 
+def _youtube_oembed_html_says_live(oembed: Optional[Dict[str, Any]]) -> bool:
+    if not isinstance(oembed, dict):
+        return False
+    html = oembed.get("html")
+    if isinstance(html, str) and "live_stream" in html.lower():
+        return True
+    live_broadcast = oembed.get("is_live") or oembed.get("live_broadcast")
+    if isinstance(live_broadcast, str):
+        return live_broadcast.strip().lower() in {"1", "true", "yes", "live"}
+    if isinstance(live_broadcast, (int, float)):
+        return bool(live_broadcast)
+    if isinstance(live_broadcast, bool):
+        return live_broadcast
+    return False
+
+
+def _youtube_page_looks_live(details: Dict[str, Any]) -> Optional[bool]:
+    if requests is None:
+        return None
+    url_candidates: List[str] = []
+    for key in ("canonical_url", "original_url", "embed_base"):
+        candidate = details.get(key)
+        if isinstance(candidate, str) and candidate and candidate not in url_candidates:
+            url_candidates.append(candidate)
+    if not url_candidates:
+        return None
+    headers = {
+        "User-Agent": "EchoMosaic/1.0 (+https://github.com/dodenbear/EchoMosaic)"
+    }
+    for url in url_candidates:
+        try:
+            resp = requests.get(url, headers=headers, timeout=5)
+            resp.raise_for_status()
+        except Exception as exc:
+            logger.debug("YouTube live probe failed for %s: %s", url, exc)
+            continue
+        text_body = resp.text if isinstance(resp.text, str) else ""
+        if not text_body:
+            try:
+                text_body = resp.content.decode("utf-8", "ignore")
+            except Exception:
+                text_body = ""
+        snippet = text_body[:200000].lower()
+        if not snippet:
+            continue
+        if any(marker in snippet for marker in YOUTUBE_LIVE_HTML_MARKERS):
+            return True
+        if '"livebroadcastdetails"' in snippet and '"islive":true' in snippet:
+            return True
+        if '"livebroadcastdetails"' in snippet and '"islivenow":true' in snippet:
+            return True
+    return False
+
+
 def _derive_youtube_content_type(
     details: Dict[str, Any], oembed: Optional[Dict[str, Any]] = None
 ) -> str:
@@ -440,12 +494,17 @@ def _derive_youtube_content_type(
                     return "playlist"
                 if lowered == "live":
                     return "live"
+        if _youtube_oembed_html_says_live(oembed):
+            return "live"
     title = ""
     if isinstance(oembed, dict):
         title_candidate = oembed.get("title")
         if isinstance(title_candidate, str):
             title = title_candidate.lower()
     if " live " in f" {title} " or title.startswith("live "):
+        return "live"
+    probe = _youtube_page_looks_live(details)
+    if probe:
         return "live"
     return "video"
 
@@ -582,6 +641,20 @@ YOUTUBE_OEMBED_ENDPOINT = "https://www.youtube.com/oembed"
 YOUTUBE_OEMBED_CACHE_TTL = 20 * 60  # 20 minutes
 YOUTUBE_OEMBED_CACHE: Dict[Tuple[str, ...], Dict[str, Any]] = {}
 YOUTUBE_OEMBED_CACHE_LOCK = threading.Lock()
+YOUTUBE_LIVE_HTML_MARKERS = (
+    '"islive":true',
+    '"islive":1',
+    '"islivecontent":true',
+    '"islivebroadcast":true',
+    '"broadcaststatus":"live"',
+    '"playbackmode":"livestream"',
+    '"playerstate":"live_stream"',
+    '"livenow":true',
+    '"livestreamabilityrenderer"',
+    '"live_streamability"',
+    '"thumbnailoverlaytimestatusrenderer":{"style":"live"',
+    '"livebroadcastdetails":{"',
+)
 
 STREAM_PLAYBACK_HISTORY_LIMIT = 50
 STREAM_UPDATE_EVENT = "stream_update"

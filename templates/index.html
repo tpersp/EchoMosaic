@@ -116,14 +116,6 @@
           <div class="title-row">
             <h2><a class="stream-link" href="{{ url_for('render_stream', name=(conf.label if conf.label else stream_id)|slugify) }}" target="_blank">{{ conf.label if conf.label else stream_id|capitalize }}</a></h2>
           </div>
-          {% set type_badges = {'video': '🎥 Video', 'playlist': '🎵 Playlist', 'live': '🔴 Live'} %}
-          <div class="now-playing-line" data-stream="{{ stream_id }}" {% if not embed_title %}hidden{% endif %}>
-            <span class="now-playing-prefix">Now Playing:</span>
-            <span class="now-playing-title">{{ embed_title }}</span>
-            {% if embed_type %}
-            <span class="now-playing-type">{{ type_badges.get(embed_type, embed_type|capitalize) }}</span>
-            {% endif %}
-          </div>
         </div>
         <div class="card-menu" data-stream="{{ stream_id }}">
           <button class="menu-button" aria-haspopup="true" aria-expanded="false" title="More"><span class="burger"></span></button>
@@ -277,7 +269,15 @@
               <input id="stream-url-{{ stream_id }}" type="text" class="stream-url-input" data-stream="{{ stream_id }}" value="{{ conf.stream_url if conf.stream_url else '' }}" placeholder="https://example.com/">
               <span class="url-type-badge" aria-live="polite"></span>
               <span class="embed-status-badge" aria-live="polite"></span>
+              {% set show_embed_type_badge = embed_type and embed_provider and embed_provider|lower == 'youtube' %}
+              <span class="embed-type-badge" aria-live="polite" {% if not show_embed_type_badge %}hidden{% endif %}{% if show_embed_type_badge %} data-type="{{ embed_type }}"{% endif %}>{% if show_embed_type_badge %}{{ embed_type|capitalize }}{% endif %}</span>
             </div>
+          </div>
+        </div>
+        <div class="form-row playing-row" data-stream="{{ stream_id }}" {% if not embed_title %}hidden{% endif %}>
+          <label>Playing:</label>
+          <div class="playing-field">
+            <span class="playing-title">{{ embed_title }}</span>
           </div>
         </div>
 
@@ -737,9 +737,9 @@
   const SYSTEM_MONITOR_POLL_MS = 10000;
   let systemMonitorIntervalId = null;
   const NOW_PLAYING_LABELS = {
-    video: '🎥 Video',
-    playlist: '🎵 Playlist',
-    live: '🔴 Live',
+    video: 'Video',
+    playlist: 'Playlist',
+    live: 'Live',
   };
 
   function normalizeNumber(value) {
@@ -952,9 +952,10 @@
 
   function updateNowPlaying(card, metadata) {
     if (!card) return;
-    const line = card.querySelector('.now-playing-line');
-    const titleEl = line ? line.querySelector('.now-playing-title') : null;
-    const typeEl = line ? line.querySelector('.now-playing-type') : null;
+    const row = card.querySelector('.playing-row');
+    const titleEl = row ? row.querySelector('.playing-title') : null;
+    const typeBadge = card.querySelector('.embed-type-badge');
+    const urlBadge = card.querySelector('.url-type-badge');
     const meta = metadata || {};
     const title = typeof meta.title === 'string' ? meta.title.trim() : (card.dataset.embedTitle || '');
     const rawType = typeof meta.content_type === 'string' ? meta.content_type.trim().toLowerCase() : (card.dataset.embedType || '').toLowerCase();
@@ -962,31 +963,31 @@
     card.dataset.embedTitle = title || '';
     card.dataset.embedType = rawType || '';
     card.dataset.embedProvider = provider || '';
-    if (!line) {
-      return;
-    }
-    if (title) {
-      line.hidden = false;
-      if (titleEl) {
-        titleEl.textContent = title;
-      }
-      if (typeEl) {
-        if (rawType) {
-          typeEl.hidden = false;
-          typeEl.textContent = NOW_PLAYING_LABELS[rawType] || (rawType.charAt(0).toUpperCase() + rawType.slice(1));
-        } else {
-          typeEl.hidden = true;
-          typeEl.textContent = '';
+    if (row) {
+      if (title) {
+        row.hidden = false;
+        if (titleEl) {
+          titleEl.textContent = title;
+        }
+      } else {
+        row.hidden = true;
+        if (titleEl) {
+          titleEl.textContent = '';
         }
       }
-    } else {
-      line.hidden = true;
-      if (titleEl) {
-        titleEl.textContent = '';
-      }
-      if (typeEl) {
-        typeEl.hidden = true;
-        typeEl.textContent = '';
+    }
+    if (typeBadge) {
+      const providerMatch = (provider || '').trim().toLowerCase();
+      const urlType = urlBadge ? (urlBadge.dataset.type || '') : '';
+      const shouldShow = rawType && (providerMatch === 'youtube' || urlType === 'youtube');
+      if (shouldShow) {
+        typeBadge.hidden = false;
+        typeBadge.textContent = NOW_PLAYING_LABELS[rawType] || (rawType.charAt(0).toUpperCase() + rawType.slice(1));
+        typeBadge.dataset.type = rawType;
+      } else {
+        typeBadge.hidden = true;
+        typeBadge.textContent = '';
+        delete typeBadge.dataset.type;
       }
     }
   }
@@ -4440,6 +4441,7 @@
     const shuffleChk = card.querySelector('.shuffle-chk');
     const shuffleLabel = shuffleChk ? shuffleChk.closest('label') : null;
     const urlDiv = card.querySelector('.stream-url-container');
+    const playingRow = card.querySelector('.playing-row');
     const imagePicker = card.querySelector('.image-picker');
     const variantWrapper = card.querySelector('.mode-variant-wrapper');
     const modeSelect = card.querySelector('.mode-select');
@@ -4484,6 +4486,7 @@
     if (durationDiv) durationDiv.style.display = (isRandom && (isImage || isVideo)) ? '' : 'none';
     if (shuffleLabel) shuffleLabel.style.display = (isRandom && (isImage || isVideo)) ? '' : 'none';
     if (urlDiv) urlDiv.style.display = isLivestream ? '' : 'none';
+    if (playingRow) playingRow.style.display = isLivestream ? '' : 'none';
     if (imagePicker) imagePicker.style.display = (isSpecific && (isImage || isVideo)) ? '' : 'none';
     if (videoModeRow) videoModeRow.style.display = (isVideo && isRandom) ? '' : 'none';
     if (playbackRow) playbackRow.style.display = isVideo ? '' : 'none';
@@ -4970,11 +4973,22 @@
       // URL helpers: type badge + background embed test + save
       function setUrlBadge(url) {
         const badge = card.querySelector('.url-type-badge');
+        const typeBadge = card.querySelector('.embed-type-badge');
         if (!badge) return;
         const t = detectUrlType(url);
         badge.textContent = t || '';
-        badge.dataset.type = (t || '').toLowerCase();
+        const datasetType = (t || '').toLowerCase();
+        if (datasetType) {
+          badge.dataset.type = datasetType;
+        } else {
+          delete badge.dataset.type;
+        }
         badge.style.visibility = t ? 'visible' : 'hidden';
+        if (typeBadge && datasetType !== 'youtube') {
+          typeBadge.hidden = true;
+          typeBadge.textContent = '';
+          delete typeBadge.dataset.type;
+        }
       }
       let testAbort = null;
       let testTimer = null;
