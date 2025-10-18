@@ -1,0 +1,7 @@
+# Ignore user and local configuration
+config.json
+.env
+
+# Ignore local cache or temporary files
+__pycache__/
+*.pyc
