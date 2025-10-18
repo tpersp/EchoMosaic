@@ -170,15 +170,25 @@ MEDIA_MODE_VARIANTS = {
     MEDIA_MODE_PICSUM: {MEDIA_MODE_PICSUM},
 }
 
+DEFAULT_MEDIA_ROOT_PATH = Path(os.path.abspath("./media")).resolve()
+
 CONFIG: Dict[str, Any] = config_manager.load_config()
-config_manager.validate_media_paths(CONFIG.get("MEDIA_PATHS", []))
 MEDIA_ROOTS = config_manager.build_media_roots(CONFIG.get("MEDIA_PATHS", []))
 if not MEDIA_ROOTS:
-    default_path = Path(os.path.abspath("./media"))
+    default_path = DEFAULT_MEDIA_ROOT_PATH
     default_alias = default_path.name or "media"
     MEDIA_ROOTS = [
         config_manager.MediaRoot(alias=default_alias, path=default_path, display_name=default_alias)
     ]
+
+for root in MEDIA_ROOTS:
+    try:
+        if root.path.resolve(strict=False) == DEFAULT_MEDIA_ROOT_PATH:
+            root.path.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        logger.warning("Unable to ensure media directory %s: %s", root.path, exc)
+
+config_manager.validate_media_paths([root.path.as_posix() for root in MEDIA_ROOTS])
 
 AVAILABLE_MEDIA_ROOTS: List[config_manager.MediaRoot] = []
 for candidate_root in MEDIA_ROOTS:
