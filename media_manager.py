@@ -48,7 +48,7 @@ PLACEHOLDER_BG = (24, 24, 24)
 PLACEHOLDER_FG = (215, 215, 215)
 PLACEHOLDER_FONT_SIZE = 24
 
-ListablePath = Union[str, Path]
+ListablePath = Union[str, Path, "VirtualPath"]
 
 try:  # Pillow >= 9.1
     _RESAMPLING_FILTER = Image.Resampling.LANCZOS  # type: ignore[attr-defined]
@@ -153,6 +153,8 @@ class MediaManager:
     # Path helpers
     # ----------------------------------------------------------------------
     def _normalize_virtual_path(self, value: ListablePath) -> VirtualPath:
+        if isinstance(value, VirtualPath):
+            return value
         if isinstance(value, Path):
             text = value.as_posix()
         else:
