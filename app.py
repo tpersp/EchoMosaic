@@ -390,11 +390,11 @@ def _parse_youtube_url_details(url: str) -> Optional[Dict[str, Any]]:
 
     embed_base: str
     if playlist_id:
-        embed_base = "https://www.youtube.com/embed/videoseries"
+        embed_base = "https://www.youtube-nocookie.com/embed/videoseries"
     elif video_id:
-        embed_base = f"https://www.youtube.com/embed/{video_id}"
+        embed_base = f"https://www.youtube-nocookie.com/embed/{video_id}"
     else:
-        embed_base = "https://www.youtube.com/embed/"
+        embed_base = "https://www.youtube-nocookie.com/embed/"
 
     return {
         "original_url": candidate,
@@ -443,6 +443,15 @@ def _youtube_oembed_html_says_live(oembed: Optional[Dict[str, Any]]) -> bool:
 def _youtube_page_looks_live(details: Dict[str, Any]) -> Optional[bool]:
     if requests is None:
         return None
+    cache_key = _youtube_cache_key(details)
+    now = time.time()
+    with YOUTUBE_LIVE_PROBE_CACHE_LOCK:
+        cached = YOUTUBE_LIVE_PROBE_CACHE.get(cache_key)
+        if (
+            cached
+            and now - cached.get("timestamp", 0) < YOUTUBE_LIVE_PROBE_CACHE_TTL
+        ):
+            return cached.get("result")
     url_candidates: List[str] = []
     for key in ("canonical_url", "original_url", "embed_base"):
         candidate = details.get(key)
@@ -451,31 +460,54 @@ def _youtube_page_looks_live(details: Dict[str, Any]) -> Optional[bool]:
     if not url_candidates:
         return None
     headers = {
-        "User-Agent": "EchoMosaic/1.0 (+https://github.com/dodenbear/EchoMosaic)"
+        "User-Agent": "EchoMosaic/1.0 (+https://github.com/dodenbear/EchoMosaic)",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
     }
+    result: Optional[bool] = None
     for url in url_candidates:
         try:
-            resp = requests.get(url, headers=headers, timeout=5)
+            resp = requests.get(url, headers=headers, timeout=5, stream=True)
             resp.raise_for_status()
         except Exception as exc:
             logger.debug("YouTube live probe failed for %s: %s", url, exc)
             continue
-        text_body = resp.text if isinstance(resp.text, str) else ""
-        if not text_body:
-            try:
-                text_body = resp.content.decode("utf-8", "ignore")
-            except Exception:
-                text_body = ""
-        snippet = text_body[:200000].lower()
+        encoding = resp.encoding or "utf-8"
+        text_bytes = bytearray()
+        try:
+            for chunk in resp.iter_content(chunk_size=4096, decode_unicode=False):
+                if not chunk:
+                    continue
+                text_bytes.extend(chunk)
+                if len(text_bytes) >= YOUTUBE_LIVE_PROBE_MAX_BYTES:
+                    break
+        finally:
+            resp.close()
+        if not text_bytes:
+            continue
+        try:
+            snippet_text = text_bytes.decode(encoding, "ignore")
+        except Exception:
+            snippet_text = text_bytes.decode("utf-8", "ignore")
+        snippet = snippet_text.lower()
         if not snippet:
             continue
         if any(marker in snippet for marker in YOUTUBE_LIVE_HTML_MARKERS):
-            return True
+            result = True
+            break
         if '"livebroadcastdetails"' in snippet and '"islive":true' in snippet:
-            return True
+            result = True
+            break
         if '"livebroadcastdetails"' in snippet and '"islivenow":true' in snippet:
-            return True
-    return False
+            result = True
+            break
+    if result is None:
+        result = False
+    with YOUTUBE_LIVE_PROBE_CACHE_LOCK:
+        YOUTUBE_LIVE_PROBE_CACHE[cache_key] = {
+            "timestamp": time.time(),
+            "result": result,
+        }
+    return result
 
 
 def _derive_youtube_content_type(
@@ -641,6 +673,10 @@ YOUTUBE_OEMBED_ENDPOINT = "https://www.youtube.com/oembed"
 YOUTUBE_OEMBED_CACHE_TTL = 20 * 60  # 20 minutes
 YOUTUBE_OEMBED_CACHE: Dict[Tuple[str, ...], Dict[str, Any]] = {}
 YOUTUBE_OEMBED_CACHE_LOCK = threading.Lock()
+YOUTUBE_LIVE_PROBE_CACHE_TTL = 15 * 60  # 15 minutes
+YOUTUBE_LIVE_PROBE_CACHE: Dict[Tuple[str, ...], Dict[str, Any]] = {}
+YOUTUBE_LIVE_PROBE_CACHE_LOCK = threading.Lock()
+YOUTUBE_LIVE_PROBE_MAX_BYTES = 30_000
 YOUTUBE_LIVE_HTML_MARKERS = (
     '"islive":true',
     '"islive":1',
@@ -654,6 +690,7 @@ YOUTUBE_LIVE_HTML_MARKERS = (
     '"live_streamability"',
     '"thumbnailoverlaytimestatusrenderer":{"style":"live"',
     '"livebroadcastdetails":{"',
+    'itemprop="islivebroadcast"',
 )
 
 STREAM_PLAYBACK_HISTORY_LIMIT = 50
@@ -5776,8 +5813,8 @@ def _classify_embed_target(url: str):
             except Exception:
                 vid = None
         if vid:
-            return "youtube", f"https://www.youtube.com/embed/{vid}"
-        return "youtube", "https://www.youtube.com/embed/"
+            return "youtube", f"https://www.youtube-nocookie.com/embed/{vid}"
+        return "youtube", "https://www.youtube-nocookie.com/embed/"
     if "twitch.tv" in lu:
         try:
             channel = u.split("twitch.tv/")[1].split("/")[0]

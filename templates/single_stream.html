@@ -233,13 +233,22 @@ async function loadYouTubeEmbed(container, config, data) {
     const YT = await ensureYouTubeIframeApi();
     const playerVars = {
       autoplay: 1,
-      controls: 1,
+      controls: 0,
       rel: 0,
       modestbranding: 1,
       playsinline: 1,
-      cc_load_policy: config && config.yt_cc ? 1 : 0,
+      loop: 0,
+      disablekb: 1,
+      fs: 0,
+      iv_load_policy: 3,
       enablejsapi: 1,
     };
+    if (config && config.yt_cc) {
+      playerVars.cc_load_policy = 1;
+    }
+    if (window.location && window.location.origin) {
+      playerVars.origin = window.location.origin;
+    }
 
     const contentType = (data && data.content_type) ? String(data.content_type).toLowerCase() : 'video';
     const videoId = data && data.video_id ? String(data.video_id) : undefined;
@@ -261,6 +270,7 @@ async function loadYouTubeEmbed(container, config, data) {
     }
 
     youTubePlayer = new YT.Player(playerId, {
+      host: 'https://www.youtube-nocookie.com',
       videoId: videoId,
       playerVars,
       events: {
