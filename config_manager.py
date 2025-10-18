@@ -39,6 +39,19 @@ DEFAULT_CONFIG_FALLBACK: Dict[str, Any] = {
     "LIVE_HLS_MAX_WORKERS": 3,
     "LIVE_HLS_ERROR_RETRY_SECS": 30,
     "MEDIA_PATHS": ["./media"],
+    "MEDIA_MANAGEMENT_ALLOW_EDIT": True,
+    "MEDIA_UPLOAD_MAX_MB": 256,
+    "MEDIA_ALLOWED_EXTS": [
+        ".png",
+        ".jpg",
+        ".jpeg",
+        ".webp",
+        ".gif",
+        ".mp4",
+        ".webm",
+        ".mkv",
+    ],
+    "MEDIA_THUMB_WIDTH": 320,
 }
 
 

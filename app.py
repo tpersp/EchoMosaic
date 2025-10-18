@@ -27,7 +27,7 @@ try:
 except Exception:
     cv2 = None
 
-from werkzeug.http import generate_etag
+from werkzeug.http import generate_etag, http_date
 
 try:
     import requests
@@ -45,6 +45,7 @@ from picsum import (
 from update_helpers import backup_user_state, restore_user_state
 from system_monitor import get_system_stats
 import config_manager
+from media_manager import MediaManager, MediaManagerError, MEDIA_MANAGER_CACHE_SUBDIR
 
 try:
     from yt_dlp import YoutubeDL  # type: ignore[import]
@@ -104,8 +105,70 @@ AI_TEMP_SUBDIR = "_ai_temp"
 AI_DEFAULT_PERSIST = True
 AI_POLL_INTERVAL = 5.0
 AI_TIMEOUT = 0.0
-INTERNAL_MEDIA_DIRS = {THUMBNAIL_SUBDIR, AI_TEMP_SUBDIR}
+INTERNAL_MEDIA_DIRS = {THUMBNAIL_SUBDIR, AI_TEMP_SUBDIR, MEDIA_MANAGER_CACHE_SUBDIR}
 IGNORED_MEDIA_PREFIX = "_"
+
+
+def _as_bool(value: Any, default: bool = False) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        stripped = value.strip().lower()
+        if not stripped:
+            return default
+        return stripped in {"1", "true", "yes", "on"}
+    if value is None:
+        return default
+    return bool(value)
+
+
+def _as_int(value: Any, default: int) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _normalize_extensions(value: Any) -> List[str]:
+    if isinstance(value, (list, tuple, set)):
+        raw_items = list(value)
+    elif isinstance(value, str):
+        stripped = value.strip()
+        if not stripped:
+            raw_items = []
+        else:
+            raw_items = [segment.strip() for segment in re.split(r"[,\s]+", stripped) if segment.strip()]
+    else:
+        raw_items = []
+    result: List[str] = []
+    for item in raw_items:
+        text = str(item).strip().lower()
+        if not text:
+            continue
+        if not text.startswith("."):
+            text = f".{text}"
+        if text not in result:
+            result.append(text)
+    if not result:
+        fallback_exts = sorted(set(IMAGE_EXTENSIONS) | set(VIDEO_EXTENSIONS))
+        result = list(fallback_exts)
+    return result
+
+
+def _virtual_leaf(virtual_path: str) -> str:
+    if not virtual_path:
+        return ""
+    candidate = virtual_path.rstrip("/")
+    if ":/" in candidate:
+        _, remainder = candidate.split(":/", 1)
+    else:
+        parts = candidate.split("/", 1)
+        remainder = parts[1] if len(parts) > 1 else parts[0]
+    remainder = remainder.strip("/")
+    if not remainder:
+        return ""
+    segments = remainder.split("/")
+    return segments[-1]
 
 
 def _should_ignore_media_name(name: Optional[str]) -> bool:
@@ -226,6 +289,32 @@ PRIMARY_MEDIA_ROOT = AVAILABLE_MEDIA_ROOTS[0]
 THUMBNAIL_CACHE_DIR = PRIMARY_MEDIA_ROOT.path / THUMBNAIL_SUBDIR
 
 NSFW_KEYWORD = "nsfw"
+
+MEDIA_MANAGEMENT_ALLOW_EDIT = _as_bool(CONFIG.get("MEDIA_MANAGEMENT_ALLOW_EDIT"), True)
+MEDIA_UPLOAD_MAX_MB = max(1, _as_int(CONFIG.get("MEDIA_UPLOAD_MAX_MB"), 256))
+MEDIA_ALLOWED_EXTS = _normalize_extensions(CONFIG.get("MEDIA_ALLOWED_EXTS"))
+MEDIA_THUMB_WIDTH = max(64, _as_int(CONFIG.get("MEDIA_THUMB_WIDTH"), 320))
+MEDIA_MANAGER = MediaManager(
+    roots=MEDIA_ROOTS,
+    allowed_exts=MEDIA_ALLOWED_EXTS,
+    max_upload_mb=MEDIA_UPLOAD_MAX_MB,
+    thumb_width=MEDIA_THUMB_WIDTH,
+    nsfw_keyword=NSFW_KEYWORD,
+    internal_dirs=INTERNAL_MEDIA_DIRS,
+)
+MEDIA_UPLOAD_MAX_BYTES = MEDIA_MANAGER.max_upload_bytes()
+
+
+def _media_error_response(exc: MediaManagerError):
+    status = getattr(exc, "status", 400) or 400
+    payload = {"error": exc.message, "code": exc.code}
+    return jsonify(payload), status
+
+
+def _require_media_edit() -> None:
+    if not MEDIA_MANAGEMENT_ALLOW_EDIT:
+        raise MediaManagerError("Media editing is disabled", code="forbidden", status=403)
+
 
 # Cache image paths per folder so we can serve repeated requests without rescanning the disk.
 IMAGE_CACHE: Dict[str, Dict[str, Any]] = {}
@@ -3697,6 +3786,131 @@ def get_folder_inventory(hide_nsfw: bool = False) -> List[Dict[str, Any]]:
     return inventory
 
 
+@app.route("/api/media/list", methods=["GET"])
+def api_media_list():
+    path = request.args.get("path", "")
+    page = max(1, _as_int(request.args.get("page"), 1))
+    page_size = _as_int(request.args.get("page_size"), 100)
+    page_size = max(1, min(page_size, 500))
+    sort = request.args.get("sort", "name")
+    order = request.args.get("order") or request.args.get("direction") or "asc"
+    hide_nsfw_raw = request.args.get("hide_nsfw")
+    hide_nsfw = True if hide_nsfw_raw is None else _parse_truthy(hide_nsfw_raw)
+    try:
+        payload = MEDIA_MANAGER.list_directory(
+            path,
+            hide_nsfw=hide_nsfw,
+            page=page,
+            page_size=page_size,
+            sort=sort,
+            order=order or "asc",
+        )
+    except MediaManagerError as exc:
+        return _media_error_response(exc)
+    return jsonify(payload)
+
+
+@app.route("/api/media/create_folder", methods=["POST"])
+def api_media_create_folder():
+    payload = request.get_json(silent=True) or {}
+    try:
+        _require_media_edit()
+        parent = payload.get("path") or ""
+        name = payload.get("name")
+        if not name or not isinstance(name, str):
+            raise MediaManagerError("Folder name is required", code="invalid_name")
+        new_path = MEDIA_MANAGER.create_folder(parent, name)
+    except MediaManagerError as exc:
+        return _media_error_response(exc)
+    logger.info("media.create_folder parent=%s name=%s", parent or "", name)
+    return jsonify({"path": new_path, "name": _virtual_leaf(new_path)})
+
+
+@app.route("/api/media/rename", methods=["POST"])
+def api_media_rename():
+    payload = request.get_json(silent=True) or {}
+    try:
+        _require_media_edit()
+        target_path = payload.get("path")
+        new_name = payload.get("new_name") or payload.get("name")
+        if not target_path or not isinstance(target_path, str):
+            raise MediaManagerError("Path is required", code="invalid_request")
+        if not new_name or not isinstance(new_name, str):
+            raise MediaManagerError("New name is required", code="invalid_name")
+        updated = MEDIA_MANAGER.rename(target_path, new_name)
+    except MediaManagerError as exc:
+        return _media_error_response(exc)
+    logger.info("media.rename path=%s new_name=%s", target_path, new_name)
+    return jsonify({"path": updated, "name": _virtual_leaf(updated)})
+
+
+@app.route("/api/media/delete", methods=["DELETE"])
+def api_media_delete():
+    payload = request.get_json(silent=True) or {}
+    target = payload.get("path") if isinstance(payload, dict) else None
+    if not target:
+        target = request.args.get("path")
+    try:
+        _require_media_edit()
+        if not target or not isinstance(target, str):
+            raise MediaManagerError("Path is required", code="invalid_request")
+        MEDIA_MANAGER.delete(target)
+    except MediaManagerError as exc:
+        return _media_error_response(exc)
+    logger.info("media.delete path=%s", target)
+    return jsonify({"ok": True})
+
+
+@app.route("/api/media/upload", methods=["POST"])
+def api_media_upload():
+    try:
+        _require_media_edit()
+        destination = request.form.get("path") or ""
+        files = request.files.getlist("files")
+        if not files:
+            raise MediaManagerError("No files were provided", code="invalid_request")
+        saved = MEDIA_MANAGER.upload(destination, files)
+    except MediaManagerError as exc:
+        return _media_error_response(exc)
+    logger.info("media.upload path=%s count=%d", destination, len(saved))
+    return jsonify({"uploaded": saved, "count": len(saved)})
+
+
+@app.route("/api/media/thumbnail", methods=["GET"])
+def api_media_thumbnail():
+    path = request.args.get("path")
+    if not path:
+        return jsonify({"error": "Path is required", "code": "invalid_request"}), 400
+    width_raw = request.args.get("w")
+    height_raw = request.args.get("h")
+    width = _as_int(width_raw, MEDIA_THUMB_WIDTH) if width_raw else MEDIA_THUMB_WIDTH
+    if width <= 0:
+        width = MEDIA_THUMB_WIDTH
+    height = _as_int(height_raw, 0) if height_raw else None
+    if height is not None and height <= 0:
+        height = None
+    try:
+        thumb_path, source_mtime, etag = MEDIA_MANAGER.get_thumbnail(path, width=width, height=height)
+    except MediaManagerError as exc:
+        return _media_error_response(exc)
+    incoming_etag = request.headers.get("If-None-Match")
+    if incoming_etag and incoming_etag == etag:
+        response = app.response_class(status=304)
+        response.headers["ETag"] = etag
+        response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+        return response
+    response = send_file(
+        thumb_path,
+        mimetype="image/jpeg",
+        conditional=True,
+        etag=etag,
+    )
+    response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+    response.headers["ETag"] = etag
+    response.headers["Last-Modified"] = http_date(source_mtime)
+    return response
+
+
 @app.route("/folders", methods=["GET"])
 def folders_collection():
     hide_nsfw = _parse_truthy(request.args.get("hide_nsfw"))
@@ -3907,6 +4121,26 @@ def try_get_hls(original_url):
         return _detect_hls_stream_url(original_url)
     except Exception:
         return None
+
+
+@app.route("/media/manage")
+def media_management_page():
+    roots_payload = [
+        {
+            "alias": root.alias,
+            "display_name": root.display_name or root.alias,
+            "path": f"{root.alias}:/",
+        }
+        for root in AVAILABLE_MEDIA_ROOTS
+    ]
+    return render_template(
+        "media_manage.html",
+        media_roots=roots_payload,
+        media_allow_edit=MEDIA_MANAGEMENT_ALLOW_EDIT,
+        media_allowed_exts=MEDIA_ALLOWED_EXTS,
+        media_upload_max_mb=MEDIA_UPLOAD_MAX_MB,
+        media_thumb_width=MEDIA_THUMB_WIDTH,
+    )
 
 @app.route("/")
 def dashboard():

@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <title>Media Manager • EchoMosaic</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='media_manage.css') }}">
+</head>
+<body>
+<header class="top-bar">
+  <h1>Media Manager</h1>
+  <nav>
+    <a href="{{ url_for('dashboard') }}">Dashboard</a>
+    <a href="{{ url_for('media_management_page') }}" aria-current="page">Media</a>
+    <a href="{{ url_for('app_settings') }}">Settings</a>
+    <button id="theme-toggle" class="icon-btn" type="button" aria-label="Toggle theme" title="Toggle theme" style="margin-left:.5rem;"></button>
+  </nav>
+</header>
+
+<main class="media-manage" data-allow-edit="{{ 'true' if media_allow_edit else 'false' }}">
+  <aside class="media-tree" id="media-tree" aria-label="Media folders">
+    <div class="tree-header">
+      <span>Folders</span>
+      <button id="tree-refresh" class="icon-btn" type="button" title="Refresh tree" aria-label="Refresh tree">&#10227;</button>
+    </div>
+    <div id="media-tree-content" class="tree-content"></div>
+  </aside>
+
+  <section class="media-panel">
+    <div class="panel-toolbar">
+      <div class="breadcrumb" id="media-breadcrumb" aria-live="polite"></div>
+      <div class="toolbar-controls">
+        <label class="toolbar-control">
+          <span>Sort</span>
+          <select id="media-sort">
+            <option value="name|asc">Name (A–Z)</option>
+            <option value="name|desc">Name (Z–A)</option>
+            <option value="mtime|desc">Date (new → old)</option>
+            <option value="mtime|asc">Date (old → new)</option>
+          </select>
+        </label>
+        <label class="toolbar-control checkbox">
+          <input type="checkbox" id="media-hide-nsfw" checked>
+          <span>Hide NSFW</span>
+        </label>
+        {% if media_allow_edit %}
+        <div class="toolbar-buttons">
+          <button id="action-create-folder" type="button">Create Folder</button>
+          <button id="action-rename-folder" type="button">Rename</button>
+          <button id="action-delete-folder" type="button">Delete</button>
+          <button id="action-upload" type="button">Upload</button>
+        </div>
+        {% endif %}
+      </div>
+    </div>
+
+    <div id="subfolder-list" class="subfolder-list" aria-live="polite"></div>
+    <div id="media-grid" class="media-grid" aria-live="polite"></div>
+    <div id="media-pagination" class="media-pagination" aria-label="Pagination"></div>
+    {% if media_allow_edit %}
+    <section id="upload-queue" class="upload-queue" aria-live="polite" hidden></section>
+    {% endif %}
+  </section>
+</main>
+
+<input type="file" id="upload-input" multiple hidden {% if media_allowed_exts %}accept="{{ media_allowed_exts|join(',') }}"{% endif %}>
+
+<div id="toast-container" class="toast-container" role="alert" aria-live="assertive"></div>
+
+<script>
+  window.MEDIA_MANAGER_BOOTSTRAP = {{ {
+    "roots": media_roots,
+    "allowEdit": media_allow_edit,
+    "allowedExts": media_allowed_exts,
+    "uploadMaxMB": media_upload_max_mb,
+    "thumbWidth": media_thumb_width
+  } | tojson }};
+</script>
+<script src="{{ url_for('static', filename='media_manage.js') }}" defer></script>
+</body>
+</html>
