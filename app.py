@@ -45,9 +45,10 @@ from flask import (
     redirect,
     url_for,
     stream_with_context,
+    has_request_context,
 )
 from flask_socketio import SocketIO, join_room, leave_room
-from stablehorde import StableHorde, StableHordeError, StableHordeCancelled
+from stablehorde import StableHorde, StableHordeError, StableHordeCancelled, StableHordeOrphaned
 from picsum import (
     register_picsum_routes,
     assign_new_picsum_to_stream,
@@ -192,6 +193,7 @@ AI_POLL_INTERVAL = 5.0
 AI_TIMEOUT = 0.0
 INTERNAL_MEDIA_DIRS = {THUMBNAIL_SUBDIR, AI_TEMP_SUBDIR, MEDIA_MANAGER_CACHE_SUBDIR}
 IGNORED_MEDIA_PREFIX = "_"
+STABLE_HORDE_LOG_PREFIX = "[StableHorde]"
 
 
 def _as_bool(value: Any, default: bool = False) -> bool:
@@ -2007,7 +2009,8 @@ def import_settings():
     with ai_jobs_lock:
         for stream_id in removed:
             ai_jobs.pop(stream_id, None)
-            ai_job_controls.pop(stream_id, None)
+            controls = ai_job_controls.pop(stream_id, None)
+            _unlink_socket_job(controls, stream_id)
 
     for stream_id in removed:
         _cleanup_temp_outputs(stream_id)
@@ -2244,6 +2247,7 @@ except Exception as exc:  # pragma: no cover - defensive during optional setup
 ai_jobs_lock = threading.Lock()
 ai_jobs: Dict[str, Dict[str, Any]] = {}
 ai_job_controls: Dict[str, Dict[str, Any]] = {}
+socket_job_index: Dict[str, Set[str]] = {}
 ai_model_cache: Dict[str, Any] = {"timestamp": 0.0, "data": []}
 auto_scheduler: Optional['AutoGenerateScheduler'] = None
 picsum_scheduler: Optional['PicsumAutoScheduler'] = None
@@ -2305,6 +2309,19 @@ def _cleanup_temp_outputs(stream_id: str) -> None:
         except Exception as exc:
             logger.warning('Failed to remove temp outputs for %s: %s', stream_id, exc)
 
+def _unlink_socket_job(controls: Optional[Dict[str, Any]], stream_id: str) -> None:
+    if not controls:
+        return
+    socket_sid = controls.get('socket_sid')
+    if not socket_sid:
+        return
+    streams = socket_job_index.get(socket_sid)
+    if not streams:
+        return
+    streams.discard(stream_id)
+    if not streams:
+        socket_job_index.pop(socket_sid, None)
+
 
 def _emit_ai_update(stream_id: str, state: Dict[str, Any], job: Optional[Dict[str, Any]] = None) -> None:
     payload: Dict[str, Any] = {"stream_id": stream_id, "state": state}
@@ -2352,6 +2369,9 @@ def _record_job_progress(stream_id: str, stage: str, payload: Dict[str, Any]) ->
         elif stage == 'cancelled':
             job['status'] = 'cancelled'
             job['message'] = str(payload.get('message') or 'Cancelled by user')
+        elif stage == 'orphaned':
+            job['status'] = 'orphaned'
+            job['message'] = str(payload.get('message') or 'Client disconnected; polling stopped')
         elif stage == 'completed':
             job['status'] = 'completed'
         ai_jobs[stream_id] = job
@@ -2359,7 +2379,12 @@ def _record_job_progress(stream_id: str, stage: str, payload: Dict[str, Any]) ->
     _emit_ai_update(stream_id, current_state, job=job)
 
 
-def _run_ai_generation(stream_id: str, options: Dict[str, Any], cancel_event: Optional[threading.Event] = None) -> None:
+def _run_ai_generation(
+    stream_id: str,
+    options: Dict[str, Any],
+    cancel_event: Optional[threading.Event] = None,
+    stop_event: Optional[threading.Event] = None,
+) -> None:
     prompt = str(options.get('prompt') or '').strip()
     if not prompt:
         _update_ai_state(stream_id, {
@@ -2369,25 +2394,28 @@ def _run_ai_generation(stream_id: str, options: Dict[str, Any], cancel_event: Op
         }, persist=True)
         with ai_jobs_lock:
             ai_jobs.pop(stream_id, None)
-            ai_job_controls.pop(stream_id, None)
+            controls = ai_job_controls.pop(stream_id, None)
+            _unlink_socket_job(controls, stream_id)
         return
 
     persist = bool(options.get('save_output', AI_DEFAULT_PERSIST))
-    if cancel_event and cancel_event.is_set():
-        message = 'Cancelled by user'
+    cancelled_by_user = bool(cancel_event and cancel_event.is_set())
+    stopped_by_disconnect = bool(stop_event and stop_event.is_set())
+    if cancelled_by_user or stopped_by_disconnect:
+        message = 'Cancelled by user' if cancelled_by_user else 'Client disconnected; polling stopped'
+        status_value = 'cancelled' if cancelled_by_user else 'orphaned'
         job_snapshot = None
         with ai_jobs_lock:
             current_job = ai_jobs.get(stream_id)
             if current_job:
                 job_snapshot = dict(current_job)
-                job_snapshot['status'] = 'cancelled'
+                job_snapshot['status'] = status_value
                 job_snapshot['message'] = message
                 ai_jobs[stream_id] = job_snapshot
-            ai_job_controls.pop(stream_id, None)
         state = _update_ai_state(
             stream_id,
             {
-                'status': 'cancelled',
+                'status': status_value,
                 'message': message,
                 'error': None,
                 'persisted': persist,
@@ -2397,6 +2425,8 @@ def _run_ai_generation(stream_id: str, options: Dict[str, Any], cancel_event: Op
         _emit_ai_update(stream_id, state, job_snapshot)
         with ai_jobs_lock:
             ai_jobs.pop(stream_id, None)
+            controls = ai_job_controls.pop(stream_id, None)
+            _unlink_socket_job(controls, stream_id)
         return
     target_root = _ensure_dir((AI_OUTPUT_ROOT if persist else AI_TEMP_ROOT) / stream_id)
 
@@ -2497,6 +2527,8 @@ def _run_ai_generation(stream_id: str, options: Dict[str, Any], cancel_event: Op
             persist=persist,
             output_dir=target_root if persist else None,
             status_callback=_status_callback,
+            cancel_callback=(lambda: bool(cancel_event and cancel_event.is_set())),
+            stop_callback=(lambda: bool(stop_event and stop_event.is_set())) if stop_event else None,
         )
     except StableHordeCancelled as exc:
         logger.info('Stable Horde job for %s cancelled: %s', stream_id, exc)
@@ -2509,7 +2541,6 @@ def _run_ai_generation(stream_id: str, options: Dict[str, Any], cancel_event: Op
                 job_snapshot['status'] = 'cancelled'
                 job_snapshot['message'] = message
                 ai_jobs[stream_id] = job_snapshot
-            ai_job_controls.pop(stream_id, None)
         state = _update_ai_state(
             stream_id,
             {
@@ -2525,6 +2556,37 @@ def _run_ai_generation(stream_id: str, options: Dict[str, Any], cancel_event: Op
             _cleanup_temp_outputs(stream_id)
         with ai_jobs_lock:
             ai_jobs.pop(stream_id, None)
+            controls = ai_job_controls.pop(stream_id, None)
+            _unlink_socket_job(controls, stream_id)
+        return
+    except StableHordeOrphaned as exc:
+        message = 'Client disconnected; polling stopped'
+        logger.info('Stable Horde polling for %s stopped: %s', stream_id, exc)
+        job_snapshot = None
+        with ai_jobs_lock:
+            current_job = ai_jobs.get(stream_id)
+            if current_job:
+                job_snapshot = dict(current_job)
+                job_snapshot['status'] = 'orphaned'
+                job_snapshot['message'] = message
+                job_snapshot['orphaned'] = True
+                ai_jobs[stream_id] = job_snapshot
+        _record_job_progress(stream_id, 'orphaned', {'message': message})
+        state = _update_ai_state(
+            stream_id,
+            {
+                'status': 'orphaned',
+                'message': message,
+                'error': None,
+                'persisted': persist,
+            },
+            persist=True,
+        )
+        _emit_ai_update(stream_id, state, job_snapshot)
+        with ai_jobs_lock:
+            ai_jobs.pop(stream_id, None)
+            controls = ai_job_controls.pop(stream_id, None)
+            _unlink_socket_job(controls, stream_id)
         return
     except StableHordeError as exc:
         logger.warning('Stable Horde job for %s failed: %s', stream_id, exc)
@@ -2541,7 +2603,8 @@ def _run_ai_generation(stream_id: str, options: Dict[str, Any], cancel_event: Op
         )
         with ai_jobs_lock:
             ai_jobs.pop(stream_id, None)
-            ai_job_controls.pop(stream_id, None)
+            controls = ai_job_controls.pop(stream_id, None)
+            _unlink_socket_job(controls, stream_id)
         return
     except Exception as exc:  # pragma: no cover - defensive logging
         logger.exception('Unexpected Stable Horde failure for %s: %s', stream_id, exc)
@@ -2558,7 +2621,8 @@ def _run_ai_generation(stream_id: str, options: Dict[str, Any], cancel_event: Op
         )
         with ai_jobs_lock:
             ai_jobs.pop(stream_id, None)
-            ai_job_controls.pop(stream_id, None)
+            controls = ai_job_controls.pop(stream_id, None)
+            _unlink_socket_job(controls, stream_id)
         return
 
     images: List[Dict[str, Any]] = []
@@ -2620,15 +2684,13 @@ def _run_ai_generation(stream_id: str, options: Dict[str, Any], cancel_event: Op
         )
         save_settings(settings)
         _emit_ai_update(stream_id, conf[AI_STATE_KEY])
-        try:
-            socketio.emit('refresh', {'stream_id': stream_id, 'config': conf})
-        except Exception as exc:  # pragma: no cover
-            logger.debug('Socket refresh emit failed: %s', exc)
+        safe_emit('refresh', {'stream_id': stream_id, 'config': conf})
 
     _record_job_progress(stream_id, 'completed', {'job_id': result.job_id})
     with ai_jobs_lock:
         ai_jobs.pop(stream_id, None)
-        ai_job_controls.pop(stream_id, None)
+        controls = ai_job_controls.pop(stream_id, None)
+        _unlink_socket_job(controls, stream_id)
 
 
 settings = load_settings()
@@ -4513,7 +4575,7 @@ def add_stream():
             save_settings(settings)
             if auto_scheduler is not None:
                 auto_scheduler.reschedule(new_id)
-            socketio.emit("streams_changed", {"action": "added", "stream_id": new_id})
+            safe_emit("streams_changed", {"action": "added", "stream_id": new_id})
             return jsonify({"stream_id": new_id})
         idx += 1
 
@@ -4523,7 +4585,8 @@ def delete_stream(stream_id):
     if stream_id in settings:
         with ai_jobs_lock:
             ai_jobs.pop(stream_id, None)
-            ai_job_controls.pop(stream_id, None)
+            controls = ai_job_controls.pop(stream_id, None)
+            _unlink_socket_job(controls, stream_id)
         _cleanup_temp_outputs(stream_id)
         settings.pop(stream_id)
         with STREAM_RUNTIME_LOCK:
@@ -4535,7 +4598,7 @@ def delete_stream(stream_id):
             auto_scheduler.remove(stream_id)
         if picsum_scheduler is not None:
             picsum_scheduler.remove(stream_id)
-        socketio.emit("streams_changed", {"action": "deleted", "stream_id": stream_id})
+        safe_emit("streams_changed", {"action": "deleted", "stream_id": stream_id})
         return jsonify({"status": "deleted"})
     return jsonify({"error": "not found"}), 404
 
@@ -5166,6 +5229,12 @@ def _queue_ai_generation(stream_id: str, ai_settings: Dict[str, Any], *, trigger
     previous_selected = conf.get('selected_image')
 
     cancel_event = threading.Event()
+    stop_event = threading.Event()
+    socket_sid: Optional[str] = None
+    if has_request_context():
+        header_sid = request.headers.get('X-Socket-ID')
+        if header_sid:
+            socket_sid = header_sid.strip() or None
     with ai_jobs_lock:
         if stream_id in ai_jobs:
             raise AutoGenerationBusy('Generation already in progress')
@@ -5177,7 +5246,13 @@ def _queue_ai_generation(stream_id: str, ai_settings: Dict[str, Any], *, trigger
             'cancel_requested': False,
             'trigger': trigger_source,
         }
-        ai_job_controls[stream_id] = {'cancel_event': cancel_event}
+        ai_job_controls[stream_id] = {
+            'cancel_event': cancel_event,
+            'stop_event': stop_event,
+            'socket_sid': socket_sid,
+        }
+        if socket_sid:
+            socket_job_index.setdefault(socket_sid, set()).add(stream_id)
     if not persist:
         _cleanup_temp_outputs(stream_id)
 
@@ -5202,14 +5277,15 @@ def _queue_ai_generation(stream_id: str, ai_settings: Dict[str, Any], *, trigger
 
     save_settings(settings)
     _emit_ai_update(stream_id, queued_state, job=ai_jobs[stream_id])
-    try:
-        socketio.emit('refresh', {'stream_id': stream_id, 'config': conf, 'tags': get_global_tags()})
-    except Exception as exc:  # pragma: no cover
-        logger.debug('Socket refresh emit failed: %s', exc)
+    safe_emit('refresh', {'stream_id': stream_id, 'config': conf, 'tags': get_global_tags()})
 
     job_options = dict(sanitized)
     job_options['prompt'] = prompt
-    worker = threading.Thread(target=_run_ai_generation, args=(stream_id, job_options, cancel_event), daemon=True)
+    worker = threading.Thread(
+        target=_run_ai_generation,
+        args=(stream_id, job_options, cancel_event, stop_event),
+        daemon=True,
+    )
     with ai_jobs_lock:
         controls = ai_job_controls.get(stream_id)
         if controls is not None:
@@ -6872,6 +6948,46 @@ def stream_group(name):
         focus_order=focus_order,
         mosaic_settings=layout_conf,
     )
+
+
+@socketio.on("disconnect")
+def handle_socket_disconnect():
+    sid = request.sid
+    log_entries: List[Tuple[str, Optional[str]]] = []
+    with ai_jobs_lock:
+        tracked_streams = socket_job_index.pop(sid, set())
+        for stream_id in tracked_streams:
+            controls = ai_job_controls.get(stream_id)
+            if controls:
+                stop_event = controls.get('stop_event')
+                if isinstance(stop_event, threading.Event):
+                    stop_event.set()
+                controls['orphan_requested'] = True
+            job = ai_jobs.get(stream_id)
+            job_id = None
+            if job:
+                job_id = job.get('job_id')
+                job_copy = dict(job)
+                job_copy['orphan_requested'] = True
+                ai_jobs[stream_id] = job_copy
+            log_entries.append((stream_id, job_id))
+    for stream_id, job_id in log_entries:
+        if job_id:
+            logger.info(
+                '%s Client %s disconnected; stopping polling for job %s (%s)',
+                STABLE_HORDE_LOG_PREFIX,
+                sid,
+                job_id,
+                stream_id,
+            )
+        else:
+            logger.info(
+                '%s Client %s disconnected; stopping polling for %s',
+                STABLE_HORDE_LOG_PREFIX,
+                sid,
+                stream_id,
+            )
+
 
 @socketio.on("stream_subscribe")
 def handle_stream_subscribe(payload):

@@ -28,6 +28,7 @@ __all__ = [
     "StableHorde",
     "StableHordeError",
     "StableHordeCancelled",
+    "StableHordeOrphaned",
     "StableHordeResult",
     "StableHordeGeneration",
 ]
@@ -49,6 +50,10 @@ class StableHordeError(RuntimeError):
 
 class StableHordeCancelled(StableHordeError):
     """Raised when a Stable Horde job is cancelled by the caller."""
+
+
+class StableHordeOrphaned(StableHordeError):
+    """Raised when polling stops because the caller requested it."""
 
 
 @dataclass
@@ -386,6 +391,7 @@ class StableHorde:
         output_dir: Optional[Union[str, Path]] = None,
         status_callback: Optional[Callable[[str, Dict[str, Any]], None]] = None,
         cancel_callback: Optional[Callable[[], bool]] = None,
+        stop_callback: Optional[Callable[[], bool]] = None,
     ) -> StableHordeResult:
         """Generate one or more images from the provided prompt."""
 
@@ -455,6 +461,7 @@ class StableHorde:
             timeout_value,
             status_callback=status_callback,
             cancel_callback=cancel_callback,
+            stop_callback=stop_callback,
         )
 
         generations: List[StableHordeGeneration] = []
@@ -679,6 +686,7 @@ class StableHorde:
         timeout: Optional[float],
         status_callback: Optional[Callable[[str, Dict[str, Any]], None]] = None,
         cancel_callback: Optional[Callable[[], bool]] = None,
+        stop_callback: Optional[Callable[[], bool]] = None,
     ) -> Dict[str, Any]:
         poll_value = float(poll_interval) if isinstance(poll_interval, (int, float)) and poll_interval > 0 else self.default_poll_interval
         effective_timeout = self.default_timeout if timeout is None else float(timeout)
@@ -700,7 +708,17 @@ class StableHorde:
                     cancel_notified = True
                 raise StableHordeCancelled(f"Stable Horde job {job_id} cancelled by caller")
 
+        def _check_stopped() -> None:
+            if stop_callback and stop_callback():
+                self._log(
+                    logging.INFO,
+                    "Polling for job %s halted by stop callback",
+                    job_id,
+                )
+                raise StableHordeOrphaned(f"Polling halted for Stable Horde job {job_id}")
+
         while True:
+            _check_stopped()
             _check_cancelled()
             status = self._request("GET", f"/generate/status/{job_id}")
             _fire_callback(status_callback, "status", {"job_id": job_id, "status": status})

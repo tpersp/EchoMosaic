@@ -657,6 +657,16 @@
   })();
 
   const socket = io();
+  let currentSocketId = null;
+  socket.on('connect', () => {
+    currentSocketId = socket.id;
+  });
+  socket.on('reconnect', () => {
+    currentSocketId = socket.id;
+  });
+  socket.on('disconnect', () => {
+    currentSocketId = null;
+  });
   let openAiCard = null;
   const aiSummaryUpdaters = new WeakMap();
 
@@ -3704,9 +3714,13 @@
         setGenerateDisabled(true);
         renderAiStatus(card, { status: 'queued' }, { status: 'queued' });
         try {
+          const headers = { 'Content-Type': 'application/json' };
+          if (currentSocketId) {
+            headers['X-Socket-ID'] = currentSocketId;
+          }
           const res = await fetch(`/ai/generate/${encodeURIComponent(streamId)}`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers,
             body: JSON.stringify(payload)
           });
           const data = await res.json().catch(() => ({}));
