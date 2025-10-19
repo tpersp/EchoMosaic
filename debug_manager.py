@@ -33,10 +33,30 @@ LEVEL_CLASS_BY_TOKEN = {
     "INFO": "log-info",
     "DEBUG": "log-debug",
 }
+KEYWORD_PATTERN = re.compile(
+    r"(?P<TRUE>\btrue\b)"
+    r"|(?P<FALSE>\bfalse\b)"
+    r"|(?P<SUCCESS>\b(success|succeeded)\b)"
+    r"|(?P<FAIL>\b(fail|failure|failed)\b)"
+    r"|(?P<SHUTDOWN>\bshutdown\b)"
+    r"|(?P<WARNING>\bwarning\b)"
+    r"|(?P<ERROR>\berror\b)",
+    re.IGNORECASE,
+)
+KEYWORD_CLASS_BY_GROUP = {
+    "TRUE": "word-true",
+    "FALSE": "word-false",
+    "SUCCESS": "word-success",
+    "FAIL": "word-fail",
+    "SHUTDOWN": "word-fail",
+    "WARNING": "word-warning",
+    "ERROR": "word-fail",
+}
+TAG_SPLIT_PATTERN = re.compile(r"(<[^>]+>)")
 
 
 def colorize_log_line(line: str) -> str:
-    """Return HTML markup that highlights timestamps, URLs, and log level tags."""
+    """Return HTML markup that highlights timestamps, URLs, log level tags, and keywords."""
 
     plain_line = line.rstrip("\n")
     escaped = html.escape(plain_line)
@@ -53,8 +73,29 @@ def colorize_log_line(line: str) -> str:
         return f'<span class="{css_class}">{match.group(0)}</span>'
 
     escaped = LEVEL_TAG_PATTERN.sub(_wrap_level, escaped)
+    escaped = _apply_keyword_highlighting(escaped)
 
     return f'<span class="log-generic">{escaped}</span>'
+
+
+def _apply_keyword_highlighting(markup: str) -> str:
+    """Wrap important keywords in span tags without disturbing existing markup."""
+
+    def _wrap_keyword(match: re.Match[str]) -> str:
+        group = match.lastgroup
+        if not group:
+            return match.group(0)
+        css_class = KEYWORD_CLASS_BY_GROUP.get(group)
+        if not css_class:
+            return match.group(0)
+        return f'<span class="{css_class}">{match.group(0)}</span>'
+
+    segments = TAG_SPLIT_PATTERN.split(markup)
+    for idx, segment in enumerate(segments):
+        if not segment or segment.startswith("<"):
+            continue
+        segments[idx] = KEYWORD_PATTERN.sub(_wrap_keyword, segment)
+    return "".join(segments)
 
 
 def clean_journal_prefix(line: str) -> str:
