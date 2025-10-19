@@ -119,7 +119,7 @@ Type=simple
 User=$SERVICE_USER
 WorkingDirectory=$INSTALL_DIR
 Environment="PATH=$INSTALL_DIR/venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
-ExecStart=$INSTALL_DIR/venv/bin/gunicorn --worker-class eventlet -w 1 -b 0.0.0.0:$PORT app:app
+ExecStart=$INSTALL_DIR/venv/bin/gunicorn -w 2 -k eventlet --bind 0.0.0.0:$PORT --timeout 120 --graceful-timeout 30 --keep-alive 5 --no-sendfile app:app
 Restart=always
 [Install]
 WantedBy=multi-user.target

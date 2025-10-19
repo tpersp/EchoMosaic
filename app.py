@@ -10,6 +10,7 @@ import threading
 import time
 import secrets
 import random
+import shlex
 import io
 import hashlib
 from copy import deepcopy
@@ -53,12 +54,84 @@ try:
 except Exception:  # pragma: no cover - yt_dlp is optional at import-time
     YoutubeDL = None
 
+
+def _configure_gunicorn_defaults() -> None:
+    """Ensure Gunicorn uses resilient defaults for Eventlet workers."""
+
+    required_pairs = {
+        "--timeout": "120",
+        "--graceful-timeout": "30",
+        "--keep-alive": "5",
+    }
+    required_flags = {"--no-sendfile"}
+
+    existing_cmd_args = os.environ.get("GUNICORN_CMD_ARGS", "")
+    existing_tokens = shlex.split(existing_cmd_args) if existing_cmd_args else []
+
+    filtered_tokens = []
+    idx = 0
+    while idx < len(existing_tokens):
+        token = existing_tokens[idx]
+        if token in required_pairs:
+            idx += 2
+            continue
+        if any(token.startswith(f"{flag}=") for flag in required_pairs):
+            idx += 1
+            continue
+        if token in required_flags:
+            idx += 1
+            continue
+        filtered_tokens.append(token)
+        idx += 1
+
+    updated_tokens = filtered_tokens
+    for flag, value in required_pairs.items():
+        updated_tokens.extend([flag, value])
+    updated_tokens.extend(sorted(required_flags))
+
+    os.environ["GUNICORN_CMD_ARGS"] = " ".join(updated_tokens).strip()
+
+
+_configure_gunicorn_defaults()
+
 app = Flask(__name__, static_folder="static", static_url_path="/static")
-socketio = SocketIO(app)
+socketio = SocketIO(
+    app,
+    async_mode="eventlet",
+    ping_timeout=120,
+    ping_interval=25,
+)
 configure_socketio(socketio)
 register_picsum_routes(app)
 
 logger = logging.getLogger(__name__)
+
+
+def safe_emit(
+    event_name: str,
+    data: Any,
+    *,
+    room: Optional[str] = None,
+    to: Optional[str] = None,
+    namespace: Optional[str] = None,
+    skip_sid: Optional[str] = None,
+    **kwargs: Any,
+) -> None:
+    """Emit a Socket.IO event defensively, ignoring disconnected clients."""
+
+    try:
+        socketio.emit(
+            event_name,
+            data,
+            room=room,
+            to=to,
+            namespace=namespace,
+            skip_sid=skip_sid,
+            **kwargs,
+        )
+    except Exception as exc:  # pragma: no cover - defensive guard against closed sockets
+        logger.warning("Socket emit failed (%s): %s", event_name, exc)
+
 
 SETTINGS_FILE = "settings.json"
 CONFIG_FILE = config_manager.CONFIG_FILE.name
@@ -2222,13 +2295,10 @@ def _cleanup_temp_outputs(stream_id: str) -> None:
 
 
 def _emit_ai_update(stream_id: str, state: Dict[str, Any], job: Optional[Dict[str, Any]] = None) -> None:
-    try:
-        payload: Dict[str, Any] = {"stream_id": stream_id, "state": state}
-        if job is not None:
-            payload['job'] = job
-        socketio.emit('ai_job_update', payload)
-    except Exception as exc:  # pragma: no cover - socket errors should not crash the server
-        logger.debug('Socket emit failed for ai_job_update: %s', exc)
+    payload: Dict[str, Any] = {"stream_id": stream_id, "state": state}
+    if job is not None:
+        payload['job'] = job
+    safe_emit('ai_job_update', payload)
 
 
 def _update_ai_state(stream_id: str, updates: Dict[str, Any], *, persist: bool = False) -> Dict[str, Any]:
