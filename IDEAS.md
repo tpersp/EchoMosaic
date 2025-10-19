@@ -8,8 +8,6 @@ A running list of ideas and future improvements. Add new items anywhere below.
 ## Suggestions from a friend
 - [ ] [2025-09-08] Add optional authentication or simple login with a session cache so casual users are not blocked but the dashboard and update endpoints are protected from anyone on the network. - Note: I'm not sure this is necessary for a local only service that i built for myself.
 
-- [ ] [2025-09-08] Make paths and constants configurable via `config.json` or environment variables. Today users still edit `app.py` to change where images are stored. Additionally an option to handle multiple locations, in case the user wants to store media in multiple locations, then the app should be able to see those too.
-
 - [ ] [2025-09-08] Offload HLS lookup to a background task and cache results. `try_get_hls()` currently invokes `yt-dlp` synchronously on each request, which can block the server under load.
 
 - [ ] [2025-09-08] Enhance group management and stream ordering. Persist layouts server-side, allow drag-and-drop reordering, and offer options to clone or share groups.
@@ -66,6 +64,8 @@ A running list of ideas and future improvements. Add new items anywhere below.
 - [x] Add system monitoring to surface CPU usage, memory usage (used/max), GPU usage (if available), storage available for media, and other useful info.
 
 - [x] Implement a better rollback feature that lets admins mark a restore point so the server can always roll back to a known good state on demand.
+
+- [x] [2025-09-08] Make paths and constants configurable via `config.json` or environment variables. Today users still edit `app.py` to change where images are stored. Additionally an option to handle multiple locations, in case the user wants to store media in multiple locations, then the app should be able to see those too.
 
 Notes
 - Use checkboxes to track status (unchecked = planned, checked = done).
