@@ -21,11 +21,22 @@ KEEPALIVE_SECONDS = 15
 TIMESTAMP_PATTERN = re.compile(
     r"(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}|[A-Z][a-z]{2} \d{1,2} \d{2}:\d{2}:\d{2})"
 )
+JOURNAL_PREFIX_PATTERN = re.compile(
+    r"^[A-Z][a-z]{2}\s+\d{1,2}\s+\d{2}:\d{2}:\d{2}(?:\s+\S+)?\s+[^\[]+\[\d+\]:\s"
+)
 URL_PATTERN = re.compile(r"(https?://[^\s]+)")
+LEVEL_TAG_PATTERN = re.compile(r"\[(ERROR|WARNING|WARN|INFO|DEBUG)\]")
+LEVEL_CLASS_BY_TOKEN = {
+    "ERROR": "log-error",
+    "WARNING": "log-warning",
+    "WARN": "log-warning",
+    "INFO": "log-info",
+    "DEBUG": "log-debug",
+}
 
 
 def colorize_log_line(line: str) -> str:
-    """Return HTML markup with spans that highlight log metadata."""
+    """Return HTML markup that highlights timestamps, URLs, and log level tags."""
 
     plain_line = line.rstrip("\n")
     escaped = html.escape(plain_line)
@@ -36,19 +47,20 @@ def colorize_log_line(line: str) -> str:
         escaped,
     )
 
-    upper_line = plain_line.upper()
-    if "ERROR" in upper_line:
-        css_class = "log-error"
-    elif "WARNING" in upper_line or "WARN" in upper_line:
-        css_class = "log-warning"
-    elif "INFO" in upper_line:
-        css_class = "log-info"
-    elif "DEBUG" in upper_line:
-        css_class = "log-debug"
-    else:
-        css_class = "log-generic"
+    def _wrap_level(match: re.Match[str]) -> str:
+        token = match.group(1)
+        css_class = LEVEL_CLASS_BY_TOKEN.get(token, "log-generic")
+        return f'<span class="{css_class}">{match.group(0)}</span>'
 
-    return f'<span class="{css_class}">{escaped}</span>'
+    escaped = LEVEL_TAG_PATTERN.sub(_wrap_level, escaped)
+
+    return f'<span class="log-generic">{escaped}</span>'
+
+
+def clean_journal_prefix(line: str) -> str:
+    """Remove repetitive systemd journal prefixes from a log line."""
+
+    return JOURNAL_PREFIX_PATTERN.sub("", line, count=1)
 
 
 class JournalAccessError(RuntimeError):
@@ -133,7 +145,7 @@ def stream_journal_follow(initial_limit: int = DEFAULT_INITIAL_LINES) -> Generat
             yield _format_sse(str(exc), event="error")
             return
         for line in recent_lines.splitlines():
-            yield _format_sse(colorize_log_line(line))
+            yield _format_sse(colorize_log_line(clean_journal_prefix(line)))
 
     try:
         process = subprocess.Popen(
@@ -159,7 +171,7 @@ def stream_journal_follow(initial_limit: int = DEFAULT_INITIAL_LINES) -> Generat
             if process.poll() is not None:
                 # Drain any remaining buffered output before exiting.
                 for line in process.stdout:
-                    yield _format_sse(colorize_log_line(line))
+                    yield _format_sse(colorize_log_line(clean_journal_prefix(line)))
                 break
 
             ready, _, _ = select.select([process.stdout], [], [], 1.0)
@@ -167,7 +179,8 @@ def stream_journal_follow(initial_limit: int = DEFAULT_INITIAL_LINES) -> Generat
                 line = process.stdout.readline()
                 if not line:
                     break
-                yield _format_sse(colorize_log_line(line))
+                cleaned = clean_journal_prefix(line)
+                yield _format_sse(colorize_log_line(cleaned))
                 last_emit = time.monotonic()
             elif time.monotonic() - last_emit >= KEEPALIVE_SECONDS:
                 yield ": keep-alive\n\n"
