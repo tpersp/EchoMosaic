@@ -38,6 +38,8 @@ DEFAULT_CLIENT_AGENT = "EchoMosaic StableHorde Client/1.0"
 DEFAULT_SAMPLER = "k_euler"
 DEFAULT_WIDTH = 512
 DEFAULT_HEIGHT = 512
+DEFAULT_TIMEOUT_SECONDS = 900.0
+PAYLOAD_DONE_GRACE_SECONDS = 45.0
 MIN_DIMENSION = 64
 MAX_DIMENSION = 2048
 DIMENSION_STEP = 64
@@ -189,9 +191,17 @@ class StableHorde:
         self.api_key = api_key.strip() if api_key else None
         self.base_url = base_url.rstrip("/")
         self.client_agent = client_agent
-        self.request_timeout = request_timeout
-        self.default_poll_interval = default_poll_interval
-        self.default_timeout = default_timeout
+        self.request_timeout = int(request_timeout)
+        self.default_poll_interval = (
+            float(default_poll_interval)
+            if isinstance(default_poll_interval, (int, float)) and float(default_poll_interval) > 0
+            else 3.0
+        )
+        self.default_timeout = (
+            float(default_timeout)
+            if isinstance(default_timeout, (int, float)) and float(default_timeout) > 0
+            else DEFAULT_TIMEOUT_SECONDS
+        )
         self._parsed_base = urlparse(self.base_url)
 
         if save_dir is None:
@@ -450,11 +460,13 @@ class StableHorde:
             _fire_callback(status_callback, "cancelled", {"job_id": job_id, "message": "Cancelled before start"})
             raise StableHordeCancelled(f"Stable Horde job {job_id} cancelled before polling")
 
+        self._log(logging.INFO, "Job %s started", job_id)
+
         persist_flag = self.persist_images if persist is None else bool(persist)
         destination, temp_dir = self._resolve_output_dir(persist_flag, output_dir)
 
-        poll_value = poll_interval or self.default_poll_interval
-        timeout_value = self.default_timeout if timeout is None else timeout
+        poll_value = float(poll_interval) if isinstance(poll_interval, (int, float)) and float(poll_interval) > 0 else self.default_poll_interval
+        timeout_value = self.default_timeout if timeout is None or (isinstance(timeout, (int, float)) and float(timeout) <= 0) else float(timeout)
         status = self._poll_job(
             job_id,
             poll_value,
@@ -688,13 +700,25 @@ class StableHorde:
         cancel_callback: Optional[Callable[[], bool]] = None,
         stop_callback: Optional[Callable[[], bool]] = None,
     ) -> Dict[str, Any]:
-        poll_value = float(poll_interval) if isinstance(poll_interval, (int, float)) and poll_interval > 0 else self.default_poll_interval
-        effective_timeout = self.default_timeout if timeout is None else float(timeout)
-        deadline = None
-        if effective_timeout and effective_timeout > 0:
-            deadline = time.time() + effective_timeout
+        poll_value = float(poll_interval) if isinstance(poll_interval, (int, float)) and float(poll_interval) > 0 else self.default_poll_interval
+        effective_timeout = (
+            self.default_timeout
+            if timeout is None or (isinstance(timeout, (int, float)) and float(timeout) <= 0)
+            else float(timeout)
+        )
+        start_time = time.time()
+        deadline = start_time + effective_timeout if effective_timeout and effective_timeout > 0 else None
+        timeout_label = f"{effective_timeout:.0f}s" if effective_timeout and effective_timeout > 0 else "disabled"
+        self._log(
+            logging.INFO,
+            "Polling job %s every %.1fs (timeout %s)",
+            job_id,
+            poll_value,
+            timeout_label,
+        )
 
         cancel_notified = False
+        done_seen_at: Optional[float] = None
 
         def _check_cancelled() -> None:
             nonlocal cancel_notified
@@ -722,25 +746,63 @@ class StableHorde:
             _check_cancelled()
             status = self._request("GET", f"/generate/status/{job_id}")
             _fire_callback(status_callback, "status", {"job_id": job_id, "status": status})
-            if status.get("faulted"):
+            done_flag = bool(status.get("done"))
+            faulted_flag = bool(status.get("faulted"))
+            generations = status.get("generations") or []
+            wait_time = status.get("wait_time")
+            queue_position = status.get("queue_position")
+            now = time.time()
+            self._log(
+                logging.INFO,
+                "Job %s status: done=%s faulted=%s queue=%s wait=%s generations=%d",
+                job_id,
+                done_flag,
+                faulted_flag,
+                queue_position,
+                wait_time,
+                len(generations),
+            )
+            if faulted_flag:
                 message = status.get("message") or status
+                self._log(logging.ERROR, "Job %s faulted — %s", job_id, message)
                 _fire_callback(status_callback, "fault", {"job_id": job_id, "status": status, "message": message})
                 raise StableHordeError(f"Stable Horde job {job_id} faulted: {message}")
-            generations = status.get("generations") or []
             if generations:
+                self._log(logging.INFO, "Job %s complete — %d generation(s) ready", job_id, len(generations))
                 return status
-            if status.get("done") and not generations:
-                time.sleep(1.0)
-                continue
-            if deadline is not None and time.time() >= deadline:
+            if done_flag and not generations:
+                if done_seen_at is None:
+                    done_seen_at = now
+                    self._log(logging.INFO, "Job %s marked done; awaiting generation payload", job_id)
+                elif now - done_seen_at >= PAYLOAD_DONE_GRACE_SECONDS:
+                    message = "Stable Horde reported completion without returning images"
+                    self._log(
+                        logging.ERROR,
+                        "Job %s done but no images after %.1fs",
+                        job_id,
+                        now - done_seen_at,
+                    )
+                    _fire_callback(status_callback, "fault", {"job_id": job_id, "status": status, "message": message})
+                    raise StableHordeError(f"{message}: job {job_id}")
+                sleep_for = min(poll_value, 2.0)
+            else:
+                done_seen_at = None
+                if isinstance(wait_time, (int, float)) and wait_time > 0:
+                    sleep_for = max(1.0, min(float(wait_time), 15.0))
+                else:
+                    sleep_for = poll_value
+            if deadline is not None and now >= deadline:
+                self._log(logging.WARNING, "Job %s timed out after %.1fs", job_id, now - start_time)
                 _fire_callback(status_callback, "timeout", {"job_id": job_id, "status": status})
                 raise StableHordeError(f"Timed out waiting for Stable Horde job {job_id}")
-            wait_time = status.get("wait_time")
-            if isinstance(wait_time, (int, float)) and wait_time > 0:
-                sleep_for = max(1.0, min(float(wait_time), 15.0))
-            else:
-                sleep_for = poll_value
-            time.sleep(sleep_for)
+            if deadline is not None and sleep_for > 0 and now + sleep_for >= deadline:
+                sleep_for = max(0.0, deadline - now)
+                if sleep_for <= 0:
+                    self._log(logging.WARNING, "Job %s timed out after %.1fs", job_id, now - start_time)
+                    _fire_callback(status_callback, "timeout", {"job_id": job_id, "status": status})
+                    raise StableHordeError(f"Timed out waiting for Stable Horde job {job_id}")
+            if sleep_for > 0:
+                time.sleep(sleep_for)
 
     def _save_image(
         self,
