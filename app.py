@@ -103,6 +103,7 @@ def _configure_gunicorn_defaults() -> None:
     updated_tokens.extend(sorted(required_flags))
 
     os.environ["GUNICORN_CMD_ARGS"] = " ".join(updated_tokens).strip()
+    os.environ.setdefault("ENGINEIO_MAX_BUFFER_SIZE", "100000000")
 
 
 _configure_gunicorn_defaults()
@@ -113,11 +114,17 @@ socketio = SocketIO(
     async_mode="eventlet",
     ping_timeout=120,
     ping_interval=25,
+    cors_allowed_origins="*",
+    max_http_buffer_size=100_000_000,
 )
 configure_socketio(socketio)
 register_picsum_routes(app)
 
 logger = logging.getLogger(__name__)
+
+_emit_throttle_lock = threading.Lock()
+_emit_min_interval = 0.05  # seconds
+_last_emit_timestamp = 0.0
 
 
 def safe_emit(
@@ -132,6 +139,13 @@ def safe_emit(
 ) -> None:
     """Emit a Socket.IO event defensively, ignoring disconnected clients."""
 
+    global _last_emit_timestamp
+    with _emit_throttle_lock:
+        now = time.monotonic()
+        wait_for = _emit_min_interval - (now - _last_emit_timestamp)
+        if wait_for > 0:
+            time.sleep(wait_for)
+        _last_emit_timestamp = time.monotonic()
     try:
         socketio.emit(
             event_name,
