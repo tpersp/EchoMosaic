@@ -658,11 +658,22 @@
 
   const socket = io();
   let currentSocketId = null;
+  const watchedStreams = new Set();
   socket.on('connect', () => {
     currentSocketId = socket.id;
+    watchedStreams.forEach(streamId => {
+      socket.emit('ai_watch', { stream_id: streamId });
+      const card = findStreamCard(streamId);
+      if (card) syncLatestAiJob(streamId, card);
+    });
   });
   socket.on('reconnect', () => {
     currentSocketId = socket.id;
+    watchedStreams.forEach(streamId => {
+      socket.emit('ai_watch', { stream_id: streamId });
+      const card = findStreamCard(streamId);
+      if (card) syncLatestAiJob(streamId, card);
+    });
   });
   socket.on('disconnect', () => {
     currentSocketId = null;
@@ -2970,6 +2981,34 @@
     return payload;
   }
 
+  async function syncLatestAiJob(streamId, card) {
+    if (!streamId) return;
+    try {
+      const res = await fetch(`/api/jobs/${encodeURIComponent(streamId)}/latest`);
+      if (!res.ok) return;
+      const data = await res.json();
+      const effectiveJob = data && (data.active_job || data.job) ? Object.assign({}, data.active_job || data.job) : null;
+      if (effectiveJob) {
+        const status = (effectiveJob.status || '').toLowerCase();
+        if (['completed', 'error', 'timeout', 'cancelled'].includes(status)) {
+          aiActiveJobs.delete(streamId);
+        } else {
+          aiActiveJobs.set(streamId, effectiveJob);
+        }
+      }
+      if (data && data.state && card) {
+        if (Array.isArray(data.state.images)) {
+          renderAiResults(card, data.state.images);
+        }
+        renderAiStatus(card, data.state, effectiveJob || aiActiveJobs.get(streamId) || null);
+      } else if (effectiveJob && card) {
+        renderAiStatus(card, {}, effectiveJob);
+      }
+    } catch (err) {
+      console.warn('Failed to synchronise AI job state', streamId, err);
+    }
+  }
+
   function setupAiControls(card, streamId) {
     const aiSection = card.querySelector('.ai-generator');
     if (!aiSection || aiSection.dataset.ready === 'true') {
@@ -2977,6 +3016,10 @@
     }
     aiSection.dataset.ready = 'true';
     aiSection.setAttribute('aria-hidden', 'true');
+    if (streamId) {
+      watchedStreams.add(streamId);
+      socket.emit('ai_watch', { stream_id: streamId });
+    }
     const summaryRoot = card.querySelector('.ai-summary');
     const modalBackdrop = card.querySelector('.ai-modal-backdrop');
     const presetSelect = card.querySelector('.ai-preset-select');
@@ -3815,6 +3858,9 @@
     }
     renderAiStatus(card, { status: card.querySelector('.ai-status')?.dataset.status || 'idle' }, aiActiveJobs.get(streamId) || null);
     highlightAiSelection(resultsEl, resultsEl ? resultsEl.dataset.selected || '' : '');
+    if (streamId) {
+      syncLatestAiJob(streamId, card);
+    }
   }
 
   function saveSettings(streamId, payload, opts = {}) {
