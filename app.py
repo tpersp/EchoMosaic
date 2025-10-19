@@ -3963,6 +3963,38 @@ def api_media_preview_frame():
     try:
         frame_path, source_mtime, etag, frame_count = MEDIA_MANAGER.get_preview_frame(path, index)
     except MediaManagerError as exc:
+        fallback_codes = {"preview_failed", "preview_skipped", "preview_disabled", "unsupported_media", "not_found"}
+        if exc.code in fallback_codes:
+            try:
+                thumb_path, source_mtime, thumb_etag = MEDIA_MANAGER.get_thumbnail(path)
+            except MediaManagerError:
+                return _media_error_response(exc)
+            etag_value = str(thumb_etag)
+            weak = False
+            if etag_value.startswith("W/"):
+                weak = True
+                etag_value = etag_value[2:]
+            etag_value = etag_value.strip('"')
+            quoted_etag = quote_etag(etag_value, weak=weak)
+            incoming_etag = request.headers.get("If-None-Match")
+            if incoming_etag and incoming_etag == quoted_etag:
+                response = app.response_class(status=304)
+                response.headers["ETag"] = quoted_etag
+                response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+                response.headers["X-Preview-Frame-Count"] = "0"
+                response.headers["X-Preview-Fallback"] = "thumbnail"
+                return response
+            response = send_file(
+                thumb_path,
+                mimetype="image/jpeg",
+                conditional=True,
+            )
+            response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+            response.headers["ETag"] = quoted_etag
+            response.headers["Last-Modified"] = http_date(source_mtime)
+            response.headers["X-Preview-Frame-Count"] = "0"
+            response.headers["X-Preview-Fallback"] = "thumbnail"
+            return response
         return _media_error_response(exc)
     etag_value = str(etag)
     weak = False

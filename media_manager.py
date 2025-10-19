@@ -12,7 +12,7 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple, Union
-from urllib.parse import quote
+from urllib.parse import quote, unquote
 
 import tempfile
 
@@ -190,7 +190,13 @@ class MediaManager:
         if isinstance(value, Path):
             text = value.as_posix()
         else:
-            text = str(value or "").strip()
+            text = str(value or "")
+        text = text.strip()
+        if "%" in text:
+            try:
+                text = unquote(text)
+            except Exception:
+                pass
         if not text or text in {".", "./", "/"}:
             return VirtualPath(alias=None, relative=Path())
         normalized = text.replace("\\", "/").strip()
@@ -412,20 +418,29 @@ class MediaManager:
         encoded = quote(virtual_path, safe="/:@")
         return f"/api/media/preview_frame?path={encoded}&i={int(index)}"
 
-    def _preview_frame_dir(self, root: MediaRoot, abs_path: Path) -> Path:
+    def _preview_frame_dir(self, root: MediaRoot, abs_path: Path, *, relative: Optional[Path] = None) -> Path:
         cache_root = self._cache_dirs[root.alias]
         preview_root = cache_root / "previews"
-        try:
-            relative = abs_path.resolve().relative_to(root.path.resolve())
-            parts = list(relative.parts)
-        except ValueError:
-            parts = [abs_path.name]
-        if parts:
-            stem = Path(parts[-1]).stem or "frame"
-            if len(parts) > 1:
-                preview_root = preview_root.joinpath(*parts[:-1])
+        candidate = relative
+        if candidate is None:
+            try:
+                candidate = abs_path.resolve().relative_to(root.path.resolve())
+            except ValueError:
+                candidate = Path(abs_path.name)
+        raw_parts = [part for part in candidate.parts if part and part not in {".", ".."}]
+        if raw_parts and raw_parts[0].endswith(":"):
+            raw_parts = raw_parts[1:]
+        if raw_parts and raw_parts[0] == MEDIA_MANAGER_CACHE_SUBDIR:
+            raw_parts = raw_parts[1:]
+            if raw_parts and raw_parts[0] == "previews":
+                raw_parts = raw_parts[1:]
+        if raw_parts:
+            stem_source = raw_parts[-1]
+            if len(raw_parts) > 1:
+                preview_root = preview_root.joinpath(*raw_parts[:-1])
         else:
-            stem = abs_path.stem or "frame"
+            stem_source = abs_path.name or abs_path.stem or "frame"
+        stem = Path(stem_source).stem or "frame"
         return preview_root / f"{stem}_frames"
 
     def _load_preview_metadata(self, frame_dir: Path) -> Optional[Dict[str, Any]]:
@@ -669,7 +684,10 @@ class MediaManager:
             raise MediaManagerError("Invalid frame index", code="invalid_request")
         if frame_index < 1:
             raise MediaManagerError("Invalid frame index", code="invalid_request")
-        root, abs_path = self._resolve(virtual_path)
+        vp = self._normalize_virtual_path(virtual_path)
+        if vp.alias is None:
+            raise MediaManagerError("Root path cannot be resolved without alias", code="invalid_path")
+        root, abs_path = self._resolve(vp)
         if not abs_path.exists() or not abs_path.is_file():
             raise MediaManagerError("File not found", code="not_found", status=404)
         ext = abs_path.suffix.lower()
@@ -677,10 +695,18 @@ class MediaManager:
             raise MediaManagerError("Preview not supported for this file type", code="unsupported_media", status=404)
         stat_info = abs_path.stat()
         if self._preview_max_bytes and stat_info.st_size > self._preview_max_bytes:
-            frame_dir = self._preview_frame_dir(root, abs_path)
+            frame_dir = self._preview_frame_dir(root, abs_path, relative=vp.relative)
             self._record_preview_skip(frame_dir, stat_info.st_mtime, "size_limit")
             raise MediaManagerError("Preview unavailable for large files", code="preview_skipped", status=404)
-        frame_dir = self._preview_frame_dir(root, abs_path)
+        frame_dir = self._preview_frame_dir(root, abs_path, relative=vp.relative)
+        logger.debug(
+            "Preview frame lookup path=%s alias=%s relative=%s frame_dir=%s requested_index=%d",
+            str(virtual_path),
+            root.alias,
+            vp.relative.as_posix(),
+            frame_dir,
+            frame_index,
+        )
         lock = self._acquire_preview_lock(frame_dir)
         with lock:
             metadata = self._load_preview_metadata(frame_dir)
