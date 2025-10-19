@@ -10,11 +10,9 @@ A running list of ideas and future improvements. Add new items anywhere below.
 
 - [ ] [2025-09-08] Offload HLS lookup to a background task and cache results. `try_get_hls()` currently invokes `yt-dlp` synchronously on each request, which can block the server under load.
 
-- [ ] [2025-09-08] Enhance group management and stream ordering. Persist layouts server-side, allow drag-and-drop reordering, and offer options to clone or share groups.
-
 - [ ] [2025-09-08] Improve error handling and user feedback. When an image or stream URL is missing, surface clear messages in the UI instead of generic JSON errors.
 
-- [ ] [2025-09-08] Add configurable logging and monitoring. Operations like `yt-dlp` calls and update scripts either fail silently or log to the console; configurable log levels and rotating file logs would help.
+- [x] [2025-09-08] Add configurable logging and monitoring. Operations like `yt-dlp` calls and update scripts either fail silently or log to the console; configurable log levels and rotating file logs would help.
 
 - [ ] Add a page and function similar to `stablehorde.py` that can pull images from the https://www.pexels.com/api/ with the available options exposed in the UI.
 

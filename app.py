@@ -35,7 +35,17 @@ try:
 except Exception:
     requests = None
 
-from flask import Flask, jsonify, send_file, request, render_template, redirect, url_for
+from flask import (
+    Flask,
+    Response,
+    jsonify,
+    send_file,
+    request,
+    render_template,
+    redirect,
+    url_for,
+    stream_with_context,
+)
 from flask_socketio import SocketIO, join_room, leave_room
 from stablehorde import StableHorde, StableHordeError, StableHordeCancelled
 from picsum import (
@@ -48,6 +58,7 @@ from system_monitor import get_system_stats
 import config_manager
 from media_manager import MediaManager, MediaManagerError, MEDIA_MANAGER_CACHE_SUBDIR
 import timer_manager
+import debug_manager
 
 try:
     from yt_dlp import YoutubeDL  # type: ignore[import]
@@ -4369,6 +4380,49 @@ def dashboard():
         strength_range=STABLE_HORDE_STRENGTH_RANGE,
         denoise_range=STABLE_HORDE_DENOISE_RANGE,
     )
+
+
+@app.route("/debug")
+def debug_page() -> str:
+    cfg = load_config()
+    logging_config = cfg.get("logging") or {}
+    service_name = cfg.get("SERVICE_NAME", "echomosaic.service")
+    return render_template(
+        "debug.html",
+        service_name=service_name,
+        logging_config=logging_config,
+        default_initial_lines=debug_manager.DEFAULT_INITIAL_LINES,
+    )
+
+
+@app.route("/api/debug/stream")
+def debug_stream() -> Response:
+    include_initial = request.args.get("initial", "1").strip().lower() not in {"0", "false", "no"}
+    initial_limit = debug_manager.DEFAULT_INITIAL_LINES if include_initial else 0
+    stream_generator = stream_with_context(debug_manager.stream_journal_follow(initial_limit=initial_limit))
+    response = Response(stream_generator, mimetype="text/event-stream")
+    response.headers["Cache-Control"] = "no-cache"
+    response.headers["X-Accel-Buffering"] = "no"
+    return response
+
+
+@app.route("/api/debug/download")
+def debug_download() -> Response:
+    limit = request.args.get("limit", type=int) or debug_manager.DEFAULT_DOWNLOAD_LINES
+    try:
+        log_data = debug_manager.get_recent_log_lines(limit=limit)
+    except debug_manager.JournalAccessError as exc:
+        return Response(str(exc), status=503, mimetype="text/plain")
+
+    cfg = load_config()
+    service_name = cfg.get("SERVICE_NAME", "echomosaic.service")
+    safe_name = "".join(ch if ch.isalnum() or ch in {"-", "_"} else "_" for ch in service_name)
+    filename = f"{safe_name or 'echomosaic'}.log"
+
+    response = Response(log_data, mimetype="text/plain")
+    response.headers["Content-Disposition"] = f'attachment; filename="{filename}"'
+    response.headers["Cache-Control"] = "no-store"
+    return response
 
 
 @app.route("/stream")

@@ -58,6 +58,10 @@ DEFAULT_CONFIG_FALLBACK: Dict[str, Any] = {
     "MEDIA_PREVIEW_WIDTH": 320,
     "MEDIA_PREVIEW_MAX_DURATION": 300,
     "MEDIA_PREVIEW_MAX_MB": 512,
+    "logging": {
+        "level": "INFO",
+        "retention_days": 7,
+    },
 }
 
 
