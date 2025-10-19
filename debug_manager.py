@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import html
 import logging
+import re
 import select
 import subprocess
 import time
@@ -15,6 +17,38 @@ logger = logging.getLogger(__name__)
 DEFAULT_INITIAL_LINES = 200
 DEFAULT_DOWNLOAD_LINES = 5000
 KEEPALIVE_SECONDS = 15
+
+TIMESTAMP_PATTERN = re.compile(
+    r"(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}|[A-Z][a-z]{2} \d{1,2} \d{2}:\d{2}:\d{2})"
+)
+URL_PATTERN = re.compile(r"(https?://[^\s]+)")
+
+
+def colorize_log_line(line: str) -> str:
+    """Return HTML markup with spans that highlight log metadata."""
+
+    plain_line = line.rstrip("\n")
+    escaped = html.escape(plain_line)
+
+    escaped = TIMESTAMP_PATTERN.sub(r'<span class="timestamp">\1</span>', escaped)
+    escaped = URL_PATTERN.sub(
+        r'<a class="log-link" href="\1" target="_blank" rel="noopener noreferrer">\1</a>',
+        escaped,
+    )
+
+    upper_line = plain_line.upper()
+    if "ERROR" in upper_line:
+        css_class = "log-error"
+    elif "WARNING" in upper_line or "WARN" in upper_line:
+        css_class = "log-warning"
+    elif "INFO" in upper_line:
+        css_class = "log-info"
+    elif "DEBUG" in upper_line:
+        css_class = "log-debug"
+    else:
+        css_class = "log-generic"
+
+    return f'<span class="{css_class}">{escaped}</span>'
 
 
 class JournalAccessError(RuntimeError):
@@ -99,7 +133,7 @@ def stream_journal_follow(initial_limit: int = DEFAULT_INITIAL_LINES) -> Generat
             yield _format_sse(str(exc), event="error")
             return
         for line in recent_lines.splitlines():
-            yield _format_sse(line)
+            yield _format_sse(colorize_log_line(line))
 
     try:
         process = subprocess.Popen(
@@ -125,7 +159,7 @@ def stream_journal_follow(initial_limit: int = DEFAULT_INITIAL_LINES) -> Generat
             if process.poll() is not None:
                 # Drain any remaining buffered output before exiting.
                 for line in process.stdout:
-                    yield _format_sse(line.rstrip("\n"))
+                    yield _format_sse(colorize_log_line(line))
                 break
 
             ready, _, _ = select.select([process.stdout], [], [], 1.0)
@@ -133,7 +167,7 @@ def stream_journal_follow(initial_limit: int = DEFAULT_INITIAL_LINES) -> Generat
                 line = process.stdout.readline()
                 if not line:
                     break
-                yield _format_sse(line.rstrip("\n"))
+                yield _format_sse(colorize_log_line(line))
                 last_emit = time.monotonic()
             elif time.monotonic() - last_emit >= KEEPALIVE_SECONDS:
                 yield ": keep-alive\n\n"
