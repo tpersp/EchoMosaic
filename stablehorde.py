@@ -16,7 +16,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 from pathlib import Path
-from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, Iterable, List, Optional, Set, Tuple, Union
 from urllib.parse import urlparse
 
 try:
@@ -162,7 +162,19 @@ class StableHorde:
         default_timeout: float = 600.0,
         load_env: bool = True,
     ) -> None:
-        self.logger = logger or logging.getLogger("stablehorde")
+        default_logger = logging.getLogger("echomosaic.stablehorde")
+        if default_logger.level == logging.NOTSET:
+            default_logger.setLevel(logging.INFO)
+        root_logger = logging.getLogger()
+        if not default_logger.handlers and not root_logger.handlers:
+            handler = logging.StreamHandler()
+            handler.setFormatter(logging.Formatter("%(levelname)s: %(message)s"))
+            default_logger.addHandler(handler)
+        self._loggers: List[logging.Logger] = []
+        if logger is not None:
+            self._loggers.append(logger)
+        self._loggers.append(default_logger)
+        self.logger = logger or default_logger
         if load_env:
             env_file = os.getenv("STABLE_HORDE_ENV_FILE", ".env")
             _load_env_file(env_file)
@@ -218,14 +230,20 @@ class StableHorde:
     def _log(self, level: int, message: str, *args: Any) -> None:
         """Emit a log message with a Stable Horde prefix."""
 
-        logger = self.logger
-        if logger is None:
-            return
-        try:
-            logger.log(level, "%s " + message, LOG_PREFIX, *args)
-        except Exception:
-            # Logging must never raise upstream.
-            pass
+        seen: Set[int] = set()
+        for logger in self._loggers:
+            if logger is None:
+                continue
+            ident = id(logger)
+            if ident in seen:
+                continue
+            seen.add(ident)
+            try:
+                if logger.isEnabledFor(level):
+                    logger.log(level, "%s " + message, LOG_PREFIX, *args)
+            except Exception:
+                # Logging must never raise upstream.
+                continue
 
     def _ensure_horde_ready(self) -> None:
         """Verify Stable Horde is reachable before attempting a generation."""
