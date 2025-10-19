@@ -252,6 +252,77 @@
     }
   }
   document.addEventListener('DOMContentLoaded', loadRestorePoints);
+
+  function setTimerSnapStatus(message, ok = true) {
+    const note = document.getElementById('timer-snap-note');
+    if (!note) return;
+    if (!message) {
+      note.textContent = '';
+      note.style.display = 'none';
+      return;
+    }
+    note.textContent = message;
+    note.style.display = 'block';
+    note.style.color = ok ? 'inherit' : '#f66';
+    note.style.opacity = ok ? 0.85 : 1;
+  }
+
+  async function loadTimerSettings() {
+    const toggle = document.getElementById('timer-snap-toggle');
+    if (!toggle) return;
+    setTimerSnapStatus('Loading…');
+    try {
+      const res = await fetch('/api/settings/timers', { cache: 'no-store' });
+      if (!res.ok) {
+        throw new Error('Request failed');
+      }
+      const data = await res.json();
+      toggle.checked = !!data.timer_snap_enabled;
+      setTimerSnapStatus('');
+    } catch (err) {
+      setTimerSnapStatus('Unable to load timer settings.', false);
+    }
+  }
+
+  async function handleTimerSnapChange(event) {
+    const toggle = event.target;
+    if (!toggle) return;
+    const desired = toggle.checked;
+    setTimerSnapStatus('Saving…');
+    toggle.disabled = true;
+    try {
+      const res = await fetch('/api/settings/timers', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-API-Key': SETTINGS_API_KEY
+        },
+        body: JSON.stringify({ timer_snap_enabled: desired })
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        const msg = data && data.error ? data.error : 'Failed to update setting';
+        throw new Error(msg);
+      }
+      const resolved = !!data.timer_snap_enabled;
+      toggle.checked = resolved;
+      setTimerSnapStatus(resolved ? 'Snap to full increments enabled.' : 'Snap to full increments disabled.');
+    } catch (err) {
+      toggle.checked = !desired;
+      setTimerSnapStatus(err.message || 'Failed to update setting.', false);
+    } finally {
+      toggle.disabled = false;
+    }
+  }
+
+  function initTimerSettingsControls() {
+    const toggle = document.getElementById('timer-snap-toggle');
+    if (!toggle) return;
+    toggle.addEventListener('change', handleTimerSnapChange);
+    loadTimerSettings();
+  }
+
+  document.addEventListener('DOMContentLoaded', initTimerSettingsControls);
 </script>
 </head>
 <body>
@@ -295,6 +366,17 @@
       <div id="history" style="max-height: 280px; overflow-y: auto; border:1px solid var(--border); border-radius:4px; background: var(--surface);">
         <ul id="history-list" style="list-style:none; margin:0; padding:0;"></ul>
       </div>
+    </div>
+
+    <div style="margin: 1rem 0; padding: 0.75rem; border:1px solid var(--border); border-radius:4px; background: var(--surface-alt);">
+      <h3 style="margin-top:0;">Auto-Generate Timers</h3>
+      <p style="margin-top:0; opacity:0.9;">Control how automatic generation timers calculate their next run across Picsum and AI streams.</p>
+      <label class="toggle compact">
+        <input type="checkbox" id="timer-snap-toggle">
+        <span class="toggle-switch"></span>
+        <span class="toggle-label">Snap Timers to Full Increments</span>
+      </label>
+      <p id="timer-snap-note" style="display:none; margin:0.5rem 0 0; font-size:0.9rem; opacity:0.85;"></p>
     </div>
 
     <div style="margin: 1rem 0; padding: 0.75rem; border:1px solid var(--border); border-radius:4px; background: var(--surface-alt);">

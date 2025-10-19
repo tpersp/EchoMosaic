@@ -46,6 +46,7 @@ from update_helpers import backup_user_state, restore_user_state
 from system_monitor import get_system_stats
 import config_manager
 from media_manager import MediaManager, MediaManagerError, MEDIA_MANAGER_CACHE_SUBDIR
+import timer_manager
 
 try:
     from yt_dlp import YoutubeDL  # type: ignore[import]
@@ -1181,6 +1182,9 @@ def ensure_ai_defaults(conf: Dict[str, Any]) -> None:
         state_defaults = default_ai_state()
         for key, value in state_defaults.items():
             ai_state.setdefault(key, value)
+    ai_state_ref = conf[AI_STATE_KEY]
+    ai_state_ref["next_auto_trigger"] = _normalize_timer_label(ai_state_ref.get("next_auto_trigger"))
+    ai_state_ref["last_auto_trigger"] = _normalize_timer_label(ai_state_ref.get("last_auto_trigger"))
 
     if "_ai_customized" not in conf:
         conf["_ai_customized"] = not _ai_settings_match_defaults(conf[AI_SETTINGS_KEY], defaults=ai_defaults)
@@ -1289,20 +1293,14 @@ def _sanitize_picsum_settings(
         clock_time = ""
 
     next_auto_raw = value.get("next_auto_trigger")
-    if isinstance(next_auto_raw, str) and next_auto_raw.strip():
-        next_auto = next_auto_raw.strip()
-    elif isinstance(next_auto_default, str) and next_auto_default.strip():
-        next_auto = next_auto_default.strip()
-    else:
-        next_auto = None
+    next_auto = _normalize_timer_label(next_auto_raw)
+    if not next_auto:
+        next_auto = _normalize_timer_label(next_auto_default)
 
     last_auto_raw = value.get("last_auto_trigger")
-    if isinstance(last_auto_raw, str) and last_auto_raw.strip():
-        last_auto = last_auto_raw.strip()
-    elif isinstance(last_auto_default, str) and last_auto_default.strip():
-        last_auto = last_auto_default.strip()
-    else:
-        last_auto = None
+    last_auto = _normalize_timer_label(last_auto_raw)
+    if not last_auto:
+        last_auto = _normalize_timer_label(last_auto_default)
 
     result.update(
         {
@@ -2011,6 +2009,21 @@ def _coerce_bool(value, default):
     if isinstance(value, str):
         return value.strip().lower() in {"1", "true", "yes", "on"}
     return default
+
+
+def _timer_snap_enabled() -> bool:
+    return _as_bool(CONFIG.get("TIMER_SNAP_ENABLED"), False)
+
+
+def _format_timer_label(moment: Optional[datetime]) -> Optional[str]:
+    if moment is None:
+        return None
+    return timer_manager.format_display_time(moment)
+
+
+def _normalize_timer_label(value: Any) -> Optional[str]:
+    normalized = timer_manager.normalize_display_label(value)
+    return normalized
 
 
 def _maybe_float(value):
@@ -5059,7 +5072,7 @@ def _queue_ai_generation(stream_id: str, ai_settings: Dict[str, Any], *, trigger
         'last_trigger_source': trigger_source,
     })
     if trigger_source != 'manual':
-        queued_state['last_auto_trigger'] = datetime.utcnow().isoformat() + 'Z'
+        queued_state['last_auto_trigger'] = _format_timer_label(datetime.now())
     queued_state['last_auto_error'] = None
 
     save_settings(settings)
@@ -5128,11 +5141,12 @@ class AutoGenerateScheduler:
             return
         with self._lock:
             self._next_run[stream_id] = next_dt.timestamp()
-        self._update_state(stream_id, next_auto_trigger=next_dt.isoformat())
+        self._update_state(stream_id, next_auto_trigger=_format_timer_label(next_dt))
 
     def _compute_next_datetime(self, conf: Dict[str, Any], mode_value: str, *, base_time: Optional[float]) -> Optional[datetime]:
         ai_settings = conf[AI_SETTINGS_KEY]
         reference_ts = base_time if base_time is not None else time.time()
+        reference_dt = datetime.fromtimestamp(reference_ts)
         if mode_value == 'timer':
             interval_value = ai_settings.get('auto_generate_interval_value')
             try:
@@ -5145,14 +5159,17 @@ class AutoGenerateScheduler:
             unit_value = unit_raw.strip().lower() if isinstance(unit_raw, str) else 'minutes'
             multiplier = AUTO_GENERATE_INTERVAL_UNITS.get(unit_value, 60.0)
             interval_seconds = max(AUTO_GENERATE_MIN_INTERVAL_SECONDS, numeric * multiplier)
-            target_ts = reference_ts + interval_seconds
-            return datetime.fromtimestamp(target_ts)
+            return timer_manager.compute_next_trigger(
+                interval_seconds,
+                reference=reference_dt,
+                snap_to_increment=_timer_snap_enabled(),
+            )
         if mode_value == 'clock':
             clock_value = _normalize_clock_time(ai_settings.get('auto_generate_clock_time'))
             if not clock_value:
                 return None
             hour, minute = map(int, clock_value.split(':'))
-            base_dt = datetime.fromtimestamp(reference_ts)
+            base_dt = reference_dt
             target = base_dt.replace(hour=hour, minute=minute, second=0, microsecond=0)
             if target <= base_dt:
                 target += timedelta(days=1)
@@ -5168,8 +5185,12 @@ class AutoGenerateScheduler:
         state = conf[AI_STATE_KEY]
         changed = False
         for key, value in updates.items():
-            if state.get(key) != value:
-                state[key] = value
+            if key in {"next_auto_trigger", "last_auto_trigger"}:
+                normalized_value = _normalize_timer_label(value)
+            else:
+                normalized_value = value
+            if state.get(key) != normalized_value:
+                state[key] = normalized_value
                 changed = True
         if changed:
             _emit_ai_update(stream_id, state)
@@ -5281,8 +5302,7 @@ class PicsumAutoScheduler:
             return
         with self._lock:
             self._next_run[stream_id] = next_dt.timestamp()
-        utc_iso = datetime.utcfromtimestamp(next_dt.timestamp()).replace(microsecond=0).isoformat() + "Z"
-        picsum["next_auto_trigger"] = utc_iso
+        picsum["next_auto_trigger"] = _format_timer_label(next_dt)
 
     def _compute_next_datetime(
         self,
@@ -5293,6 +5313,7 @@ class PicsumAutoScheduler:
     ) -> Optional[datetime]:
         picsum = conf.get(PICSUM_SETTINGS_KEY) or {}
         reference_ts = base_time if base_time is not None else time.time()
+        reference_dt = datetime.fromtimestamp(reference_ts)
         if mode == "timer":
             interval_value = _coerce_float(picsum.get("auto_interval_value"), PICSUM_DEFAULT_INTERVAL_VALUE)
             if interval_value is None or interval_value <= 0:
@@ -5301,14 +5322,17 @@ class PicsumAutoScheduler:
             unit = str(unit_raw).strip().lower() if isinstance(unit_raw, str) else PICSUM_DEFAULT_INTERVAL_UNIT
             unit_seconds = AUTO_GENERATE_INTERVAL_UNITS.get(unit, AUTO_GENERATE_INTERVAL_UNITS[PICSUM_DEFAULT_INTERVAL_UNIT])
             seconds = max(60.0, interval_value * unit_seconds)
-            target_ts = reference_ts + seconds
-            return datetime.fromtimestamp(target_ts)
+            return timer_manager.compute_next_trigger(
+                seconds,
+                reference=reference_dt,
+                snap_to_increment=_timer_snap_enabled(),
+            )
         if mode == "clock":
             clock_value = _normalize_clock_time(picsum.get("auto_clock_time"))
             if not clock_value:
                 return None
             hour, minute = map(int, clock_value.split(":"))
-            base_dt = datetime.fromtimestamp(reference_ts)
+            base_dt = reference_dt
             target = base_dt.replace(hour=hour, minute=minute, second=0, microsecond=0)
             if target <= base_dt:
                 target += timedelta(days=1)
@@ -5338,8 +5362,7 @@ class PicsumAutoScheduler:
             self.remove(stream_id)
             return
         picsum_conf = conf.get(PICSUM_SETTINGS_KEY) or {}
-        now_iso = datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
-        picsum_conf["last_auto_trigger"] = now_iso
+        picsum_conf["last_auto_trigger"] = _format_timer_label(datetime.now())
         self.reschedule(stream_id, base_time=time.time())
         save_settings(settings)
         _broadcast_picsum_update(
@@ -5685,6 +5708,54 @@ def _delete_restore_point(repo_path: str, point_id: str) -> bool:
         return False
     shutil.rmtree(point_path)
     return True
+
+
+def _apply_timer_snap_setting(enabled: bool) -> Dict[str, Dict[str, Optional[str]]]:
+    CONFIG["TIMER_SNAP_ENABLED"] = enabled
+    if auto_scheduler is not None:
+        auto_scheduler.reschedule_all()
+    if picsum_scheduler is not None:
+        picsum_scheduler.reschedule_all()
+
+    summary: Dict[str, Dict[str, Optional[str]]] = {}
+    for stream_id, conf in settings.items():
+        if not isinstance(conf, dict):
+            continue
+        ensure_ai_defaults(conf)
+        ensure_picsum_defaults(conf)
+        ai_state = conf.get(AI_STATE_KEY)
+        picsum_conf = conf.get(PICSUM_SETTINGS_KEY)
+        summary[stream_id] = {
+            "ai_next": ai_state.get("next_auto_trigger") if isinstance(ai_state, dict) else None,
+            "picsum_next": picsum_conf.get("next_auto_trigger") if isinstance(picsum_conf, dict) else None,
+        }
+
+    save_settings(settings)
+    return summary
+
+
+@app.route("/api/settings/timers", methods=["GET", "POST"])
+def api_timer_settings():
+    cfg = load_config()
+    snap_enabled = _as_bool(cfg.get("TIMER_SNAP_ENABLED"), False)
+    if request.method == "GET":
+        return jsonify({"timer_snap_enabled": snap_enabled})
+
+    api_key = cfg.get("API_KEY")
+    if api_key and request.headers.get("X-API-Key") != api_key:
+        return jsonify({"error": "Unauthorized"}), 401
+
+    payload = request.get_json(silent=True) or {}
+    requested = _as_bool(payload.get("timer_snap_enabled"), False)
+    cfg["TIMER_SNAP_ENABLED"] = requested
+    try:
+        config_manager.save_config(cfg)
+    except Exception:
+        logger.exception("Failed to persist timer snap setting")
+        return jsonify({"error": "Unable to save setting"}), 500
+
+    stream_summary = _apply_timer_snap_setting(requested)
+    return jsonify({"timer_snap_enabled": requested, "streams": stream_summary})
 
 
 @app.route("/restore_points", methods=["GET", "POST"])

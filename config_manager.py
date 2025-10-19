@@ -34,6 +34,7 @@ DEFAULT_CONFIG_FALLBACK: Dict[str, Any] = {
     "AI_DEFAULT_PERSIST": True,
     "AI_POLL_INTERVAL": 5.0,
     "AI_TIMEOUT": 0.0,
+    "TIMER_SNAP_ENABLED": False,
     "LIVE_HLS_ASYNC": True,
     "LIVE_HLS_TTL_SECS": 3600,
     "LIVE_HLS_MAX_WORKERS": 3,
@@ -180,6 +181,15 @@ def load_config(
 
     merged["MEDIA_PATHS"] = _normalize_media_paths(merged.get("MEDIA_PATHS"))
     return merged
+
+
+def save_config(
+    data: Dict[str, Any],
+    config_path: Path = CONFIG_FILE,
+) -> None:
+    """Persist ``data`` to ``config_path``."""
+
+    _write_json(Path(config_path), data)
 
 
 def validate_media_paths(paths: Iterable[str]) -> List[Path]:

@@ -1657,16 +1657,28 @@
     highlightAiSelection(resultsEl, resultsEl.dataset.selected || '');
   }
 
-  function formatAutoTime(value) {
-    const fallback = '\u2014';
-    if (!value) return fallback;
-    const parsed = new Date(value);
-    if (!Number.isNaN(parsed.getTime())) {
-      const datePart = parsed.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
-      const timePart = parsed.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
-      return `${datePart} ${timePart}`;
+  const MONTH_LABELS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+  function formatUnifiedTimestamp(value, emptyPlaceholder = '\u2014') {
+    if (value === null || value === undefined) return emptyPlaceholder;
+    const text = String(value).trim();
+    if (!text) return emptyPlaceholder;
+    if (/^\d{2} [A-Za-z]{3} \d{2}:\d{2}$/.test(text)) {
+      return text;
     }
-    return value || fallback;
+    const parsed = new Date(text);
+    if (!Number.isNaN(parsed.getTime())) {
+      const day = String(parsed.getDate()).padStart(2, '0');
+      const month = MONTH_LABELS[parsed.getMonth()] || MONTH_LABELS[0];
+      const hours = String(parsed.getHours()).padStart(2, '0');
+      const minutes = String(parsed.getMinutes()).padStart(2, '0');
+      return `${day} ${month} ${hours}:${minutes}`;
+    }
+    return text;
+  }
+
+  function formatAutoTime(value) {
+    return formatUnifiedTimestamp(value, '\u2014');
   }
 
   function updateAutoIndicators(card, state) {
