@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 import math
 import mimetypes
@@ -15,7 +16,7 @@ from urllib.parse import quote
 
 import tempfile
 
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageFont, ImageSequence
 
 from config_manager import MediaRoot
 from werkzeug.datastructures import FileStorage
@@ -42,6 +43,7 @@ VIDEO_EXTENSIONS: set[str] = {
     ".avi",
     ".m4v",
 }
+PREVIEW_EXTENSIONS: set[str] = set(VIDEO_EXTENSIONS | {".gif"})
 
 PLACEHOLDER_SIZE = (320, 180)
 PLACEHOLDER_BG = (24, 24, 24)
@@ -136,6 +138,11 @@ class MediaManager:
         thumb_width: int = 320,
         nsfw_keyword: str = "nsfw",
         internal_dirs: Optional[Iterable[str]] = None,
+        preview_enabled: bool = True,
+        preview_frames: int = 8,
+        preview_width: int = 320,
+        preview_max_duration: float = 300.0,
+        preview_max_bytes: Optional[int] = None,
     ) -> None:
         if not roots:
             raise ValueError("At least one media root is required")
@@ -158,6 +165,21 @@ class MediaManager:
             except OSError as exc:  # pragma: no cover - depends on fs permissions
                 logger.debug("Unable to ensure thumbnail cache %s: %s", cache_dir, exc)
             self._cache_dirs[alias] = cache_dir
+        self._preview_enabled = bool(preview_enabled)
+        self._preview_frames = max(1, int(preview_frames))
+        self._preview_width = max(16, int(preview_width))
+        try:
+            duration = float(preview_max_duration)
+        except (TypeError, ValueError):
+            duration = 0.0
+        self._preview_max_duration = duration if duration > 0 else 0.0
+        if preview_max_bytes is not None and preview_max_bytes > 0:
+            self._preview_max_bytes: Optional[int] = int(preview_max_bytes)
+        else:
+            self._preview_max_bytes = None
+        self._preview_locks: Dict[Path, threading.Lock] = {}
+        self._ffmpeg_path = self._which("ffmpeg")
+        self._ffprobe_path = self._which("ffprobe")
 
     # ----------------------------------------------------------------------
     # Path helpers
@@ -287,7 +309,8 @@ class MediaManager:
                     name = entry.name
                     if self._hidden(name):
                         continue
-                    virtual_child = self._virtualize(root.alias, Path(entry.path))
+                    entry_path = Path(entry.path)
+                    virtual_child = self._virtualize(root.alias, entry_path)
                     if hide_nsfw and self._is_nsfw(virtual_child):
                         continue
                     try:
@@ -309,19 +332,21 @@ class MediaManager:
                     elif entry.is_file():
                         ext = Path(name).suffix.lower()
                         size = stat_info.st_size
-                        file_items.append(
-                            {
-                                "name": name,
-                                "path": virtual_child,
-                                "size": size,
-                                "size_text": _human_readable_size(size),
-                                "mtime": stat_info.st_mtime,
-                                "ext": ext,
-                                "thumbUrl": self._thumbnail_url(virtual_child),
-                                "isVideo": ext in VIDEO_EXTENSIONS,
-                                "isImage": ext in IMAGE_EXTENSIONS,
-                            }
-                        )
+                        file_entry = {
+                            "name": name,
+                            "path": virtual_child,
+                            "size": size,
+                            "size_text": _human_readable_size(size),
+                            "mtime": stat_info.st_mtime,
+                            "ext": ext,
+                            "thumbUrl": self._thumbnail_url(virtual_child),
+                            "isVideo": ext in VIDEO_EXTENSIONS,
+                            "isImage": ext in IMAGE_EXTENSIONS,
+                        }
+                        frames = self._preview_frames_for_entry(root, entry_path, stat_info)
+                        if frames:
+                            file_entry["frames"] = frames
+                        file_items.append(file_entry)
         except FileNotFoundError:
             raise MediaManagerError("Folder not found", code="not_found", status=404)
         except OSError as exc:
@@ -367,9 +392,122 @@ class MediaManager:
             return 0
         return count
 
-    def _thumbnail_url(self, virtual_path: str) -> str:
+    def _thumbnail_url(
+        self,
+        virtual_path: str,
+        *,
+        width: Optional[int] = None,
+        height: Optional[int] = None,
+    ) -> str:
         encoded = quote(virtual_path, safe="/:@")
-        return f"/api/media/thumbnail?path={encoded}"
+        params = [f"path={encoded}"]
+        if width and width > 0:
+            params.append(f"w={int(width)}")
+        if height and height > 0:
+            params.append(f"h={int(height)}")
+        query = "&".join(params)
+        return f"/api/media/thumbnail?{query}"
+
+    def _preview_frame_url(self, virtual_path: str, index: int) -> str:
+        encoded = quote(virtual_path, safe="/:@")
+        return f"/api/media/preview_frame?path={encoded}&i={int(index)}"
+
+    def _preview_frame_dir(self, root: MediaRoot, abs_path: Path) -> Path:
+        cache_root = self._cache_dirs[root.alias]
+        preview_root = cache_root / "previews"
+        try:
+            relative = abs_path.resolve().relative_to(root.path.resolve())
+            parts = list(relative.parts)
+        except ValueError:
+            parts = [abs_path.name]
+        if parts:
+            stem = Path(parts[-1]).stem or "frame"
+            if len(parts) > 1:
+                preview_root = preview_root.joinpath(*parts[:-1])
+        else:
+            stem = abs_path.stem or "frame"
+        return preview_root / f"{stem}_frames"
+
+    def _load_preview_metadata(self, frame_dir: Path) -> Optional[Dict[str, Any]]:
+        meta_path = frame_dir / "meta.json"
+        try:
+            with meta_path.open("r", encoding="utf-8") as handle:
+                return json.load(handle)
+        except (FileNotFoundError, json.JSONDecodeError, OSError):
+            return None
+
+    def _write_preview_metadata(self, frame_dir: Path, metadata: Dict[str, Any]) -> None:
+        meta_path = frame_dir / "meta.json"
+        try:
+            frame_dir.mkdir(parents=True, exist_ok=True)
+            temp_path = meta_path.with_suffix(".tmp")
+            with temp_path.open("w", encoding="utf-8") as handle:
+                json.dump(metadata, handle)
+                handle.write("\n")
+            temp_path.replace(meta_path)
+        except OSError as exc:
+            logger.debug("Failed to persist preview metadata %s: %s", meta_path, exc)
+
+    def _acquire_preview_lock(self, frame_dir: Path) -> threading.Lock:
+        with self._lock:
+            lock = self._preview_locks.get(frame_dir)
+            if lock is None:
+                lock = threading.Lock()
+                self._preview_locks[frame_dir] = lock
+            return lock
+
+    def _preview_metadata_current(self, metadata: Optional[Dict[str, Any]], source_mtime: float) -> bool:
+        if not metadata:
+            return False
+        try:
+            cached_mtime = float(metadata.get("source_mtime", 0.0))
+        except (TypeError, ValueError):
+            return False
+        if cached_mtime < source_mtime:
+            return False
+        target_frames = int(metadata.get("target_frames") or 0)
+        if target_frames != self._preview_frames:
+            return False
+        cached_width = int(metadata.get("width") or 0)
+        if cached_width != self._preview_width:
+            return False
+        return True
+
+    def _record_preview_skip(self, frame_dir: Path, source_mtime: float, reason: str) -> None:
+        metadata = {
+            "source_mtime": source_mtime,
+            "frame_count": 0,
+            "skip_reason": reason,
+            "generated_at": time.time(),
+            "target_frames": self._preview_frames,
+            "width": self._preview_width,
+        }
+        self._write_preview_metadata(frame_dir, metadata)
+
+    def _preview_frames_for_entry(self, root: MediaRoot, abs_path: Path, stat_info: os.stat_result) -> List[str]:
+        if not self._preview_enabled:
+            return []
+        ext = abs_path.suffix.lower()
+        if ext not in PREVIEW_EXTENSIONS:
+            return []
+        if self._preview_max_bytes and stat_info.st_size > self._preview_max_bytes:
+            return []
+        frame_dir = self._preview_frame_dir(root, abs_path)
+        metadata = self._load_preview_metadata(frame_dir)
+        if not self._preview_metadata_current(metadata, stat_info.st_mtime):
+            metadata = None
+        frame_count = 0
+        if metadata:
+            try:
+                frame_count = int(metadata.get("frame_count") or 0)
+            except (TypeError, ValueError):
+                frame_count = 0
+        elif self._preview_enabled:
+            frame_count = self._preview_frames
+        if frame_count <= 1:
+            return []
+        virtual = self._virtualize(root.alias, abs_path)
+        return [self._preview_frame_url(virtual, idx) for idx in range(1, frame_count + 1)]
 
     # ----------------------------------------------------------------------
     # File operations
@@ -485,6 +623,9 @@ class MediaManager:
                 "isVideo": ext in VIDEO_EXTENSIONS,
                 "isImage": ext in IMAGE_EXTENSIONS,
             }
+            frames = self._preview_frames_for_entry(root, target_path, stats)
+            if frames:
+                entry["frames"] = frames
             saved.append(entry)
         return saved
 
@@ -519,6 +660,69 @@ class MediaManager:
     # ----------------------------------------------------------------------
     # Thumbnail generation
     # ----------------------------------------------------------------------
+    def get_preview_frame(self, virtual_path: ListablePath, index: int) -> Tuple[Path, float, str, int]:
+        if not self._preview_enabled:
+            raise MediaManagerError("Preview generation is disabled", code="preview_disabled", status=404)
+        try:
+            frame_index = int(index)
+        except (TypeError, ValueError):
+            raise MediaManagerError("Invalid frame index", code="invalid_request")
+        if frame_index < 1:
+            raise MediaManagerError("Invalid frame index", code="invalid_request")
+        root, abs_path = self._resolve(virtual_path)
+        if not abs_path.exists() or not abs_path.is_file():
+            raise MediaManagerError("File not found", code="not_found", status=404)
+        ext = abs_path.suffix.lower()
+        if ext not in PREVIEW_EXTENSIONS:
+            raise MediaManagerError("Preview not supported for this file type", code="unsupported_media", status=404)
+        stat_info = abs_path.stat()
+        if self._preview_max_bytes and stat_info.st_size > self._preview_max_bytes:
+            frame_dir = self._preview_frame_dir(root, abs_path)
+            self._record_preview_skip(frame_dir, stat_info.st_mtime, "size_limit")
+            raise MediaManagerError("Preview unavailable for large files", code="preview_skipped", status=404)
+        frame_dir = self._preview_frame_dir(root, abs_path)
+        lock = self._acquire_preview_lock(frame_dir)
+        with lock:
+            metadata = self._load_preview_metadata(frame_dir)
+            if not self._preview_metadata_current(metadata, stat_info.st_mtime):
+                metadata = None
+            if metadata is None:
+                if ext in VIDEO_EXTENSIONS:
+                    duration = self._probe_video_duration(abs_path)
+                    if duration is None or duration <= 0:
+                        self._record_preview_skip(frame_dir, stat_info.st_mtime, "duration_unknown")
+                        raise MediaManagerError("Preview unavailable for this video", code="preview_skipped", status=404)
+                    if self._preview_max_duration and duration > self._preview_max_duration:
+                        self._record_preview_skip(frame_dir, stat_info.st_mtime, "duration_limit")
+                        raise MediaManagerError("Preview skipped for long videos", code="preview_skipped", status=404)
+                generated = self._generate_preview_frames(root, abs_path, ext=ext, stat_info=stat_info)
+                if generated <= 1:
+                    self._record_preview_skip(frame_dir, stat_info.st_mtime, "insufficient_frames")
+                    raise MediaManagerError("Preview generation failed", code="preview_failed", status=404)
+                metadata = self._load_preview_metadata(frame_dir)
+            if not metadata:
+                raise MediaManagerError("Preview metadata missing", code="preview_failed", status=404)
+            try:
+                frame_count = int(metadata.get("frame_count") or 0)
+            except (TypeError, ValueError):
+                frame_count = 0
+            if frame_count <= 1:
+                self._record_preview_skip(frame_dir, stat_info.st_mtime, "insufficient_frames")
+                raise MediaManagerError("Preview unavailable", code="preview_failed", status=404)
+            normalized_index = ((frame_index - 1) % frame_count) + 1
+            frame_path = frame_dir / f"frame_{normalized_index:03d}.webp"
+            if not frame_path.exists():
+                frames = sorted(frame_dir.glob("frame_*.webp"))
+                if not frames:
+                    self._record_preview_skip(frame_dir, stat_info.st_mtime, "missing_frames")
+                    raise MediaManagerError("Preview unavailable", code="preview_failed", status=404)
+                frame_count = len(frames)
+                normalized_index = ((frame_index - 1) % frame_count) + 1
+                frame_path = frames[normalized_index - 1]
+            cache_key = self._cache_key(abs_path, self._preview_width, normalized_index, stat_info.st_mtime)
+            etag = f'W/"preview-{cache_key}"'
+        return frame_path, stat_info.st_mtime, etag, frame_count
+
     def get_thumbnail(
         self,
         virtual_path: ListablePath,
@@ -574,6 +778,137 @@ class MediaManager:
                 raise MediaManagerError("Unable to create thumbnail", code="thumbnail_failed", status=500)
         return cache_path, stat_info.st_mtime, etag
 
+    def get_thumbnail_metadata(
+        self,
+        virtual_path: ListablePath,
+        *,
+        width: Optional[int] = None,
+        height: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        root, abs_path = self._resolve(virtual_path)
+        if not abs_path.exists() or not abs_path.is_file():
+            raise MediaManagerError("File not found", code="not_found", status=404)
+        stat_info = abs_path.stat()
+        virtual = self._virtualize(root.alias, abs_path)
+        thumb_url = self._thumbnail_url(virtual, width=width, height=height)
+        frames = self._preview_frames_for_entry(root, abs_path, stat_info)
+        payload: Dict[str, Any] = {"thumb": thumb_url, "mtime": stat_info.st_mtime}
+        if frames:
+            payload["frames"] = frames
+        return payload
+
+    def _generate_preview_frames(
+        self,
+        root: MediaRoot,
+        abs_path: Path,
+        *,
+        ext: str,
+        stat_info: os.stat_result,
+    ) -> int:
+        cache_root = self._cache_dirs[root.alias]
+        try:
+            temp_dir = Path(tempfile.mkdtemp(prefix="preview_", dir=cache_root))
+        except OSError as exc:
+            logger.debug("Unable to create preview temp dir for %s: %s", abs_path, exc)
+            return 0
+        generated = 0
+        try:
+            if ext == ".gif":
+                generated = self._generate_gif_preview(abs_path, temp_dir)
+            else:
+                generated = self._generate_video_preview(abs_path, temp_dir)
+            if generated <= 1:
+                return 0
+            frame_dir = self._preview_frame_dir(root, abs_path)
+            if frame_dir.exists():
+                shutil.rmtree(frame_dir, ignore_errors=True)
+            frame_dir.parent.mkdir(parents=True, exist_ok=True)
+            temp_dir.replace(frame_dir)
+            metadata = {
+                "source_mtime": stat_info.st_mtime,
+                "frame_count": generated,
+                "generated_at": time.time(),
+                "target_frames": self._preview_frames,
+                "width": self._preview_width,
+            }
+            self._write_preview_metadata(frame_dir, metadata)
+            return generated
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.debug("Preview generation failed for %s: %s", abs_path, exc)
+            return 0
+        finally:
+            if temp_dir.exists():
+                shutil.rmtree(temp_dir, ignore_errors=True)
+
+    def _generate_video_preview(self, path: Path, output_dir: Path) -> int:
+        ffmpeg_path = self._ffmpeg_path or self._which("ffmpeg")
+        if not ffmpeg_path:
+            logger.debug("Preview skipped for %s: ffmpeg unavailable", path)
+            self._ffmpeg_path = None
+            return 0
+        self._ffmpeg_path = ffmpeg_path
+        output_dir.mkdir(parents=True, exist_ok=True)
+        duration = self._probe_video_duration(path)
+        if duration is None or duration <= 0:
+            return 0
+        if self._preview_max_duration and duration > self._preview_max_duration:
+            return 0
+        fps_value = self._preview_frames / max(duration, 1.0)
+        fps_value = max(min(fps_value, 30.0), 0.1)
+        output_template = str(output_dir / "frame_%03d.webp")
+        filter_chain = f"fps={fps_value:.4f},scale={self._preview_width}:-1:force_original_aspect_ratio=decrease"
+        cmd = [
+            ffmpeg_path,
+            "-y",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-i",
+            str(path),
+            "-vf",
+            filter_chain,
+            "-frames:v",
+            str(self._preview_frames),
+            "-an",
+            "-q:v",
+            "80",
+            output_template,
+        ]
+        try:
+            subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)  # noqa: S603,S607
+        except (subprocess.CalledProcessError, FileNotFoundError, OSError) as exc:
+            logger.debug("Preview frame extraction failed for %s: %s", path, exc)
+            return 0
+        frames = sorted(output_dir.glob("frame_*.webp"))
+        return len(frames)
+
+    def _generate_gif_preview(self, path: Path, output_dir: Path) -> int:
+        output_dir.mkdir(parents=True, exist_ok=True)
+        count = 0
+        try:
+            with Image.open(path) as image:
+                total_frames = getattr(image, "n_frames", 1)
+                if total_frames <= 1:
+                    return 0
+                step = max(1, total_frames // self._preview_frames) if self._preview_frames else 1
+                for idx, frame in enumerate(ImageSequence.Iterator(image)):
+                    if idx % step != 0:
+                        continue
+                    if count >= self._preview_frames:
+                        break
+                    frame_copy = frame.copy().convert("RGBA")
+                    canvas = Image.new("RGBA", frame_copy.size)
+                    canvas.paste(frame_copy, (0, 0), frame_copy)
+                    canvas = canvas.convert("RGB")
+                    canvas.thumbnail((self._preview_width, self._preview_width * 4), _RESAMPLING_FILTER)
+                    output_path = output_dir / f"frame_{count + 1:03d}.webp"
+                    canvas.save(output_path, "WEBP", quality=80, method=6)
+                    count += 1
+        except (OSError, ValueError) as exc:
+            logger.debug("GIF preview extraction failed for %s: %s", path, exc)
+            return 0
+        return count
+
     def _cache_key(self, path: Path, width: int, height: int, mtime: float) -> str:
         digest = f"{path}:{mtime}:{width}:{height}"
         return str(abs(hash(digest)))
@@ -596,10 +931,11 @@ class MediaManager:
             return background
 
     def _render_video(self, path: Path, width: int, height: int) -> Optional[Image.Image]:
-        ffmpeg_path = self._which("ffmpeg")
+        ffmpeg_path = self._ffmpeg_path or self._which("ffmpeg")
         if not ffmpeg_path:
             logger.debug("ffmpeg not available; cannot render video thumbnail")
             return None
+        self._ffmpeg_path = ffmpeg_path
         timestamp = self._probe_video_timestamp(path)
         if timestamp is None:
             timestamp = 0.1
@@ -635,10 +971,11 @@ class MediaManager:
             except OSError:
                 pass
 
-    def _probe_video_timestamp(self, path: Path) -> Optional[float]:
-        ffprobe_path = self._which("ffprobe")
+    def _probe_video_duration(self, path: Path) -> Optional[float]:
+        ffprobe_path = self._ffprobe_path or self._which("ffprobe")
         if not ffprobe_path:
             return None
+        self._ffprobe_path = ffprobe_path
         cmd = [
             ffprobe_path,
             "-v",
@@ -656,9 +993,15 @@ class MediaManager:
             duration = float(result.stdout.strip())
             if not math.isfinite(duration) or duration <= 0:
                 return None
-            return duration / 2
+            return duration
         except (ValueError, subprocess.CalledProcessError, FileNotFoundError):
             return None
+
+    def _probe_video_timestamp(self, path: Path) -> Optional[float]:
+        duration = self._probe_video_duration(path)
+        if duration is None:
+            return None
+        return duration / 2
 
     def _which(self, program: str) -> Optional[str]:
         for search_dir in os.getenv("PATH", "").split(os.pathsep):

@@ -4,6 +4,13 @@
   const roots = Array.isArray(bootstrap.roots) ? bootstrap.roots : [];
   const allowedExts = Array.isArray(bootstrap.allowedExts) ? bootstrap.allowedExts : [];
   const uploadMaxMB = Number(bootstrap.uploadMaxMB || 0);
+  const previewEnabled = bootstrap.previewEnabled !== false;
+  const PREVIEW_INTERVAL = (() => {
+    const value = Number(bootstrap.previewIntervalMs || 150);
+    if (!Number.isFinite(value) || value <= 0) return 150;
+    return Math.min(Math.max(value, 60), 1000);
+  })();
+  const previewStates = new WeakMap();
 
   const state = {
     currentPath: "",
@@ -52,6 +59,96 @@
     rootMargin: "120px",
     threshold: 0.01,
   });
+
+  function normalizePreviewUrls(frames) {
+    if (!Array.isArray(frames)) return [];
+    const urls = [];
+    frames.forEach((item) => {
+      const text = typeof item === "string" ? item.trim() : "";
+      if (!text) return;
+      if (!urls.includes(text)) {
+        urls.push(text);
+      }
+    });
+    return urls;
+  }
+
+  function attachPreview(card, img, frames) {
+    if (!previewEnabled) return;
+    const urls = normalizePreviewUrls(frames);
+    if (urls.length <= 1) return;
+    const existing = previewStates.get(card);
+    if (existing) {
+      existing.urls = urls;
+      existing.index = 0;
+      return;
+    }
+    const state = {
+      urls,
+      timer: null,
+      index: 0,
+      original: null,
+    };
+    previewStates.set(card, state);
+    const start = () => startPreview(card, img);
+    const stop = () => stopPreview(card, img);
+    card.addEventListener("mouseenter", start);
+    card.addEventListener("mouseleave", stop);
+    card.addEventListener("focus", start);
+    card.addEventListener("blur", stop);
+    card.dataset.preview = "ready";
+  }
+
+  function startPreview(card, img) {
+    const state = previewStates.get(card);
+    if (!state || state.timer) return;
+    if (!state.urls || state.urls.length <= 1) return;
+    if (img.dataset && img.dataset.src && !img.getAttribute("src")) {
+      img.src = img.dataset.src;
+    }
+    if (!state.original) {
+      state.original = img.currentSrc || img.getAttribute("src") || img.dataset.src || "";
+    }
+    state.index = 0;
+    const advance = () => {
+      if (!state.urls.length) {
+        stopPreview(card, img);
+        return;
+      }
+      const url = state.urls[state.index % state.urls.length];
+      if (url) {
+        img.src = url;
+      }
+      state.index = (state.index + 1) % state.urls.length;
+    };
+    advance();
+    state.timer = window.setInterval(advance, PREVIEW_INTERVAL);
+    card.dataset.preview = "playing";
+  }
+
+  function stopPreview(card, img) {
+    const state = previewStates.get(card);
+    if (!state) return;
+    if (state.timer) {
+      window.clearInterval(state.timer);
+      state.timer = null;
+    }
+    state.index = 0;
+    const fallback = state.original || (img.dataset ? img.dataset.src : "") || "";
+    if (fallback) {
+      img.src = fallback;
+    }
+    card.dataset.preview = "ready";
+  }
+
+  function stopAllPreviews() {
+    document.querySelectorAll(".media-card[data-preview=\"playing\"]").forEach((cardEl) => {
+      const imgEl = cardEl.querySelector(".media-thumb img");
+      if (imgEl) {
+        stopPreview(cardEl, imgEl);
+      }
+    });
+  }
 
   function initThemeToggle() {
     const root = document.documentElement;
@@ -331,6 +428,7 @@
     const img = document.createElement("img");
     if (file.thumbUrl) {
       img.dataset.src = file.thumbUrl;
+      img.dataset.thumb = file.thumbUrl;
       thumbObserver.observe(img);
     } else {
       const placeholder = document.createElement("div");
@@ -338,6 +436,7 @@
       placeholder.textContent = file.ext ? file.ext.toUpperCase() : "FILE";
       thumb.appendChild(placeholder);
     }
+    img.alt = file.name || "";
     thumb.appendChild(img);
     card.appendChild(thumb);
 
@@ -393,6 +492,10 @@
     body.appendChild(meta);
     card.appendChild(body);
 
+    if (Array.isArray(file.frames) && file.frames.length > 1) {
+      attachPreview(card, img, file.frames);
+    }
+
     return card;
   }
 
@@ -404,6 +507,7 @@
 
   function renderFiles(files) {
     if (!grid) return;
+    stopAllPreviews();
     clearElement(grid);
     if (!files || !files.length) {
       const message = document.createElement("div");
@@ -724,7 +828,14 @@
     document.addEventListener("click", closeAllMenus);
     document.addEventListener("keydown", (event) => {
       if (event.key === "Escape") closeAllMenus();
+      if (event.key === "Escape") stopAllPreviews();
     });
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState !== "visible") {
+        stopAllPreviews();
+      }
+    });
+    window.addEventListener("blur", stopAllPreviews);
     if (hideNsfwToggle) {
       hideNsfwToggle.addEventListener("change", () => {
         state.hideNsfw = hideNsfwToggle.checked;

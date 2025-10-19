@@ -294,6 +294,22 @@ MEDIA_MANAGEMENT_ALLOW_EDIT = _as_bool(CONFIG.get("MEDIA_MANAGEMENT_ALLOW_EDIT")
 MEDIA_UPLOAD_MAX_MB = max(1, _as_int(CONFIG.get("MEDIA_UPLOAD_MAX_MB"), 256))
 MEDIA_ALLOWED_EXTS = _normalize_extensions(CONFIG.get("MEDIA_ALLOWED_EXTS"))
 MEDIA_THUMB_WIDTH = max(64, _as_int(CONFIG.get("MEDIA_THUMB_WIDTH"), 320))
+MEDIA_PREVIEW_ENABLED = _as_bool(CONFIG.get("MEDIA_PREVIEW_ENABLED"), True)
+MEDIA_PREVIEW_FRAMES = max(1, _as_int(CONFIG.get("MEDIA_PREVIEW_FRAMES"), 8))
+MEDIA_PREVIEW_WIDTH = max(32, _as_int(CONFIG.get("MEDIA_PREVIEW_WIDTH"), MEDIA_THUMB_WIDTH))
+_preview_duration_raw = CONFIG.get("MEDIA_PREVIEW_MAX_DURATION", 300)
+try:
+    MEDIA_PREVIEW_MAX_DURATION = float(_preview_duration_raw)
+except (TypeError, ValueError):
+    MEDIA_PREVIEW_MAX_DURATION = 300.0
+if MEDIA_PREVIEW_MAX_DURATION < 0:
+    MEDIA_PREVIEW_MAX_DURATION = 0.0
+MEDIA_PREVIEW_MAX_MB = max(0, _as_int(CONFIG.get("MEDIA_PREVIEW_MAX_MB"), 512))
+MEDIA_PREVIEW_MAX_BYTES: Optional[int]
+if MEDIA_PREVIEW_MAX_MB > 0:
+    MEDIA_PREVIEW_MAX_BYTES = MEDIA_PREVIEW_MAX_MB * 1024 * 1024
+else:
+    MEDIA_PREVIEW_MAX_BYTES = None
 MEDIA_MANAGER = MediaManager(
     roots=MEDIA_ROOTS,
     allowed_exts=MEDIA_ALLOWED_EXTS,
@@ -301,6 +317,11 @@ MEDIA_MANAGER = MediaManager(
     thumb_width=MEDIA_THUMB_WIDTH,
     nsfw_keyword=NSFW_KEYWORD,
     internal_dirs=INTERNAL_MEDIA_DIRS,
+    preview_enabled=MEDIA_PREVIEW_ENABLED,
+    preview_frames=MEDIA_PREVIEW_FRAMES,
+    preview_width=MEDIA_PREVIEW_WIDTH,
+    preview_max_duration=MEDIA_PREVIEW_MAX_DURATION,
+    preview_max_bytes=MEDIA_PREVIEW_MAX_BYTES,
 )
 MEDIA_UPLOAD_MAX_BYTES = MEDIA_MANAGER.max_upload_bytes()
 
@@ -3895,6 +3916,12 @@ def api_media_thumbnail():
     height = _as_int(height_raw, 0) if height_raw else None
     if height is not None and height <= 0:
         height = None
+    if request.args.get("meta"):
+        try:
+            metadata = MEDIA_MANAGER.get_thumbnail_metadata(path, width=width, height=height)
+        except MediaManagerError as exc:
+            return _media_error_response(exc)
+        return jsonify(metadata)
     try:
         thumb_path, source_mtime, etag = MEDIA_MANAGER.get_thumbnail(path, width=width, height=height)
     except MediaManagerError as exc:
@@ -3920,6 +3947,45 @@ def api_media_thumbnail():
     response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
     response.headers["ETag"] = quoted_etag
     response.headers["Last-Modified"] = http_date(source_mtime)
+    return response
+
+
+@app.route("/api/media/preview_frame", methods=["GET"])
+def api_media_preview_frame():
+    path = request.args.get("path")
+    if not path:
+        return jsonify({"error": "Path is required", "code": "invalid_request"}), 400
+    index_raw = request.args.get("i") or request.args.get("index") or "1"
+    try:
+        index = int(index_raw)
+    except (TypeError, ValueError):
+        return jsonify({"error": "Invalid frame index", "code": "invalid_request"}), 400
+    try:
+        frame_path, source_mtime, etag, frame_count = MEDIA_MANAGER.get_preview_frame(path, index)
+    except MediaManagerError as exc:
+        return _media_error_response(exc)
+    etag_value = str(etag)
+    weak = False
+    if etag_value.startswith("W/"):
+        weak = True
+        etag_value = etag_value[2:]
+    etag_value = etag_value.strip('"')
+    quoted_etag = quote_etag(etag_value, weak=weak)
+    incoming_etag = request.headers.get("If-None-Match")
+    if incoming_etag and incoming_etag == quoted_etag:
+        response = app.response_class(status=304)
+        response.headers["ETag"] = quoted_etag
+        response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+        return response
+    response = send_file(
+        frame_path,
+        mimetype="image/webp",
+        conditional=True,
+    )
+    response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+    response.headers["ETag"] = quoted_etag
+    response.headers["Last-Modified"] = http_date(source_mtime)
+    response.headers["X-Preview-Frame-Count"] = str(frame_count)
     return response
 
 
@@ -4152,6 +4218,10 @@ def media_management_page():
         media_allowed_exts=MEDIA_ALLOWED_EXTS,
         media_upload_max_mb=MEDIA_UPLOAD_MAX_MB,
         media_thumb_width=MEDIA_THUMB_WIDTH,
+        media_preview_enabled=MEDIA_PREVIEW_ENABLED,
+        media_preview_frames=MEDIA_PREVIEW_FRAMES,
+        media_preview_width=MEDIA_PREVIEW_WIDTH,
+        media_preview_max_duration=MEDIA_PREVIEW_MAX_DURATION,
     )
 
 @app.route("/")
