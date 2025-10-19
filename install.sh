@@ -21,7 +21,7 @@ read -r -p "Enter the port the server should listen on [${default_port}]: " PORT
 PORT="${PORT:-$default_port}"
 echo "\nInstalling system packages…"
 sudo apt-get update
-sudo apt-get install -y python3 python3-venv python3-pip
+sudo apt-get install -y python3 python3-venv python3-pip ffmpeg
 echo "\nCopying files to ${INSTALL_DIR}…"
 sudo mkdir -p "$INSTALL_DIR"
 # Copy everything in this repository into the installation directory.  We avoid
