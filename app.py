@@ -2235,6 +2235,7 @@ try:
         persist_images=AI_DEFAULT_PERSIST,
         default_poll_interval=AI_POLL_INTERVAL,
         default_timeout=AI_TIMEOUT,
+        logger=app.logger,
     )
 except Exception as exc:  # pragma: no cover - defensive during optional setup
     logger.warning("Stable Horde client unavailable: %s", exc)

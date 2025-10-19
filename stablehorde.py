@@ -7,12 +7,17 @@ request AI generated images without embedding HTTP logic inside the Flask app.
 from __future__ import annotations
 
 import base64
+import logging
 import os
+import socket
 import tempfile
 import time
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple, Union
+from urllib.parse import urlparse
 
 try:
     import requests
@@ -35,6 +40,7 @@ DEFAULT_HEIGHT = 512
 MIN_DIMENSION = 64
 MAX_DIMENSION = 2048
 DIMENSION_STEP = 64
+LOG_PREFIX = "[StableHorde]"
 
 
 class StableHordeError(RuntimeError):
@@ -148,6 +154,7 @@ class StableHorde:
         *,
         base_url: str = DEFAULT_BASE_URL,
         client_agent: str = DEFAULT_CLIENT_AGENT,
+        logger: Optional[logging.Logger] = None,
         save_dir: Optional[Union[str, Path]] = None,
         persist_images: Optional[bool] = None,
         request_timeout: int = 30,
@@ -155,6 +162,7 @@ class StableHorde:
         default_timeout: float = 600.0,
         load_env: bool = True,
     ) -> None:
+        self.logger = logger or logging.getLogger("stablehorde")
         if load_env:
             env_file = os.getenv("STABLE_HORDE_ENV_FILE", ".env")
             _load_env_file(env_file)
@@ -167,6 +175,7 @@ class StableHorde:
         self.request_timeout = request_timeout
         self.default_poll_interval = default_poll_interval
         self.default_timeout = default_timeout
+        self._parsed_base = urlparse(self.base_url)
 
         if save_dir is None:
             save_dir_env = os.getenv("STABLE_HORDE_SAVE_DIR")
@@ -202,6 +211,117 @@ class StableHorde:
         if self.persist_images and self._persistent_dir is None:
             self._persistent_dir = self._default_output_dir
             self._persistent_dir.mkdir(parents=True, exist_ok=True)
+
+    # ------------------------------------------------------------------
+    # Logging helpers
+    # ------------------------------------------------------------------
+    def _log(self, level: int, message: str, *args: Any) -> None:
+        """Emit a log message with a Stable Horde prefix."""
+
+        logger = self.logger
+        if logger is None:
+            return
+        try:
+            logger.log(level, "%s " + message, LOG_PREFIX, *args)
+        except Exception:
+            # Logging must never raise upstream.
+            pass
+
+    def _ensure_horde_ready(self) -> None:
+        """Verify Stable Horde is reachable before attempting a generation."""
+
+        if self._ping_horde():
+            return
+        raise StableHordeError("Stable Horde unreachable after health check attempts")
+
+    def _ping_horde(self, *, attempts: int = 5, base_delay: int = 10, timeout: int = 3) -> bool:
+        """Attempt to resolve and open a socket to the Stable Horde host."""
+
+        host = self._parsed_base.hostname or "stablehorde.net"
+        scheme = self._parsed_base.scheme or "https"
+        port = self._parsed_base.port or (443 if scheme == "https" else 80)
+
+        for attempt in range(1, attempts + 1):
+            try:
+                socket.getaddrinfo(host, port)
+                with socket.create_connection((host, port), timeout=timeout):
+                    pass
+            except OSError as exc:
+                self._log(
+                    logging.WARNING,
+                    "Ping attempt %d/%d to %s:%s failed (%s)",
+                    attempt,
+                    attempts,
+                    host,
+                    port,
+                    exc,
+                )
+                if attempt < attempts:
+                    delay = base_delay * attempt
+                    self._log(logging.INFO, "Waiting %ds before retrying ping", delay)
+                    time.sleep(delay)
+                continue
+
+            self._log(
+                logging.INFO,
+                "Ping to %s:%s succeeded on attempt %d",
+                host,
+                port,
+                attempt,
+            )
+            return True
+
+        self._log(
+            logging.ERROR,
+            "Ping to %s:%s failed after %d attempts",
+            host,
+            port,
+            attempts,
+        )
+        return False
+
+    def _parse_retry_after(self, header_value: Optional[str]) -> int:
+        """Parse a Retry-After header into seconds, defaulting gracefully."""
+
+        default_wait = 60
+        if not header_value:
+            return default_wait
+
+        value = header_value.strip()
+        if not value:
+            return default_wait
+
+        try:
+            wait_seconds = float(value)
+            if wait_seconds >= 0:
+                return max(1, int(wait_seconds))
+        except ValueError:
+            pass
+
+        try:
+            target_dt = parsedate_to_datetime(value)
+        except (TypeError, ValueError):
+            return default_wait
+
+        if target_dt is None:
+            return default_wait
+
+        if target_dt.tzinfo is None:
+            target_dt = target_dt.replace(tzinfo=timezone.utc)
+
+        now = datetime.now(timezone.utc)
+        delta = (target_dt - now).total_seconds()
+        if delta <= 0:
+            return default_wait
+        return max(1, int(delta))
+
+    def _extract_response_detail(self, response: "requests.Response") -> Any:
+        """Safely extract JSON or text details from a response for logging."""
+
+        try:
+            return response.json()
+        except ValueError:
+            return response.text
 
     # ------------------------------------------------------------------
     # Public helpers
@@ -253,6 +373,8 @@ class StableHorde:
 
         if not prompt or not prompt.strip():
             raise StableHordeError("Prompt is required for Stable Horde generation")
+
+        self._ensure_horde_ready()
 
         width = int(width)
         height = int(height)
@@ -389,20 +511,122 @@ class StableHorde:
 
     def _request(self, method: str, path: str, **kwargs: Any) -> Any:
         url = self._url(path)
-        try:
-            response = self._session.request(method, url, timeout=self.request_timeout, **kwargs)
-        except requests.RequestException as exc:
-            raise StableHordeError(f"Request to Stable Horde failed: {exc}") from exc
-        if response.status_code >= 400:
+        attempts = 3
+        backoff_schedule = [1, 5, 15]
+
+        for attempt in range(1, attempts + 1):
             try:
-                detail: Any = response.json()
-            except ValueError:
-                detail = response.text
-            raise StableHordeError(f"Stable Horde error {response.status_code}: {detail}")
-        content_type = response.headers.get("Content-Type", "")
-        if "application/json" in content_type:
-            return response.json()
-        return response.content
+                response = self._session.request(method, url, timeout=self.request_timeout, **kwargs)
+            except requests.RequestException as exc:
+                if attempt >= attempts:
+                    self._log(
+                        logging.ERROR,
+                        "%s %s failed after %d attempts (%s)",
+                        method,
+                        url,
+                        attempt,
+                        exc,
+                    )
+                    raise StableHordeError(f"Request to Stable Horde failed after retries: {exc}") from exc
+
+                delay = backoff_schedule[min(attempt - 1, len(backoff_schedule) - 1)]
+                self._log(
+                    logging.WARNING,
+                    "%s %s attempt %d/%d failed (%s). Retrying in %ds",
+                    method,
+                    url,
+                    attempt,
+                    attempts,
+                    exc,
+                    delay,
+                )
+                time.sleep(delay)
+                continue
+
+            status = response.status_code
+            if status == 429:
+                wait_seconds = self._parse_retry_after(response.headers.get("Retry-After"))
+                if attempt >= attempts:
+                    self._log(
+                        logging.ERROR,
+                        "%s %s hit rate limit after %d attempts (Retry-After %ds)",
+                        method,
+                        url,
+                        attempt,
+                        wait_seconds,
+                    )
+                    detail = self._extract_response_detail(response)
+                    raise StableHordeError(f"Stable Horde error 429: {detail}")
+
+                self._log(
+                    logging.WARNING,
+                    "%s %s received 429 rate limit (attempt %d/%d). Waiting %ds before retry",
+                    method,
+                    url,
+                    attempt,
+                    attempts,
+                    wait_seconds,
+                )
+                time.sleep(wait_seconds)
+                continue
+
+            if 500 <= status:
+                detail = self._extract_response_detail(response)
+                if attempt >= attempts:
+                    self._log(
+                        logging.ERROR,
+                        "%s %s received server error %d after %d attempts: %s",
+                        method,
+                        url,
+                        status,
+                        attempt,
+                        detail,
+                    )
+                    raise StableHordeError(f"Stable Horde error {status}: {detail}")
+
+                delay = backoff_schedule[min(attempt - 1, len(backoff_schedule) - 1)]
+                self._log(
+                    logging.WARNING,
+                    "%s %s received server error %d (attempt %d/%d): %s. Retrying in %ds",
+                    method,
+                    url,
+                    status,
+                    attempt,
+                    attempts,
+                    detail,
+                    delay,
+                )
+                time.sleep(delay)
+                continue
+
+            if status >= 400:
+                detail = self._extract_response_detail(response)
+                self._log(
+                    logging.ERROR,
+                    "%s %s failed with status %d: %s",
+                    method,
+                    url,
+                    status,
+                    detail,
+                )
+                raise StableHordeError(f"Stable Horde error {status}: {detail}")
+
+            content_type = response.headers.get("Content-Type", "")
+            self._log(
+                logging.INFO,
+                "%s %s succeeded with status %d",
+                method,
+                url,
+                status,
+            )
+            if "application/json" in content_type:
+                try:
+                    return response.json()
+                except ValueError:
+                    return response.text
+            return response.content
+
+        raise StableHordeError("Stable Horde request retries exhausted")
 
     def _validate_dimensions(self, width: int, height: int) -> Tuple[int, int]:
         for value, label in ((width, "width"), (height, "height")):
