@@ -43,7 +43,7 @@ VIDEO_EXTENSIONS: set[str] = {
     ".avi",
     ".m4v",
 }
-PREVIEW_EXTENSIONS: set[str] = set(VIDEO_EXTENSIONS | {".gif"})
+PREVIEW_EXTENSIONS: set[str] = {".gif"}
 
 PLACEHOLDER_SIZE = (320, 180)
 PLACEHOLDER_BG = (24, 24, 24)
@@ -713,14 +713,6 @@ class MediaManager:
             if not self._preview_metadata_current(metadata, stat_info.st_mtime):
                 metadata = None
             if metadata is None:
-                if ext in VIDEO_EXTENSIONS:
-                    duration = self._probe_video_duration(abs_path)
-                    if duration is None or duration <= 0:
-                        self._record_preview_skip(frame_dir, stat_info.st_mtime, "duration_unknown")
-                        raise MediaManagerError("Preview unavailable for this video", code="preview_skipped", status=404)
-                    if self._preview_max_duration and duration > self._preview_max_duration:
-                        self._record_preview_skip(frame_dir, stat_info.st_mtime, "duration_limit")
-                        raise MediaManagerError("Preview skipped for long videos", code="preview_skipped", status=404)
                 generated = self._generate_preview_frames(root, abs_path, ext=ext, stat_info=stat_info)
                 if generated <= 1:
                     self._record_preview_skip(frame_dir, stat_info.st_mtime, "insufficient_frames")
@@ -839,10 +831,9 @@ class MediaManager:
             return 0
         generated = 0
         try:
-            if ext == ".gif":
-                generated = self._generate_gif_preview(abs_path, temp_dir)
-            else:
-                generated = self._generate_video_preview(abs_path, temp_dir)
+            if ext != ".gif":
+                return 0
+            generated = self._generate_gif_preview(abs_path, temp_dir)
             if generated <= 1:
                 return 0
             frame_dir = self._preview_frame_dir(root, abs_path)
@@ -865,48 +856,6 @@ class MediaManager:
         finally:
             if temp_dir.exists():
                 shutil.rmtree(temp_dir, ignore_errors=True)
-
-    def _generate_video_preview(self, path: Path, output_dir: Path) -> int:
-        ffmpeg_path = self._ffmpeg_path or self._which("ffmpeg")
-        if not ffmpeg_path:
-            logger.debug("Preview skipped for %s: ffmpeg unavailable", path)
-            self._ffmpeg_path = None
-            return 0
-        self._ffmpeg_path = ffmpeg_path
-        output_dir.mkdir(parents=True, exist_ok=True)
-        duration = self._probe_video_duration(path)
-        if duration is None or duration <= 0:
-            return 0
-        if self._preview_max_duration and duration > self._preview_max_duration:
-            return 0
-        fps_value = self._preview_frames / max(duration, 1.0)
-        fps_value = max(min(fps_value, 30.0), 0.1)
-        output_template = str(output_dir / "frame_%03d.webp")
-        filter_chain = f"fps={fps_value:.4f},scale={self._preview_width}:-1:force_original_aspect_ratio=decrease"
-        cmd = [
-            ffmpeg_path,
-            "-y",
-            "-hide_banner",
-            "-loglevel",
-            "error",
-            "-i",
-            str(path),
-            "-vf",
-            filter_chain,
-            "-frames:v",
-            str(self._preview_frames),
-            "-an",
-            "-q:v",
-            "80",
-            output_template,
-        ]
-        try:
-            subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)  # noqa: S603,S607
-        except (subprocess.CalledProcessError, FileNotFoundError, OSError) as exc:
-            logger.debug("Preview frame extraction failed for %s: %s", path, exc)
-            return 0
-        frames = sorted(output_dir.glob("frame_*.webp"))
-        return len(frames)
 
     def _generate_gif_preview(self, path: Path, output_dir: Path) -> int:
         output_dir.mkdir(parents=True, exist_ok=True)

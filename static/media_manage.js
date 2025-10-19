@@ -150,6 +150,63 @@
     });
   }
 
+  function setupVideoHover(card, img, file) {
+    if (!file || !file.path) return;
+    const thumb = card.querySelector(".media-thumb");
+    if (!thumb) return;
+    const videoUrl = buildVideoStreamUrl(file.path);
+    if (!videoUrl) return;
+    const placeholder = thumb.querySelector(".placeholder");
+    thumb.classList.add("video-hoverable");
+    let videoEl = null;
+
+    const ensureVideo = () => {
+      if (videoEl) return videoEl;
+      videoEl = document.createElement("video");
+      videoEl.className = "media-thumb-video";
+      videoEl.preload = "metadata";
+      videoEl.controls = true;
+      videoEl.muted = true;
+      videoEl.defaultMuted = true;
+      videoEl.playsInline = true;
+      videoEl.setAttribute("playsinline", "");
+      videoEl.setAttribute("muted", "");
+      videoEl.src = videoUrl;
+      thumb.appendChild(videoEl);
+      return videoEl;
+    };
+
+    const show = () => {
+      const video = ensureVideo();
+      if (img.dataset && img.dataset.src && !img.getAttribute("src")) {
+        img.src = img.dataset.src;
+      }
+      thumb.classList.add("video-active");
+      if (placeholder) placeholder.classList.add("is-hidden");
+      img.classList.add("is-hidden");
+      video.classList.add("is-active");
+    };
+
+    const hide = () => {
+      if (!videoEl) return;
+      thumb.classList.remove("video-active");
+      videoEl.pause();
+      try {
+        videoEl.currentTime = 0;
+      } catch (err) {
+        /* ignore reset errors */
+      }
+      videoEl.classList.remove("is-active");
+      img.classList.remove("is-hidden");
+      if (placeholder) placeholder.classList.remove("is-hidden");
+    };
+
+    card.addEventListener("mouseenter", show);
+    card.addEventListener("focus", show);
+    card.addEventListener("mouseleave", hide);
+    card.addEventListener("blur", hide);
+  }
+
   function initThemeToggle() {
     const root = document.documentElement;
     const btn = document.getElementById("theme-toggle");
@@ -198,6 +255,15 @@
     if (!info.alias || info.segments.length === 0) return "";
     const segments = info.segments.slice(0, -1);
     return buildVirtual(info.alias, segments);
+  }
+
+  function buildVideoStreamUrl(virtualPath) {
+    const info = parseVirtual(virtualPath);
+    if (!info.alias) return "";
+    const encodedAlias = encodeURIComponent(info.alias);
+    const encodedSegments = info.segments.map((segment) => encodeURIComponent(segment));
+    const parts = [encodedAlias, ...encodedSegments];
+    return `/stream/video/${parts.join("/")}`;
   }
 
   function leafName(path) {
@@ -492,7 +558,9 @@
     body.appendChild(meta);
     card.appendChild(body);
 
-    if (Array.isArray(file.frames) && file.frames.length > 1) {
+    if (file.isVideo) {
+      setupVideoHover(card, img, file);
+    } else if (Array.isArray(file.frames) && file.frames.length > 1) {
       attachPreview(card, img, file.frames);
     }
 

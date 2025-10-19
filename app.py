@@ -6474,6 +6474,7 @@ def _send_video_response(path: Union[str, Path]):
         conditional=True,
     )
     response.headers.setdefault("Cache-Control", f"public, max-age={IMAGE_CACHE_TIMEOUT}")
+    response.headers.setdefault("Accept-Ranges", "bytes")
     return response
 
 
