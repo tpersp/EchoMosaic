@@ -104,6 +104,12 @@ def _configure_gunicorn_defaults() -> None:
 
     os.environ["GUNICORN_CMD_ARGS"] = " ".join(updated_tokens).strip()
     os.environ.setdefault("ENGINEIO_MAX_BUFFER_SIZE", "100000000")
+    try:
+        import eventlet.debug  # type: ignore[import]
+    except Exception:  # pragma: no cover - eventlet optional in some environments
+        pass
+    else:
+        eventlet.debug.hub_exceptions(False)
 
 
 _configure_gunicorn_defaults()
@@ -156,8 +162,12 @@ def safe_emit(
             skip_sid=skip_sid,
             **kwargs,
         )
-    except Exception as exc:  # pragma: no cover - defensive guard against closed sockets
-        logger.warning("Socket emit failed (%s): %s", event_name, exc)
+    except (OSError, BrokenPipeError) as exc:  # pragma: no cover - expected on disconnects
+        app.logger.warning(
+            "[SocketIO] Tried to emit to disconnected client for event '%s': %s",
+            event_name,
+            exc,
+        )
 
 
 SETTINGS_FILE = "settings.json"
@@ -2053,23 +2063,20 @@ def import_settings():
         if auto_scheduler is not None:
             auto_scheduler.reschedule(stream_id)
 
-    try:
-        socketio.emit(
-            "streams_changed",
-            {
-                "action": "import",
-                "added": added,
-                "removed": removed,
-                "updated": updated,
-            },
+    safe_emit(
+        "streams_changed",
+        {
+            "action": "import",
+            "added": added,
+            "removed": removed,
+            "updated": updated,
+        },
+    )
+    for stream_id in new_streams:
+        safe_emit(
+            "refresh",
+            {"stream_id": stream_id, "config": settings[stream_id], "tags": tags_snapshot},
         )
-        for stream_id in new_streams:
-            socketio.emit(
-                "refresh",
-                {"stream_id": stream_id, "config": settings[stream_id], "tags": tags_snapshot},
-            )
-    except Exception as exc:  # pragma: no cover
-        logger.debug("Socket emit failed during settings import: %s", exc)
 
     response = {
         "success": True,
@@ -3363,13 +3370,10 @@ class StreamPlaybackManager:
         if stream_id:
             self._mark_sync_sent(stream_id, server_time if isinstance(server_time, (int, float)) else None)
         target_room = room or stream_id
-        try:
-            if target_room:
-                socketio.emit(event, payload, to=target_room)
-            else:
-                socketio.emit(event, payload)
-        except Exception as exc:  # pragma: no cover - socket broadcast best effort
-            logger.debug("Stream emit failed for %s (%s): %s", target_room or stream_id, event, exc)
+        if target_room:
+            safe_emit(event, payload, to=target_room)
+        else:
+            safe_emit(event, payload)
 
     def _next_media(self, state: StreamPlaybackState) -> Optional[Dict[str, Any]]:
         entries = list_media(state.folder, hide_nsfw=state.hide_nsfw)
@@ -3814,19 +3818,16 @@ def _refresh_stream_thumbnail(stream_id: str, snapshot: Optional[Dict[str, Any]]
 
     payload = _public_thumbnail_payload(record)
     if payload:
-        try:
-            socketio.emit(
-                "thumbnail_update",
-                {
-                    "stream": stream_id,
-                    "url": record["url"],
-                    "placeholder": placeholder,
-                    "badge": info.get("badge"),
-                    "updated_at": payload.get("updated_at"),
-                },
-            )
-        except Exception as exc:  # pragma: no cover - socket broadcast best effort
-            logger.debug("Thumbnail update emit failed for %s: %s", stream_id, exc)
+        safe_emit(
+            "thumbnail_update",
+            {
+                "stream": stream_id,
+                "url": record["url"],
+                "placeholder": placeholder,
+                "badge": info.get("badge"),
+                "updated_at": payload.get("updated_at"),
+            },
+        )
     return payload
 ensure_ai_presets_storage()
 # Backfill defaults for existing stream entries
@@ -4364,14 +4365,11 @@ def _run_hls_detection_job(key: str, stream_id: str, original_url: str) -> None:
         error=error_text or "none",
     )
     if entry.url:
-        try:
-            with app.app_context():
-                socketio.emit(
-                    "live_hls_ready",
-                    {"stream_id": stream_id, "cache_key": key, "hls_url": entry.url},
-                )
-        except Exception as exc:  # pragma: no cover - socket failures should not break detection
-            logger.debug("live_hls_ready emit failed for %s: %s", stream_id, exc)
+        with app.app_context():
+            safe_emit(
+                "live_hls_ready",
+                {"stream_id": stream_id, "cache_key": key, "hls_url": entry.url},
+            )
 
 
 def try_get_hls(original_url):
@@ -4803,7 +4801,7 @@ def update_stream_settings(stream_id):
         auto_scheduler.reschedule(stream_id)
     if picsum_scheduler is not None:
         picsum_scheduler.reschedule(stream_id)
-    socketio.emit("refresh", {"stream_id": stream_id, "config": conf, "tags": get_global_tags()})
+    safe_emit("refresh", {"stream_id": stream_id, "config": conf, "tags": get_global_tags()})
     return jsonify({"status": "success", "new_config": conf, "tags": get_global_tags()})
 
 
@@ -4892,7 +4890,7 @@ def _broadcast_picsum_update(
     thumbnail: Optional[Dict[str, Any]],
 ) -> None:
     refresh_payload = {"stream_id": stream_id, "config": conf, "tags": get_global_tags()}
-    socketio.emit("refresh", refresh_payload)
+    safe_emit("refresh", refresh_payload)
 
     stream_update_payload = {
         "stream_id": stream_id,
@@ -4915,7 +4913,7 @@ def _broadcast_picsum_update(
         "server_time": time.time(),
         "thumbnail": thumbnail or _get_runtime_thumbnail_payload(stream_id),
     }
-    socketio.emit(STREAM_UPDATE_EVENT, stream_update_payload)
+    safe_emit(STREAM_UPDATE_EVENT, stream_update_payload)
 
 
 @app.route("/picsum/refresh", methods=["POST"])
@@ -6361,10 +6359,7 @@ def groups_collection():
     else:
         settings["_groups"][name] = cleaned
     save_settings(settings)
-    try:
-        socketio.emit("mosaic_refresh", {"group": name})
-    except Exception:
-        pass
+    safe_emit("mosaic_refresh", {"group": name})
     return jsonify({"status": "ok", "group": {name: settings["_groups"][name]}})
 
 
@@ -7092,7 +7087,7 @@ def handle_video_control(payload):
     }
     if volume_value is not None:
         message['volume'] = max(0.0, min(1.0, volume_value))
-    socketio.emit('video_control', message)
+    safe_emit('video_control', message)
 
 
 if __name__ == "__main__":
