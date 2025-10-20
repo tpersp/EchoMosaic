@@ -13,6 +13,7 @@ import random
 import shlex
 import io
 import hashlib
+import socket
 from copy import deepcopy
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -120,6 +121,72 @@ def _configure_gunicorn_defaults() -> None:
 
 
 _configure_gunicorn_defaults()
+
+_SOCKET_NOISE_KEYWORDS = (
+    "bad file descriptor",
+    "connection timed out",
+    "broken pipe",
+    "timed out",
+)
+_SOCKET_NOISE_ERRNOS = {9, 32, 54, 60, 104, 110}
+
+
+class SocketNoiseFilter(logging.Filter):
+    """Downgrade noisy disconnect errors to DEBUG without tracebacks."""
+
+    def _is_socket_noise(self, record: logging.LogRecord) -> bool:
+        if record.exc_info:
+            exception = record.exc_info[1]
+            if isinstance(exception, (OSError, socket.error, TimeoutError)):
+                errno = getattr(exception, "errno", None)
+                if errno in _SOCKET_NOISE_ERRNOS:
+                    return True
+                text = str(exception)
+                if text:
+                    lowered = text.lower()
+                    return any(keyword in lowered for keyword in _SOCKET_NOISE_KEYWORDS)
+        try:
+            message = record.getMessage()
+        except Exception:
+            message = record.msg
+        if not message:
+            return False
+        lowered_message = str(message).lower()
+        return any(keyword in lowered_message for keyword in _SOCKET_NOISE_KEYWORDS)
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if self._is_socket_noise(record):
+            record.levelno = logging.DEBUG
+            record.levelname = logging.getLevelName(logging.DEBUG)
+            record.exc_info = None
+            record.exc_text = None
+            record.stack_info = None
+        return True
+
+
+_socket_noise_filter = SocketNoiseFilter()
+
+
+def _install_socket_noise_filter() -> None:
+    root_logger = logging.getLogger()
+    if _socket_noise_filter not in root_logger.filters:
+        root_logger.addFilter(_socket_noise_filter)
+
+    noisy_logger_names = (
+        "eventlet.wsgi.server",
+        "gunicorn.error",
+        "gunicorn.access",
+        "engineio.server",
+    )
+    for name in noisy_logger_names:
+        target_logger = logging.getLogger(name)
+        if _socket_noise_filter not in target_logger.filters:
+            target_logger.addFilter(_socket_noise_filter)
+
+    logging.getLogger("eventlet.wsgi.server").setLevel(logging.ERROR)
+
+
+_install_socket_noise_filter()
 
 app = Flask(__name__, static_folder="static", static_url_path="/static")
 
@@ -7002,6 +7069,17 @@ def stream_group(name):
         focus_order=focus_order,
         mosaic_settings=layout_conf,
     )
+
+
+@socketio.on_error_default
+def _socketio_default_error_handler(e: Exception) -> None:
+    """Suppress noisy disconnect errors while re-raising unexpected issues."""
+    if isinstance(e, (OSError, socket.error, TimeoutError)):
+        text = str(e).lower()
+        if any(keyword in text for keyword in _SOCKET_NOISE_KEYWORDS):
+            app.logger.debug("[SocketIO] Ignored harmless disconnect: %s", e)
+            return
+    raise
 
 
 @socketio.on("disconnect")
