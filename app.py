@@ -21,6 +21,13 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple, Union, Set
 from urllib.parse import quote, urlparse, parse_qs
 
+import engineio.payload
+import engineio.server
+
+# --- Engine.IO packet limit patch (prevents "Too many packets in payload") ---
+engineio.payload.Payload.max_decode_packets = 200
+_ORIGINAL_ENGINEIO_HANDLE_REQUEST = engineio.server.Server.handle_request
+
 from PIL import Image, ImageDraw, ImageFont
 
 try:
@@ -115,6 +122,20 @@ def _configure_gunicorn_defaults() -> None:
 _configure_gunicorn_defaults()
 
 app = Flask(__name__, static_folder="static", static_url_path="/static")
+
+if not getattr(engineio.server.Server.handle_request, "__codex_overflow_patch__", False):
+    def _quiet_engineio_handle_request(self, environ, start_response=None):
+        try:
+            return _ORIGINAL_ENGINEIO_HANDLE_REQUEST(self, environ, start_response)
+        except ValueError as exc:
+            if "Too many packets in payload" in str(exc):
+                app.logger.warning("[SocketIO] Ignored Engine.IO packet overflow.")
+                return []
+            raise
+
+    _quiet_engineio_handle_request.__codex_overflow_patch__ = True  # type: ignore[attr-defined]
+    engineio.server.Server.handle_request = _quiet_engineio_handle_request
+
 socketio = SocketIO(
     app,
     async_mode="eventlet",
