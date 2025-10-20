@@ -1,6 +1,7 @@
 # Ignore user and local configuration
 config.json
 .env
+.venv
 
 # Ignore local cache or temporary files
 __pycache__/
