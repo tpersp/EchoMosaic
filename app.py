@@ -2405,6 +2405,23 @@ def _record_job_progress(stream_id: str, stage: str, payload: Dict[str, Any]) ->
         elif stage == 'completed':
             job['status'] = 'completed'
         ai_jobs[stream_id] = job
+    state_ref: Optional[Dict[str, Any]] = None
+    conf_ref = settings.get(stream_id)
+    if isinstance(conf_ref, dict):
+        candidate_state = conf_ref.get(AI_STATE_KEY)
+        if isinstance(candidate_state, dict):
+            state_ref = candidate_state
+    if state_ref is not None:
+        if job.get('status'):
+            state_ref['status'] = job['status']
+        if stage == 'status':
+            state_ref['queue_position'] = job.get('queue_position')
+            state_ref['wait_time'] = job.get('wait_time')
+        elif stage in ('fault', 'timeout', 'cancelled', 'completed'):
+            state_ref['queue_position'] = job.get('queue_position')
+            state_ref['wait_time'] = job.get('wait_time')
+            if job.get('message'):
+                state_ref['message'] = job['message']
     if manager_id:
         if stage == 'accepted':
             job_manager.set_stable_id(manager_id, payload.get('job_id'))
@@ -5256,6 +5273,8 @@ def _queue_ai_generation(stream_id: str, ai_settings: Dict[str, Any], *, trigger
             'cancel_requested': False,
             'trigger': trigger_source,
             'manager_id': manager_id,
+            'queue_position': None,
+            'wait_time': None,
         }
         ai_job_controls[stream_id] = {
             'cancel_event': cancel_event,

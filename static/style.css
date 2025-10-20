@@ -1078,7 +1078,6 @@ a {
 .ai-summary-actions .ai-status {
   margin-left: auto;
   flex: 1 1 140px;
-  text-align: right;
   min-width: 0;
   overflow-wrap: anywhere;
 }
@@ -1462,8 +1461,42 @@ body.ai-modal-active {
 }
 
 .ai-status {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-end;
+  justify-content: center;
+  gap: 0.15rem;
   font-size: 0.85rem;
   color: var(--muted-color);
+  text-align: right;
+}
+
+.ai-status-label {
+  font-size: 0.85rem;
+  color: inherit;
+}
+
+.ai-status-eta {
+  font-size: 0.75rem;
+  color: var(--accent-color);
+  white-space: nowrap;
+  transition: color 0.25s ease;
+}
+
+.ai-status-eta.waiting {
+  color: #ffd740;
+}
+
+.ai-status-eta.processing {
+  color: #ffa000;
+}
+
+.ai-status-eta.done {
+  color: #00e676;
+}
+
+.ai-status-eta.error {
+  color: var(--danger-color, #d9534f);
 }
 
 .ai-status[data-status='queued'],

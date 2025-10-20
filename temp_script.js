@@ -1709,6 +1709,20 @@
   function renderAiStatus(card, state, job) {
     const statusEl = card.querySelector('.ai-status');
     if (!statusEl) return;
+    let labelEl = statusEl.querySelector('.ai-status-label');
+    let etaEl = statusEl.querySelector('.ai-status-eta');
+    if (!labelEl) {
+      labelEl = document.createElement('span');
+      labelEl.className = 'ai-status-label';
+      labelEl.textContent = statusEl.textContent || '';
+      statusEl.textContent = '';
+      statusEl.appendChild(labelEl);
+    }
+    if (!etaEl) {
+      etaEl = document.createElement('span');
+      etaEl.className = 'ai-status-eta';
+      statusEl.appendChild(etaEl);
+    }
     const info = state || {};
     const jobInfo = job || {};
     const status = (jobInfo.status || info.status || 'idle').toLowerCase();
@@ -1724,7 +1738,40 @@
       label += note ? ` - ${note}` : '...';
     }
     statusEl.dataset.status = status;
-    statusEl.textContent = label;
+    labelEl.textContent = label;
+    const waitRaw = jobInfo.wait_time ?? info.wait_time;
+    const failureStatuses = ['error', 'timeout', 'cancelled'];
+    etaEl.hidden = false;
+    etaEl.textContent = '';
+    etaEl.className = 'ai-status-eta';
+    if (status === 'completed') {
+      etaEl.textContent = 'Completed';
+      etaEl.classList.add('done');
+    } else if (failureStatuses.includes(status)) {
+      const failureText = status === 'cancelled' ? 'Cancelled' : (status === 'timeout' ? 'Timed out' : 'Failed');
+      etaEl.textContent = failureText;
+      etaEl.classList.add('error');
+    } else {
+      const waitSeconds = typeof waitRaw === 'number' ? waitRaw : parseFloat(waitRaw);
+      if (!Number.isNaN(waitSeconds) && waitSeconds > 0) {
+        const rounded = Math.max(0, Math.round(waitSeconds));
+        const minutes = Math.floor(rounded / 60);
+        const seconds = rounded % 60;
+        const parts = [];
+        if (minutes > 0) parts.push(`${minutes}m`);
+        parts.push(`${seconds}s`);
+        etaEl.textContent = `ETA ~ ${parts.join(' ')}`;
+        etaEl.classList.add('waiting');
+      } else if (['running', 'accepted', 'queued', 'cancelling'].includes(status)) {
+        etaEl.textContent = 'Processing...';
+        etaEl.classList.add('processing');
+      } else {
+        etaEl.hidden = true;
+      }
+    }
+    if (!etaEl.textContent) {
+      etaEl.hidden = true;
+    }
     const activeStatuses = ['queued', 'accepted', 'running', 'cancelling'];
     card.querySelectorAll('.ai-generate-btn').forEach(btn => {
       btn.disabled = activeStatuses.includes(status);
