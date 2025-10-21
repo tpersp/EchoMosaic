@@ -1,8 +1,32 @@
 # Ignore user and local configuration
 config.json
 .env
-.venv
+.env.*
+.venv/
+venv/
+env/
 
 # Ignore local cache or temporary files
 __pycache__/
 *.pyc
+.pytest_cache/
+.coverage
+coverage.xml
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+.tox/
+.DS_Store
+
+# Local-only tests
+tests/
+test_*.py
+*_test.py
+pytest.ini
+tox.ini
+pyproject.toml
+setup.cfg
+
+# Editor/IDE
+.vscode/
+.idea/
