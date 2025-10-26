@@ -14,6 +14,7 @@ import shlex
 import io
 import hashlib
 import socket
+import sys
 from copy import deepcopy
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -22,14 +23,32 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple, Union, Set
 from urllib.parse import quote, urlparse, parse_qs
 
-import engineio.payload
-import engineio.server
+try:
+    import engineio.payload  # type: ignore[import]
+    import engineio.server  # type: ignore[import]
+except ModuleNotFoundError:
+    engineio = None  # type: ignore[assignment]
+    _ORIGINAL_ENGINEIO_HANDLE_REQUEST = None
+    logging.getLogger(__name__).warning(
+        "engineio package not available; live socket optimisations disabled."
+    )
+else:
+    engineio = sys.modules.get("engineio")
+    # --- Engine.IO packet limit patch (prevents "Too many packets in payload") ---
+    engineio.payload.Payload.max_decode_packets = 200
+    _ORIGINAL_ENGINEIO_HANDLE_REQUEST = engineio.server.Server.handle_request
 
-# --- Engine.IO packet limit patch (prevents "Too many packets in payload") ---
-engineio.payload.Payload.max_decode_packets = 200
-_ORIGINAL_ENGINEIO_HANDLE_REQUEST = engineio.server.Server.handle_request
+try:
+    from PIL import Image, ImageDraw, ImageFont
+except ModuleNotFoundError:  # pragma: no cover - optional dependency handling
+    class _MissingPillowModule:
+        def __getattr__(self, item: str) -> Any:
+            raise RuntimeError(
+                "Pillow is required for image processing features. "
+                "Install it via 'pip install Pillow'."
+            )
 
-from PIL import Image, ImageDraw, ImageFont
+    Image = ImageDraw = ImageFont = _MissingPillowModule()  # type: ignore[assignment]
 
 try:
     import cv2  # type: ignore[import]
@@ -67,6 +86,7 @@ from system_monitor import get_system_stats
 import config_manager
 from media_manager import MediaManager, MediaManagerError, MEDIA_MANAGER_CACHE_SUBDIR
 import timer_manager
+from timer_manager import TimerManager, default_timer_config, ensure_timer_config
 import debug_manager
 from job_manager import job_manager
 
@@ -190,18 +210,19 @@ _install_socket_noise_filter()
 
 app = Flask(__name__, static_folder="static", static_url_path="/static")
 
-if not getattr(engineio.server.Server.handle_request, "__codex_overflow_patch__", False):
-    def _quiet_engineio_handle_request(self, environ, start_response=None):
-        try:
-            return _ORIGINAL_ENGINEIO_HANDLE_REQUEST(self, environ, start_response)
-        except ValueError as exc:
-            if "Too many packets in payload" in str(exc):
-                app.logger.warning("[SocketIO] Ignored Engine.IO packet overflow.")
-                return []
-            raise
+if engineio is not None and _ORIGINAL_ENGINEIO_HANDLE_REQUEST is not None:
+    if not getattr(engineio.server.Server.handle_request, "__codex_overflow_patch__", False):
+        def _quiet_engineio_handle_request(self, environ, start_response=None):
+            try:
+                return _ORIGINAL_ENGINEIO_HANDLE_REQUEST(self, environ, start_response)
+            except ValueError as exc:
+                if "Too many packets in payload" in str(exc):
+                    app.logger.warning("[SocketIO] Ignored Engine.IO packet overflow.")
+                    return []
+                raise
 
-    _quiet_engineio_handle_request.__codex_overflow_patch__ = True  # type: ignore[attr-defined]
-    engineio.server.Server.handle_request = _quiet_engineio_handle_request
+        _quiet_engineio_handle_request.__codex_overflow_patch__ = True  # type: ignore[attr-defined]
+        engineio.server.Server.handle_request = _quiet_engineio_handle_request
 
 socketio = SocketIO(
     app,
@@ -446,6 +467,11 @@ MEDIA_MODE_VARIANTS = {
     MEDIA_MODE_LIVESTREAM: {"livestream"},
     MEDIA_MODE_AI: {AI_MODE},
     MEDIA_MODE_PICSUM: {MEDIA_MODE_PICSUM},
+}
+TIMER_SUPPORTED_MODES = {AI_MODE, MEDIA_MODE_PICSUM}
+TIMER_MODE_LABELS = {
+    AI_MODE: "AI Images",
+    MEDIA_MODE_PICSUM: "Picsum",
 }
 
 DEFAULT_MEDIA_ROOT_PATH = Path(os.path.abspath("./media")).resolve()
@@ -1527,6 +1553,48 @@ def ensure_picsum_defaults(conf: Dict[str, Any]) -> None:
         conf["_picsum_seed_custom"] = bool(conf["_picsum_seed_custom"])
 
 
+def ensure_timer_defaults(conf: Dict[str, Any]) -> Dict[str, Any]:
+    """Ensure the general timer configuration exists for the stream."""
+
+    timer_conf = ensure_timer_config(conf)
+    conf["timer"] = timer_conf
+    return timer_conf
+
+
+def _canonical_timer_mode(conf: Dict[str, Any]) -> Optional[str]:
+    """Return the canonical timer-capable mode for the stream, if any."""
+
+    for candidate in (
+        (conf.get("media_mode") or ""),
+        (conf.get("mode") or ""),
+    ):
+        if not isinstance(candidate, str):
+            continue
+        normalized = candidate.strip().lower()
+        if normalized in TIMER_SUPPORTED_MODES:
+            return normalized
+    return None
+
+
+def _timer_mode_label(mode: Optional[str]) -> str:
+    if not mode:
+        return "Unknown"
+    return TIMER_MODE_LABELS.get(mode, mode.capitalize())
+
+
+def _log_timer_schedule(stream_id: str, mode: Optional[str], moment: datetime, offset_minutes: float) -> None:
+    offset_note = ""
+    if offset_minutes:
+        offset_note = f" (offset +{offset_minutes:g}m)"
+    logger.info(
+        "[Timer] %s (%s) next run at %s%s",
+        stream_id,
+        _timer_mode_label(mode),
+        timer_manager.format_display_time(moment),
+        offset_note,
+    )
+
+
 def _normalize_tag_name(value: Any) -> Optional[str]:
     if not isinstance(value, str):
         return None
@@ -1849,6 +1917,7 @@ def default_stream_config():
         AI_SETTINGS_KEY: default_ai_settings(),
         AI_STATE_KEY: default_ai_state(),
         "_ai_customized": False,
+        "timer": default_timer_config(),
     }
 
 
@@ -1947,6 +2016,7 @@ def _sanitize_imported_stream_config(stream_id: str, raw_conf: Any) -> Dict[str,
     picsum_raw = conf.get(PICSUM_SETTINGS_KEY)
     conf[PICSUM_SETTINGS_KEY] = _sanitize_picsum_settings(picsum_raw, defaults=default_picsum_settings())
     conf['_picsum_seed_custom'] = bool(conf.get('_picsum_seed_custom', False))
+    ensure_timer_defaults(conf)
     conf["embed_metadata"] = _sanitize_embed_metadata(conf.get("embed_metadata"))
     ensure_background_defaults(conf)
     return conf
@@ -4521,6 +4591,7 @@ def dashboard():
             conf["image_quality"] = "auto"
         else:
             conf["image_quality"] = quality.strip().lower()
+        ensure_timer_defaults(conf)
         ensure_background_defaults(conf)
         ensure_tag_defaults(conf)
         _refresh_embed_metadata(stream_id, conf)
@@ -4590,6 +4661,7 @@ def mosaic_streams():
     for stream_id, conf in streams.items():
         if not isinstance(conf, dict):
             continue
+        ensure_timer_defaults(conf)
         ensure_background_defaults(conf)
         ensure_tag_defaults(conf)
         _refresh_embed_metadata(stream_id, conf)
@@ -4631,6 +4703,7 @@ def render_stream(name):
     if config_quality not in IMAGE_QUALITY_CHOICES:
         config_quality = "auto"
     conf["image_quality"] = config_quality
+    ensure_timer_defaults(conf)
     ensure_background_defaults(conf)
     ensure_tag_defaults(conf)
     _refresh_embed_metadata(key, conf)
@@ -4703,6 +4776,7 @@ def get_stream_settings(stream_id):
     conf = settings[stream_id]
     ensure_ai_defaults(conf)
     ensure_picsum_defaults(conf)
+    ensure_timer_defaults(conf)
     ensure_background_defaults(conf)
     ensure_tag_defaults(conf)
     return jsonify(conf)
@@ -4733,6 +4807,7 @@ def update_stream_settings(stream_id):
     conf = settings[stream_id]
     ensure_ai_defaults(conf)
     ensure_picsum_defaults(conf)
+    ensure_timer_defaults(conf)
     previous_mode = conf.get("mode")
 
     stream_url_changed = False
@@ -4908,6 +4983,86 @@ def update_stream_settings(stream_id):
         picsum_scheduler.reschedule(stream_id)
     safe_emit("refresh", {"stream_id": stream_id, "config": conf, "tags": get_global_tags()})
     return jsonify({"status": "success", "new_config": conf, "tags": get_global_tags()})
+
+
+@app.route("/api/timer/update/<stream_id>", methods=["POST"])
+def update_stream_timer(stream_id: str):
+    conf = settings.get(stream_id)
+    if not isinstance(conf, dict):
+        return jsonify({"error": f"No stream '{stream_id}' found"}), 404
+
+    payload = request.get_json(silent=True) or {}
+    if not isinstance(payload, dict):
+        return jsonify({"error": "Invalid payload"}), 400
+
+    ensure_ai_defaults(conf)
+    ensure_picsum_defaults(conf)
+    ensure_timer_defaults(conf)
+
+    timer_mode = _canonical_timer_mode(conf)
+    if timer_mode not in TIMER_SUPPORTED_MODES:
+        return jsonify({"error": "Timer controls are not available for this stream."}), 400
+
+    timer = TimerManager(
+        mode=timer_mode or conf.get("mode") or "",
+        stream_id=stream_id,
+        config_owner=conf,
+        snap_provider=_timer_snap_enabled,
+    )
+    allowed_updates = {key: payload[key] for key in ("enabled", "interval", "offset") if key in payload}
+    updated_config = timer.apply_updates(allowed_updates)
+
+    if timer_mode == AI_MODE:
+        ai_settings = conf[AI_SETTINGS_KEY]
+        if updated_config["enabled"]:
+            ai_settings["auto_generate_mode"] = "timer"
+            ai_settings["auto_generate_interval_value"] = float(updated_config["interval"])
+            ai_settings["auto_generate_interval_unit"] = "minutes"
+        elif ai_settings.get("auto_generate_mode") == "timer":
+            ai_settings["auto_generate_mode"] = "off"
+        conf["_ai_customized"] = not _ai_settings_match_defaults(ai_settings)
+    elif timer_mode == MEDIA_MODE_PICSUM:
+        picsum_settings = conf.get(PICSUM_SETTINGS_KEY) or {}
+        if updated_config["enabled"]:
+            picsum_settings["auto_mode"] = "timer"
+            picsum_settings["auto_interval_value"] = float(updated_config["interval"])
+            picsum_settings["auto_interval_unit"] = "minutes"
+        elif picsum_settings.get("auto_mode") == "timer":
+            picsum_settings["auto_mode"] = "off"
+        conf[PICSUM_SETTINGS_KEY] = picsum_settings
+
+    if updated_config["enabled"]:
+        initial_next = timer.compute_next()
+        timer.update_next(initial_next)
+    else:
+        timer.update_next(None)
+        if timer_mode == MEDIA_MODE_PICSUM:
+            picsum_settings = conf.get(PICSUM_SETTINGS_KEY) or {}
+            picsum_settings["next_auto_trigger"] = None
+
+    scheduler_ts = time.time()
+    if timer_mode == AI_MODE and auto_scheduler is not None:
+        auto_scheduler.reschedule(stream_id, base_time=scheduler_ts)
+    elif timer_mode == MEDIA_MODE_PICSUM and picsum_scheduler is not None:
+        picsum_scheduler.reschedule(stream_id, base_time=scheduler_ts)
+
+    refreshed_config = timer.refresh()
+    if timer_mode == AI_MODE:
+        next_label = conf[AI_STATE_KEY].get("next_auto_trigger")
+        last_label = conf[AI_STATE_KEY].get("last_auto_trigger")
+    else:
+        picsum_state = conf.get(PICSUM_SETTINGS_KEY) or {}
+        next_label = picsum_state.get("next_auto_trigger")
+        last_label = picsum_state.get("last_auto_trigger")
+
+    save_settings(settings)
+    return jsonify({
+        "status": "success",
+        "timer": refreshed_config,
+        "mode": timer_mode,
+        "next_auto_trigger": next_label,
+        "last_auto_trigger": last_label,
+    })
 
 
 def _refresh_picsum_stream(
@@ -5414,6 +5569,15 @@ class AutoGenerateScheduler:
     def remove(self, stream_id: str) -> None:
         with self._lock:
             self._next_run.pop(stream_id, None)
+        conf = settings.get(stream_id)
+        if isinstance(conf, dict):
+            ensure_timer_defaults(conf)
+            TimerManager(
+                mode=_canonical_timer_mode(conf) or conf.get("mode") or "",
+                stream_id=stream_id,
+                config_owner=conf,
+                snap_provider=_timer_snap_enabled,
+            ).update_next(None)
         self._update_state(stream_id, next_auto_trigger=None, last_auto_error=None)
 
     def reschedule(self, stream_id: str, *, base_time: Optional[float] = None) -> None:
@@ -5423,6 +5587,33 @@ class AutoGenerateScheduler:
             return
         ensure_ai_defaults(conf)
         ensure_picsum_defaults(conf)
+        ensure_timer_defaults(conf)
+
+        timer_mode = _canonical_timer_mode(conf)
+        timer = TimerManager(
+            mode=timer_mode or conf.get("mode") or "",
+            stream_id=stream_id,
+            config_owner=conf,
+            snap_provider=_timer_snap_enabled,
+        )
+        reference_ts = base_time if base_time is not None else time.time()
+
+        if timer_mode == AI_MODE and timer.is_enabled():
+            next_dt = timer.compute_next(reference=datetime.fromtimestamp(reference_ts))
+            if next_dt is None:
+                with self._lock:
+                    self._next_run.pop(stream_id, None)
+                timer.update_next(None)
+                self._update_state(stream_id, next_auto_trigger=None, last_auto_error=None)
+                return
+            with self._lock:
+                self._next_run[stream_id] = next_dt.timestamp()
+            timer.update_next(next_dt)
+            self._update_state(stream_id, next_auto_trigger=_format_timer_label(next_dt), last_auto_error=None)
+            _log_timer_schedule(stream_id, timer_mode, next_dt, timer.offset_minutes())
+            return
+
+        timer.update_next(None)
         ai_settings = conf[AI_SETTINGS_KEY]
         mode_raw = ai_settings.get('auto_generate_mode')
         mode_value = mode_raw.strip().lower() if isinstance(mode_raw, str) else 'off'
@@ -5512,13 +5703,46 @@ class AutoGenerateScheduler:
             return
         ensure_ai_defaults(conf)
         ensure_picsum_defaults(conf)
+        ensure_timer_defaults(conf)
+        timer_mode = _canonical_timer_mode(conf)
+        timer = TimerManager(
+            mode=timer_mode or conf.get("mode") or "",
+            stream_id=stream_id,
+            config_owner=conf,
+            snap_provider=_timer_snap_enabled,
+        )
         ai_settings = conf[AI_SETTINGS_KEY]
+        prompt = str(ai_settings.get('prompt') or '').strip()
+        if timer_mode == AI_MODE and timer.is_enabled():
+            if not prompt:
+                self._update_state(stream_id, last_auto_error='Prompt is required for auto-generation')
+                self.reschedule(stream_id)
+                return
+            try:
+                _queue_ai_generation(stream_id, ai_settings, trigger_source='auto')
+            except AutoGenerationBusy:
+                self._update_state(stream_id, last_auto_error=None)
+                self.reschedule(stream_id, base_time=time.time())
+            except AutoGenerationPromptMissing as exc:
+                self._update_state(stream_id, last_auto_error=str(exc))
+                self.reschedule(stream_id)
+            except AutoGenerationUnavailable as exc:
+                self._update_state(stream_id, last_auto_error=str(exc))
+                self.reschedule(stream_id)
+            except AutoGenerationError as exc:
+                self._update_state(stream_id, last_auto_error=str(exc))
+                self.reschedule(stream_id)
+            else:
+                timer.mark_trigger()
+                self._update_state(stream_id, last_auto_error=None)
+                self.reschedule(stream_id, base_time=time.time())
+            return
+
         mode_raw = ai_settings.get('auto_generate_mode')
         mode_value = mode_raw.strip().lower() if isinstance(mode_raw, str) else 'off'
         if conf.get('mode') != AI_MODE or mode_value not in AUTO_GENERATE_MODES or mode_value == 'off':
             self.reschedule(stream_id)
             return
-        prompt = str(ai_settings.get('prompt') or '').strip()
         if not prompt:
             self._update_state(stream_id, last_auto_error='Prompt is required for auto-generation')
             self.reschedule(stream_id)
@@ -5578,6 +5802,13 @@ class PicsumAutoScheduler:
             self._next_run.pop(stream_id, None)
         conf = settings.get(stream_id)
         if isinstance(conf, dict):
+            ensure_timer_defaults(conf)
+            TimerManager(
+                mode=_canonical_timer_mode(conf) or conf.get("mode") or "",
+                stream_id=stream_id,
+                config_owner=conf,
+                snap_provider=_timer_snap_enabled,
+            ).update_next(None)
             picsum = conf.get(PICSUM_SETTINGS_KEY)
             if isinstance(picsum, dict):
                 picsum["next_auto_trigger"] = None
@@ -5588,6 +5819,30 @@ class PicsumAutoScheduler:
             self.remove(stream_id)
             return
         ensure_picsum_defaults(conf)
+        ensure_timer_defaults(conf)
+        timer_mode = _canonical_timer_mode(conf)
+        timer = TimerManager(
+            mode=timer_mode or conf.get("mode") or "",
+            stream_id=stream_id,
+            config_owner=conf,
+            snap_provider=_timer_snap_enabled,
+        )
+        reference_ts = base_time if base_time is not None else time.time()
+        picsum = conf.get(PICSUM_SETTINGS_KEY) or {}
+
+        if timer_mode == MEDIA_MODE_PICSUM and timer.is_enabled():
+            next_dt = timer.compute_next(reference=datetime.fromtimestamp(reference_ts))
+            if next_dt is None:
+                self.remove(stream_id)
+                return
+            with self._lock:
+                self._next_run[stream_id] = next_dt.timestamp()
+            timer.update_next(next_dt)
+            picsum["next_auto_trigger"] = _format_timer_label(next_dt)
+            _log_timer_schedule(stream_id, timer_mode, next_dt, timer.offset_minutes())
+            return
+
+        timer.update_next(None)
         picsum = conf.get(PICSUM_SETTINGS_KEY) or {}
         mode_raw = picsum.get("auto_mode")
         mode = str(mode_raw).strip().lower() if isinstance(mode_raw, str) else PICSUM_DEFAULT_AUTO_MODE
@@ -5655,12 +5910,23 @@ class PicsumAutoScheduler:
             self.remove(stream_id)
             return
         ensure_picsum_defaults(conf)
+        ensure_timer_defaults(conf)
+        timer_mode = _canonical_timer_mode(conf)
+        timer = TimerManager(
+            mode=timer_mode or conf.get("mode") or "",
+            stream_id=stream_id,
+            config_owner=conf,
+            snap_provider=_timer_snap_enabled,
+        )
         result = _refresh_picsum_stream(stream_id)
         if result is None:
             self.remove(stream_id)
             return
         picsum_conf = conf.get(PICSUM_SETTINGS_KEY) or {}
-        picsum_conf["last_auto_trigger"] = _format_timer_label(datetime.now())
+        moment = datetime.now()
+        picsum_conf["last_auto_trigger"] = _format_timer_label(moment)
+        if timer_mode == MEDIA_MODE_PICSUM and timer.is_enabled():
+            timer.mark_trigger(when=moment)
         self.reschedule(stream_id, base_time=time.time())
         save_settings(settings)
         _broadcast_picsum_update(

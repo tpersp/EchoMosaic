@@ -1,0 +1,55 @@
+{% set _timer = timer_conf or {} %}
+{% set _interval = _timer.interval if _timer.interval is not none else 10 %}
+{% set _offset = _timer.offset if _timer.offset is not none else 0 %}
+{% set _next_run = _timer.next_run if _timer.next_run is not none else '' %}
+{% set _interval_str = ('%.3f' % _interval).rstrip('0').rstrip('.') %}
+{% set _offset_str = ('%.3f' % _offset).rstrip('0').rstrip('.') %}
+{% set _presets = [5, 10, 15, 30, 60, 90, 120, 180, 240] %}
+{% set _preset_match = namespace(value=None) %}
+{% for _preset in _presets %}
+  {% if _preset_match.value is none and (_interval - _preset)|abs < 0.001 %}
+    {% set _preset_match.value = _preset %}
+  {% endif %}
+{% endfor %}
+<div class="timer-section card-section" data-stream="{{ stream_id }}"
+     data-timer-mode="{{ timer_mode }}"
+     data-timer-supported="{{ 'true' if timer_visible else 'false' }}"
+     data-timer-enabled="{{ 'true' if _timer.enabled else 'false' }}"
+     data-timer-interval="{{ _interval_str }}"
+     data-timer-offset="{{ _offset_str }}"
+     data-timer-next="{{ _next_run }}"
+     {% if not timer_visible %}hidden{% endif %}>
+  <div class="timer-section-header">
+    <h4 class="timer-section-title">Timer Settings</h4>
+  </div>
+  <div class="timer-row timer-toggle-row">
+    <label class="toggle inline">
+      <input type="checkbox" class="timer-enable-toggle" {% if _timer.enabled %}checked{% endif %}>
+      <span class="toggle-switch" aria-hidden="true"></span>
+      <span class="toggle-label">Enable Timer</span>
+    </label>
+  </div>
+  <div class="timer-row timer-interval-row">
+    <label for="timer-interval-preset-{{ stream_id }}">Interval</label>
+    <div class="timer-interval-controls">
+      <select id="timer-interval-preset-{{ stream_id }}" class="timer-interval-preset">
+        {% for _preset in _presets %}
+        <option value="{{ _preset }}" {% if _preset_match.value == _preset %}selected{% endif %}>{{ _preset }} min</option>
+        {% endfor %}
+        <option value="custom" {% if _preset_match.value is none %}selected{% endif %}>Custom…</option>
+      </select>
+      <div class="timer-custom-input">
+        <input id="timer-interval-custom-{{ stream_id }}" type="number" class="timer-interval-custom" min="0.5" step="0.5" value="{{ _interval_str }}">
+        <span class="timer-unit-label">min</span>
+      </div>
+    </div>
+  </div>
+  <div class="timer-row timer-offset-row">
+    <label for="timer-offset-{{ stream_id }}">Offset (min)</label>
+    <input id="timer-offset-{{ stream_id }}" type="number" class="timer-offset-input" min="0" step="1" value="{{ _offset_str }}">
+  </div>
+  <div class="timer-row timer-next-row">
+    <span class="timer-next-label">Next run:</span>
+    <span class="timer-next-value">{{ _next_run if _next_run else '&mdash;' }}</span>
+  </div>
+</div>
