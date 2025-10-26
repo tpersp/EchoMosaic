@@ -315,24 +315,6 @@
                 </div>
               </div>
             </div>
-            {% set picsum_auto_mode = (picsum.auto_mode or 'off')|lower %}
-            <div class="picsum-auto" data-auto-mode="{{ picsum_auto_mode }}">
-              <div class="picsum-auto-field">
-                <label for="picsum-auto-mode-{{ stream_id }}">Auto Mode</label>
-                <select id="picsum-auto-mode-{{ stream_id }}" class="picsum-auto-mode">
-                  <option value="off" {% if picsum_auto_mode in ['off', 'timer'] %}selected{% endif %}>Off</option>
-                  <option value="clock" {% if picsum_auto_mode == 'clock' %}selected{% endif %}>Clock</option>
-                </select>
-              </div>
-              <div class="picsum-auto-field picsum-auto-clock" {% if picsum_auto_mode != 'clock' %}style="display:none;"{% endif %}>
-                <label for="picsum-auto-time-{{ stream_id }}">At (HH:MM)</label>
-                <input id="picsum-auto-time-{{ stream_id }}" type="time" class="picsum-auto-time" value="{{ picsum.auto_clock_time|default('') }}">
-              </div>
-              <div class="picsum-auto-summary" {% if not picsum.last_auto_trigger and not picsum.next_auto_trigger %}hidden{% endif %}>
-                <span class="picsum-auto-last" {% if not picsum.last_auto_trigger %}hidden{% endif %}>{% if picsum.last_auto_trigger %}Last: {{ picsum.last_auto_trigger }}{% endif %}</span>
-                <span class="picsum-auto-next" {% if not picsum.next_auto_trigger %}hidden{% endif %}>{% if picsum.next_auto_trigger %}Next: {{ picsum.next_auto_trigger }}{% endif %}</span>
-              </div>
-            </div>
             <div class="picsum-actions">
               <button type="button" class="picsum-fetch-btn" data-stream="{{ stream_id }}">Fetch Image</button>
               <span class="picsum-status" aria-live="polite" hidden></span>
@@ -359,18 +341,15 @@
         </div>
         {% set ai = conf.ai_settings or {} %}
         {% set ai_state = conf.ai_state or {} %}
-        {% set auto_mode = (ai.auto_generate_mode or 'off')|lower %}
-        {% set auto_clock_time = ai.auto_generate_clock_time or '' %}
         {% set timer_info = conf.timer or {} %}
         {% if timer_info.enabled %}
           {% set timer_interval_value = timer_info.interval|default(0) %}
           {% set timer_interval_str = '{:g}'.format((timer_interval_value|float)) %}
           {% set auto_label = 'Timer (' ~ timer_interval_str ~ ' min)' %}
-        {% elif auto_mode == 'clock' %}
-          {% set auto_label = 'Clock (' ~ (auto_clock_time if auto_clock_time else '--:--') ~ ')' %}
         {% else %}
           {% set auto_label = 'Off' %}
         {% endif %}
+        {% set next_label = timer_info.next_run if timer_info.next_run else ai_state.next_auto_trigger %}
         <div class="ai-summary" data-stream="{{ stream_id }}" {% if conf.mode != 'ai' %} style="display:none;" {% endif %}>
           <div class="ai-summary-grid">
             <div class="ai-summary-item"><span class="ai-summary-label">Model</span><span class="ai-summary-value ai-summary-model">{{ ai.model or 'Auto' }}</span></div>
@@ -384,7 +363,7 @@
             <div class="ai-summary-item"><span class="ai-summary-label">Save</span><span class="ai-summary-value ai-summary-save">{{ 'Yes' if ai.save_output else 'Temp' }}</span></div>
             <div class="ai-summary-item"><span class="ai-summary-label">Timeout</span><span class="ai-summary-value ai-summary-timeout">{{ ai.timeout if ai.timeout and ai.timeout > 0 else 'No limit' }}</span></div>
             <div class="ai-summary-item"><span class="ai-summary-label">Auto</span><span class="ai-summary-value ai-summary-auto">{{ auto_label }}</span></div>
-            <div class="ai-summary-item"><span class="ai-summary-label">Next</span><span class="ai-summary-value ai-summary-next">{{ ai_state.next_auto_trigger or '&mdash;' }}</span></div>
+            <div class="ai-summary-item"><span class="ai-summary-label">Next</span><span class="ai-summary-value ai-summary-next">{{ next_label or '&mdash;' }}</span></div>
           </div>
           <div class="ai-summary-actions">
             <button type="button" class="ai-open-settings" data-stream="{{ stream_id }}">Settings</button>
@@ -532,25 +511,6 @@
               <p class="hint">Up to {{ max_loras }} entries. Strength 1.0 is neutral.</p>
             </div>
           </details>
-          <div class="ai-auto-settings" data-stream="{{ stream_id }}">
-            <div class="section-title">Auto Generate</div>
-            <div class="ai-auto-row">
-              <label for="ai-auto-mode-{{ stream_id }}">Mode</label>
-              <select id="ai-auto-mode-{{ stream_id }}" class="ai-auto-mode" data-stream="{{ stream_id }}">
-                <option value="off" {% if auto_mode in ['off', 'timer'] %}selected{% endif %}>Off</option>
-                <option value="clock" {% if auto_mode == 'clock' %}selected{% endif %}>Clock</option>
-              </select>
-            </div>
-            <div class="ai-auto-row ai-auto-clock-row" {% if auto_mode != 'clock' %}hidden{% endif %}>
-              <label for="ai-auto-clock-{{ stream_id }}">At</label>
-              <input id="ai-auto-clock-{{ stream_id }}" type="time" class="ai-auto-clock" data-stream="{{ stream_id }}" value="{{ auto_clock_time }}">
-            </div>
-            <div class="ai-auto-status">
-              <span class="ai-auto-status-label">Next run:</span>
-              <span class="ai-auto-next">{{ ai_state.next_auto_trigger or '&mdash;' }}</span>
-              <span class="ai-auto-error" {% if not ai_state.last_auto_error %}hidden{% endif %}>{{ ai_state.last_auto_error or '' }}</span>
-            </div>
-          </div>
           <div class="ai-flags">
             <label class="toggle inline"><input type="checkbox" class="ai-save-output" data-stream="{{ stream_id }}" {% if ai.save_output %}checked{% endif %}><span class="toggle-switch"></span><span class="toggle-label">Save to library</span></label>
             <label class="toggle inline"><input type="checkbox" class="ai-nsfw" data-stream="{{ stream_id }}" {% if ai.nsfw %}checked{% endif %}><span class="toggle-switch"></span><span class="toggle-label">Allow NSFW</span></label>
@@ -588,7 +548,7 @@
 
       {% set timer_conf_value = conf.timer if conf.timer else {} %}
       {% set timer_section_mode = (conf.media_mode if conf.media_mode else conf.mode if conf.mode else '')|lower %}
-      {% set timer_visible = timer_section_mode in ['ai', 'picsum'] %}
+      {% set timer_visible = timer_section_mode in ['ai', 'picsum', 'pexels'] %}
       {% with stream_id=stream_id, timer_conf=timer_conf_value, timer_mode=timer_section_mode, timer_visible=timer_visible %}
         {% include '_timer_section.html' %}
       {% endwith %}
@@ -676,7 +636,7 @@
 
   const timerControls = (() => {
     const registry = new Map();
-    const supportedModes = new Set(['ai', 'picsum']);
+    const supportedModes = new Set(['ai', 'picsum', 'pexels']);
 
     function formatNumber(value, precision = 2) {
       if (!Number.isFinite(value)) return '';
@@ -725,42 +685,6 @@
       return null;
     }
 
-    function updateLegacyStatus(card, mode, nextLabel, lastLabel) {
-      const normalizedMode = (mode || card.dataset.timerMode || '').toLowerCase();
-      if (normalizedMode === 'ai') {
-        const nextEl = card.querySelector('.ai-auto-next');
-        if (nextEl) {
-          nextEl.textContent = nextLabel ? nextLabel : '—';
-        }
-      } else if (normalizedMode === 'picsum') {
-        const nextEl = card.querySelector('.picsum-auto-next');
-        const lastEl = card.querySelector('.picsum-auto-last');
-        const summary = card.querySelector('.picsum-auto-summary');
-        let hasInfo = false;
-        if (nextEl) {
-          if (nextLabel) {
-            nextEl.textContent = `Next: ${nextLabel}`;
-            nextEl.hidden = false;
-            hasInfo = true;
-          } else {
-            nextEl.textContent = '';
-            nextEl.hidden = true;
-          }
-        }
-        if (lastEl) {
-          if (lastLabel) {
-            lastEl.textContent = `Last: ${lastLabel}`;
-            lastEl.hidden = false;
-            hasInfo = true;
-          } else {
-            lastEl.textContent = '';
-            lastEl.hidden = true;
-          }
-        }
-        if (summary) summary.hidden = !hasInfo;
-      }
-    }
-
     function applyState(streamId, mode, config, opts = {}) {
       const state = registry.get(streamId);
       if (!state) return;
@@ -781,6 +705,7 @@
       if (state.preset) {
         const matched = enabled ? matchPresetValue(state.preset, interval) : null;
         state.preset.value = matched || 'custom';
+        state.preset.disabled = !enabled;
       }
       if (state.custom) {
         state.custom.value = interval > 0 ? formatNumber(interval) : '';
@@ -792,7 +717,6 @@
       }
       if (state.next) {
         state.next.textContent = nextRun ? nextRun : '—';
-        state.next.classList.toggle('is-active', enabled && !!nextRun);
       }
       if (!opts.skipVisibility) {
         updateVisibility(card);
@@ -828,7 +752,12 @@
             applyState(streamId, data.mode || state.mode, data.timer);
           }
           if (data) {
-            updateLegacyStatus(state.card, data.mode || state.mode, data.next_auto_trigger, data.last_auto_trigger);
+            const nextTrigger = Object.prototype.hasOwnProperty.call(data, 'next_auto_trigger')
+              ? data.next_auto_trigger
+              : (data.timer && Object.prototype.hasOwnProperty.call(data.timer, 'next_run') ? data.timer.next_run : undefined);
+            if (nextTrigger !== undefined) {
+              updateAutoIndicators(state.card, { next_auto_trigger: nextTrigger });
+            }
           }
           return data;
         })
@@ -946,7 +875,9 @@
       if (!state) return;
       const nextMode = (extras.mode || state.mode || card.dataset.mediaMode || '').toLowerCase();
       applyState(streamId, nextMode, timerConfig || {}, { skipVisibility: false });
-      updateLegacyStatus(card, nextMode, extras.next_auto_trigger, extras.last_auto_trigger);
+      if (extras && extras.next_auto_trigger !== undefined) {
+        updateAutoIndicators(card, { next_auto_trigger: extras.next_auto_trigger });
+      }
     }
 
     function includeTimerSection(streamId, streamMode) {
@@ -972,7 +903,14 @@
         const state = registry.get(streamId);
         if (!state || !data) return;
         applyState(streamId, data.mode || state.mode, data.timer || {});
-        updateLegacyStatus(state.card, data.mode || state.mode, data.next_auto_trigger, data.last_auto_trigger);
+        if (data) {
+          const nextTrigger = Object.prototype.hasOwnProperty.call(data, 'next_auto_trigger')
+            ? data.next_auto_trigger
+            : (data.timer && Object.prototype.hasOwnProperty.call(data.timer, 'next_run') ? data.timer.next_run : undefined);
+          if (nextTrigger !== undefined) {
+            updateAutoIndicators(state.card, { next_auto_trigger: nextTrigger });
+          }
+        }
       },
     };
   })();
@@ -3089,24 +3027,17 @@
     if (!card) return;
     const info = state || {};
     if (Object.prototype.hasOwnProperty.call(info, 'next_auto_trigger')) {
-      const summaryNext = card.querySelector('.ai-summary-next');
-      const modalNext = card.querySelector('.ai-auto-next');
       const formatted = formatAutoTime(info.next_auto_trigger);
-      if (summaryNext) summaryNext.textContent = formatted;
-      if (modalNext) modalNext.textContent = formatted;
+      const summaryNext = card.querySelector('.ai-summary-next');
+      if (summaryNext) summaryNext.textContent = formatted || '—';
+      const timerValue = card.querySelector('.timer-next-value');
+      if (timerValue) timerValue.textContent = formatted || '—';
+      card.dataset.timerNext = info.next_auto_trigger ? info.next_auto_trigger : '';
+      const section = card.querySelector('.timer-section');
+      if (section) section.dataset.timerNext = card.dataset.timerNext;
     }
     if (Object.prototype.hasOwnProperty.call(info, 'last_auto_error')) {
-      const errorEl = card.querySelector('.ai-auto-error');
-      if (errorEl) {
-        const message = info.last_auto_error;
-        if (message) {
-          errorEl.textContent = message;
-          errorEl.hidden = false;
-        } else {
-          errorEl.textContent = '';
-          errorEl.hidden = true;
-        }
-      }
+      card.dataset.timerLastError = info.last_auto_error ? String(info.last_auto_error) : '';
     }
   }
 
@@ -3172,6 +3103,16 @@
       } else {
         etaEl.hidden = true;
       }
+    }
+    const autoErrorMessage = info.last_auto_error || card.dataset.timerLastError || '';
+    if (autoErrorMessage && !failureStatuses.includes(status)) {
+      etaEl.hidden = false;
+      etaEl.textContent = autoErrorMessage;
+      etaEl.classList.remove('waiting', 'processing', 'done');
+      etaEl.classList.add('error');
+      statusEl.title = autoErrorMessage;
+    } else if (!failureStatuses.includes(status)) {
+      statusEl.removeAttribute('title');
     }
     if (!etaEl.textContent) {
       etaEl.hidden = true;
@@ -3321,14 +3262,6 @@
         payload.timeout = null;
       }
     }
-    const autoModeSelect = card.querySelector('.ai-auto-mode');
-    if (autoModeSelect) {
-      payload.auto_generate_mode = autoModeSelect.value;
-    }
-    const autoClockInput = card.querySelector('.ai-auto-clock');
-    if (autoClockInput) {
-      payload.auto_generate_clock_time = autoClockInput.value;
-    }
     return payload;
   }
 
@@ -3378,16 +3311,7 @@
     const managePresetBtn = card.querySelector('.ai-preset-manage');
     const openSettingsBtn = card.querySelector('.ai-open-settings');
     const closeSettingsButtons = aiSection.querySelectorAll('.ai-close-settings, .ai-close-settings-secondary');
-    const autoModeSelect = card.querySelector('.ai-auto-mode');
-    const autoClockRow = card.querySelector('.ai-auto-clock-row');
-    const autoClockInput = card.querySelector('.ai-auto-clock');
     let applyingPreset = false;
-    const updateAutoVisibility = () => {
-      const modeValue = autoModeSelect ? autoModeSelect.value : 'off';
-      if (autoClockRow) autoClockRow.hidden = modeValue !== 'clock';
-      if (autoClockInput) autoClockInput.disabled = modeValue !== 'clock';
-    };
-    updateAutoVisibility();
     if (modalBackdrop) modalBackdrop.hidden = true;
 
     function updateSummary() {
@@ -3445,7 +3369,6 @@
         const el = summaryRoot.querySelector(selector);
         if (el) el.textContent = value;
       });
-      const autoModeSelect = card.querySelector('.ai-auto-mode');
       const timerEnabled = card.dataset.timerEnabled === 'true';
       let autoLabel = 'Off';
       if (timerEnabled) {
@@ -3457,29 +3380,13 @@
         } else {
           autoLabel = 'Timer';
         }
-      } else if (autoModeSelect && autoModeSelect.value === 'clock') {
-        const clockInput = card.querySelector('.ai-auto-clock');
-        const timeValue = clockInput && clockInput.value ? clockInput.value : '--:--';
-        autoLabel = `Clock (${timeValue})`;
       }
       const autoSummary = summaryRoot.querySelector('.ai-summary-auto');
       if (autoSummary) autoSummary.textContent = autoLabel;
-    }
-
-    if (autoModeSelect) {
-      autoModeSelect.addEventListener('change', e => {
-        updateAutoVisibility();
-        saveSettings(streamId, { ai_settings: { auto_generate_mode: e.target.value } });
-        updateSummary();
-      });
-    }
-    if (autoClockInput) {
-      const handleClockChange = () => {
-        saveSettings(streamId, { ai_settings: { auto_generate_clock_time: autoClockInput.value } });
-        updateSummary();
-      };
-      autoClockInput.addEventListener('change', handleClockChange);
-      autoClockInput.addEventListener('blur', handleClockChange);
+      const nextSummary = summaryRoot.querySelector('.ai-summary-next');
+      if (nextSummary) {
+        nextSummary.textContent = formatAutoTime(card.dataset.timerNext || '');
+      }
     }
     aiSummaryUpdaters.set(card, updateSummary);
     updateSummary();
@@ -3906,15 +3813,6 @@
         });
         updateLoraAddState();
       }
-      const autoModeSelect = card.querySelector('.ai-auto-mode');
-      if (autoModeSelect) {
-        let modeValue = typeof preset.auto_generate_mode === 'string' ? preset.auto_generate_mode.toLowerCase() : 'off';
-        if (modeValue === 'timer') modeValue = 'off';
-        autoModeSelect.value = modeValue;
-        updateAutoVisibility();
-      }
-      const autoClockInputEl = card.querySelector('.ai-auto-clock');
-      if (autoClockInputEl) autoClockInputEl.value = preset.auto_generate_clock_time || '';
       if (aiSection) {
         const timeoutValue = Number(preset.timeout);
         if (Number.isFinite(timeoutValue) && timeoutValue > 0) {
@@ -4315,21 +4213,6 @@
                 }
               }
             }
-            const autoWrapper = card.querySelector('.ai-auto-settings');
-            if (autoWrapper) {
-              const modeSelect = autoWrapper.querySelector('.ai-auto-mode');
-              const clockInput = autoWrapper.querySelector('.ai-auto-clock');
-              const clockRow = autoWrapper.querySelector('.ai-auto-clock-row');
-              const normalizedMode = typeof aiSettings.auto_generate_mode === 'string' ? aiSettings.auto_generate_mode.toLowerCase() : 'off';
-              const appliedMode = normalizedMode === 'timer' ? 'off' : normalizedMode;
-              if (modeSelect) modeSelect.value = appliedMode;
-              if (clockInput && aiSettings.auto_generate_clock) {
-                clockInput.value = aiSettings.auto_generate_clock;
-              }
-              const isClock = appliedMode === 'clock';
-              if (clockRow) clockRow.hidden = !isClock;
-              if (clockInput) clockInput.disabled = !isClock;
-            }
           }
           if (data.new_config && data.new_config.ai_state) {
             updateAutoIndicators(card, data.new_config.ai_state);
@@ -4425,10 +4308,8 @@
     blur: PICSUM_LIMITS.blur.default,
     grayscale: false,
     seed: null,
-    auto_mode: 'off',
-    auto_interval_value: 10,
-    auto_interval_unit: 'minutes',
-    auto_clock_time: '',
+    seed_display: '',
+    seed_custom: false,
     next_auto_trigger: null,
     last_auto_trigger: null,
   });
@@ -4482,17 +4363,7 @@
     const limitedSeed = seedRawValue ? seedRawValue.slice(0, 64) : '';
     const displaySeed = limitedSeed || '';
     const seedValue = limitedSeed || null;
-    const seedCustom = false;
-    const autoModeRaw = typeof raw.auto_mode === 'string' ? raw.auto_mode.trim().toLowerCase() : PICSUM_DEFAULTS.auto_mode;
-    const autoMode = ['off', 'timer', 'clock'].includes(autoModeRaw) ? autoModeRaw : 'off';
-    let autoIntervalValue = parseFloat(raw.auto_interval_value);
-    if (!Number.isFinite(autoIntervalValue) || autoIntervalValue <= 0) {
-      autoIntervalValue = PICSUM_DEFAULTS.auto_interval_value;
-    }
-    const autoIntervalUnitRaw = typeof raw.auto_interval_unit === 'string' ? raw.auto_interval_unit.trim().toLowerCase() : PICSUM_DEFAULTS.auto_interval_unit;
-    const autoIntervalUnit = autoIntervalUnitRaw === 'hours' ? 'hours' : 'minutes';
-    const autoClockRaw = typeof raw.auto_clock_time === 'string' ? raw.auto_clock_time.trim() : '';
-    const autoClockTime = /^\d{2}:\d{2}$/.test(autoClockRaw) ? autoClockRaw : '';
+    const seedCustom = typeof raw.seed_custom === 'boolean' ? raw.seed_custom : !!raw.seed_custom;
     const nextAutoRaw = typeof raw.next_auto_trigger === 'string' ? raw.next_auto_trigger.trim() : '';
     const lastAutoRaw = typeof raw.last_auto_trigger === 'string' ? raw.last_auto_trigger.trim() : '';
     return {
@@ -4503,10 +4374,6 @@
       seed: seedValue,
       seed_display: displaySeed,
       seed_custom: seedCustom,
-      auto_mode: autoMode,
-      auto_interval_value: autoIntervalValue,
-      auto_interval_unit: autoIntervalUnit,
-      auto_clock_time: autoClockTime,
       next_auto_trigger: nextAutoRaw || null,
       last_auto_trigger: lastAutoRaw || null,
     };
@@ -4521,140 +4388,62 @@
     const heightInput = config.querySelector('.picsum-height');
     const blurInput = config.querySelector('.picsum-blur');
     const grayscaleInput = config.querySelector('.picsum-grayscale');
-    const autoModeSelect = config.querySelector('.picsum-auto-mode');
-    const autoTimeInput = config.querySelector('.picsum-auto-time');
-    const autoModeRaw = autoModeSelect ? autoModeSelect.value : (config.dataset.autoMode || 'off');
-    const autoMode = typeof autoModeRaw === 'string' ? autoModeRaw.trim().toLowerCase() : 'off';
-    const autoIntervalRaw = Number(config.dataset.autoIntervalValue || PICSUM_DEFAULTS.auto_interval_value);
-    const autoTimeRaw = autoTimeInput ? autoTimeInput.value : (config.dataset.autoClockTime || '');
-    const autoUnitRaw = config.dataset.autoIntervalUnit || 'minutes';
     const payload = {
       width: widthInput ? widthInput.value : PICSUM_DEFAULTS.width,
       height: heightInput ? heightInput.value : PICSUM_DEFAULTS.height,
       blur: blurInput ? blurInput.value : PICSUM_DEFAULTS.blur,
       grayscale: grayscaleInput ? grayscaleInput.checked : PICSUM_DEFAULTS.grayscale,
-      auto_mode: autoMode === 'clock' ? 'clock' : 'off',
-      auto_interval_value: Number.isFinite(autoIntervalRaw) && autoIntervalRaw > 0 ? autoIntervalRaw : PICSUM_DEFAULTS.auto_interval_value,
-      auto_interval_unit: ['minutes', 'hours'].includes(autoUnitRaw) ? autoUnitRaw : 'minutes',
-      auto_clock_time: typeof autoTimeRaw === 'string' && /^\d{2}:\d{2}$/.test(autoTimeRaw.trim()) ? autoTimeRaw.trim() : '',
     };
     return normalizePicsumSettings(payload);
   }
 
-  function applyPicsumSettings(card, settings, opts = {}) {
-    const normalized = normalizePicsumSettings(settings);
-    const config = card.querySelector('.picsum-config');
-    if (!config) {
-      return normalized;
-    }
-    const widthInput = config.querySelector('.picsum-width');
-    const heightInput = config.querySelector('.picsum-height');
-    const blurInput = config.querySelector('.picsum-blur');
-    const grayscaleInput = config.querySelector('.picsum-grayscale');
-    const seedDisplay = config.querySelector('.picsum-current-seed');
-    const seedCopyBtn = config.querySelector('.picsum-seed-copy');
-    const autoModeSelect = config.querySelector('.picsum-auto-mode');
-    const autoTimeInput = config.querySelector('.picsum-auto-time');
-    const autoSummary = config.querySelector('.picsum-auto-summary');
-    const autoLast = config.querySelector('.picsum-auto-last');
-    const autoNext = config.querySelector('.picsum-auto-next');
-    const preserveSeedDisplay = Boolean(opts.preserveSeedDisplay);
-    const normalizedSeed =
-      typeof normalized.seed_display === 'string' && normalized.seed_display.trim()
-        ? normalized.seed_display.trim()
-        : (typeof normalized.seed === 'string' ? normalized.seed.trim() : '');
-    const existingSeed =
-      typeof config.dataset.currentSeed === 'string' && config.dataset.currentSeed
-        ? config.dataset.currentSeed
-        : '';
-    const displaySeed = normalizedSeed || (preserveSeedDisplay ? existingSeed : '');
-
-    if (widthInput) widthInput.value = normalized.width;
-    if (heightInput) heightInput.value = normalized.height;
-    if (blurInput) blurInput.value = normalized.blur;
-    if (grayscaleInput) grayscaleInput.checked = normalized.grayscale;
-
-    if (seedDisplay) {
-      if (displaySeed) {
-        seedDisplay.textContent = displaySeed;
-        seedDisplay.classList.remove('is-empty');
-      } else {
-        seedDisplay.textContent = '—';
-        seedDisplay.classList.add('is-empty');
-      }
-      seedDisplay.dataset.seed = displaySeed || '';
-    }
-    if (seedCopyBtn) {
-      seedCopyBtn.disabled = !displaySeed;
-      seedCopyBtn.dataset.seed = displaySeed || '';
-    }
-
-    const appliedAutoMode = normalized.auto_mode === 'clock' ? 'clock' : 'off';
-    if (autoModeSelect) {
-      autoModeSelect.value = appliedAutoMode;
-    }
-    if (autoTimeInput) {
-      autoTimeInput.value = normalized.auto_clock_time || '';
-    }
-    updatePicsumAutoVisibility(config, appliedAutoMode);
-    if (autoSummary) {
-      const formattedLast = formatPicsumTimestamp(normalized.last_auto_trigger);
-      const formattedNext = formatPicsumTimestamp(normalized.next_auto_trigger);
-      let hasInfo = false;
-      if (autoLast) {
-        if (formattedLast) {
-          autoLast.textContent = `Last: ${formattedLast}`;
-          autoLast.hidden = false;
-          hasInfo = true;
-        } else {
-          autoLast.textContent = '';
-          autoLast.hidden = true;
-        }
-      }
-      if (autoNext) {
-        if (formattedNext) {
-          autoNext.textContent = `Next: ${formattedNext}`;
-          autoNext.hidden = false;
-          hasInfo = true;
-        } else {
-          autoNext.textContent = '';
-          autoNext.hidden = true;
-        }
-      }
-      autoSummary.hidden = !hasInfo;
-    }
-
-    config.dataset.currentSeed = displaySeed || '';
-    config.dataset.autoMode = appliedAutoMode;
-    config.dataset.autoIntervalValue = normalized.auto_interval_value;
-    config.dataset.autoIntervalUnit = normalized.auto_interval_unit || 'minutes';
-    config.dataset.autoClockTime = normalized.auto_clock_time || '';
-    card.dataset.picsumSeed = displaySeed || '';
+function applyPicsumSettings(card, settings, opts = {}) {
+  const normalized = normalizePicsumSettings(settings);
+  const config = card.querySelector('.picsum-config');
+  if (!config) {
     return normalized;
   }
-  function updatePicsumAutoVisibility(config, mode) {
-    const normalized = typeof mode === 'string' ? mode.toLowerCase() : 'off';
-    const clockField = config.querySelector('.picsum-auto-clock');
-    const clockInput = config.querySelector('.picsum-auto-time');
-    if (clockField) clockField.style.display = normalized === 'clock' ? '' : 'none';
-    if (clockInput) clockInput.disabled = normalized !== 'clock';
-    config.dataset.autoMode = normalized;
+  const widthInput = config.querySelector('.picsum-width');
+  const heightInput = config.querySelector('.picsum-height');
+  const blurInput = config.querySelector('.picsum-blur');
+  const grayscaleInput = config.querySelector('.picsum-grayscale');
+  const seedDisplay = config.querySelector('.picsum-current-seed');
+  const seedCopyBtn = config.querySelector('.picsum-seed-copy');
+  const preserveSeedDisplay = Boolean(opts.preserveSeedDisplay);
+  const normalizedSeed =
+    typeof normalized.seed_display === 'string' && normalized.seed_display.trim()
+      ? normalized.seed_display.trim()
+      : (typeof normalized.seed === 'string' ? normalized.seed.trim() : '');
+  const existingSeed =
+    typeof config.dataset.currentSeed === 'string' && config.dataset.currentSeed
+      ? config.dataset.currentSeed
+      : '';
+  const displaySeed = normalizedSeed || (preserveSeedDisplay ? existingSeed : '');
+
+  if (widthInput) widthInput.value = normalized.width;
+  if (heightInput) heightInput.value = normalized.height;
+  if (blurInput) blurInput.value = normalized.blur;
+  if (grayscaleInput) grayscaleInput.checked = normalized.grayscale;
+
+  if (seedDisplay) {
+    if (displaySeed) {
+      seedDisplay.textContent = displaySeed;
+      seedDisplay.classList.remove('is-empty');
+    } else {
+      seedDisplay.textContent = '—';
+      seedDisplay.classList.add('is-empty');
+    }
+    seedDisplay.dataset.seed = displaySeed || '';
+  }
+  if (seedCopyBtn) {
+    seedCopyBtn.disabled = !displaySeed;
+    seedCopyBtn.dataset.seed = displaySeed || '';
   }
 
-  function formatPicsumTimestamp(value) {
-    if (!value || typeof value !== 'string') {
-      return '';
-    }
-    const trimmed = value.trim();
-    if (!trimmed) {
-      return '';
-    }
-    const lower = trimmed.toLowerCase();
-    if (lower === 'none' || lower === 'null') {
-      return '';
-    }
-    return formatUnifiedTimestamp(trimmed, '');
-  }
+  config.dataset.currentSeed = displaySeed || '';
+  card.dataset.picsumSeed = displaySeed || '';
+  return normalized;
+}
   function setPicsumStatus(card, message, isError = false) {
     const statusEl = card.querySelector('.picsum-status');
     if (!statusEl) {
@@ -4918,12 +4707,6 @@
     if (backgroundRow) backgroundRow.style.display = (isLivestream || isVideo) ? 'none' : '';
     if (picsumRow) {
       picsumRow.style.display = isPicsum ? '' : 'none';
-      if (isPicsum) {
-        const picsumConfig = card.querySelector('.picsum-config');
-        if (picsumConfig) {
-          updatePicsumAutoVisibility(picsumConfig, picsumConfig.dataset.autoMode || 'off');
-        }
-      }
     }
 
     if (videoModeSelect) {
@@ -5170,8 +4953,6 @@
         const blurInput = picsumConfig.querySelector('.picsum-blur');
         const grayscaleInput = picsumConfig.querySelector('.picsum-grayscale');
         const seedCopyBtn = picsumConfig.querySelector('.picsum-seed-copy');
-        const autoModeSelect = picsumConfig.querySelector('.picsum-auto-mode');
-        const autoTimeInput = picsumConfig.querySelector('.picsum-auto-time');
         const fetchBtn = picsumConfig.querySelector('.picsum-fetch-btn');
         const maybeSave = () => {
           if ((card.dataset.mediaMode || '').toLowerCase() !== 'picsum') {
@@ -5191,16 +4972,6 @@
         if (heightInput) heightInput.addEventListener('change', maybeSave);
         if (blurInput) blurInput.addEventListener('change', maybeSave);
         if (grayscaleInput) grayscaleInput.addEventListener('change', maybeSave);
-        if (autoModeSelect) {
-          autoModeSelect.addEventListener('change', e => {
-            updatePicsumAutoVisibility(picsumConfig, e.target.value);
-            maybeSave();
-          });
-        }
-        if (autoTimeInput) {
-          autoTimeInput.addEventListener('change', maybeSave);
-          autoTimeInput.addEventListener('blur', maybeSave);
-        }
         if (fetchBtn) {
           fetchBtn.addEventListener('click', async () => {
             if ((card.dataset.mediaMode || '').toLowerCase() !== 'picsum') {

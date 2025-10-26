@@ -404,10 +404,7 @@ def _should_ignore_media_name(name: Optional[str]) -> bool:
         return True
     return leaf.startswith(IGNORED_MEDIA_PREFIX)
 
-AUTO_GENERATE_MODES = {"off", "timer", "clock"}
 AUTO_GENERATE_INTERVAL_UNITS = {"minutes": 60.0, "hours": 3600.0}
-AUTO_GENERATE_MIN_INTERVAL_SECONDS = 60.0
-AUTO_GENERATE_DEFAULT_INTERVAL_VALUE = 10.0
 
 class AutoGenerationError(RuntimeError):
     """Raised when an AI generation queue request cannot be fulfilled."""
@@ -1349,10 +1346,6 @@ AI_FALLBACK_DEFAULTS: Dict[str, Any] = {
     "disable_batching": False,
     "allow_downgrade": False,
     "timeout": AI_TIMEOUT,
-    "auto_generate_mode": "off",
-    "auto_generate_interval_value": AUTO_GENERATE_DEFAULT_INTERVAL_VALUE,
-    "auto_generate_interval_unit": "minutes",
-    "auto_generate_clock_time": None,
 }
 
 
@@ -1433,11 +1426,6 @@ PICSUM_MAX_DIMENSION = 4096
 PICSUM_MIN_BLUR = 0
 PICSUM_MAX_BLUR = 10
 PICSUM_DEFAULT_BLUR = 0
-PICSUM_AUTO_MODES = {"off", "timer", "clock"}
-PICSUM_DEFAULT_AUTO_MODE = "off"
-PICSUM_DEFAULT_INTERVAL_VALUE = 10.0
-PICSUM_DEFAULT_INTERVAL_UNIT = "minutes"
-
 
 def default_picsum_settings() -> Dict[str, Any]:
     return {
@@ -1446,10 +1434,6 @@ def default_picsum_settings() -> Dict[str, Any]:
         "blur": PICSUM_DEFAULT_BLUR,
         "grayscale": False,
         "seed": None,
-        "auto_mode": PICSUM_DEFAULT_AUTO_MODE,
-        "auto_interval_value": PICSUM_DEFAULT_INTERVAL_VALUE,
-        "auto_interval_unit": PICSUM_DEFAULT_INTERVAL_UNIT,
-        "auto_clock_time": "",
         "next_auto_trigger": None,
         "last_auto_trigger": None,
     }
@@ -1475,10 +1459,6 @@ def _sanitize_picsum_settings(
     blur_default = baseline.get("blur", PICSUM_DEFAULT_BLUR)
     grayscale_default = bool(baseline.get("grayscale", False))
     seed_default = baseline.get("seed")
-    auto_mode_default = baseline.get("auto_mode", PICSUM_DEFAULT_AUTO_MODE)
-    auto_interval_default = float(baseline.get("auto_interval_value", PICSUM_DEFAULT_INTERVAL_VALUE))
-    auto_unit_default = baseline.get("auto_interval_unit", PICSUM_DEFAULT_INTERVAL_UNIT)
-    auto_clock_default = baseline.get("auto_clock_time", "")
     next_auto_default = baseline.get("next_auto_trigger")
     last_auto_default = baseline.get("last_auto_trigger")
 
@@ -1495,28 +1475,6 @@ def _sanitize_picsum_settings(
         "grayscale": bool(grayscale_val),
         "seed": seed_val if seed_in_payload else seed_default,
     }
-    auto_mode_raw = value.get("auto_mode")
-    auto_mode = str(auto_mode_raw).strip().lower() if isinstance(auto_mode_raw, str) else auto_mode_default
-    if auto_mode not in PICSUM_AUTO_MODES:
-        auto_mode = PICSUM_DEFAULT_AUTO_MODE
-
-    interval_value = _coerce_float(value.get("auto_interval_value"), auto_interval_default)
-    if interval_value is None or interval_value <= 0:
-        interval_value = PICSUM_DEFAULT_INTERVAL_VALUE
-
-    interval_unit_raw = value.get("auto_interval_unit")
-    interval_unit = str(interval_unit_raw).strip().lower() if isinstance(interval_unit_raw, str) else auto_unit_default
-    if interval_unit not in AUTO_GENERATE_INTERVAL_UNITS:
-        interval_unit = PICSUM_DEFAULT_INTERVAL_UNIT
-
-    clock_raw = value.get("auto_clock_time")
-    if clock_raw is None:
-        clock_time = _normalize_clock_time(auto_clock_default)
-    else:
-        clock_time = _normalize_clock_time(clock_raw)
-    if clock_time is None:
-        clock_time = ""
-
     next_auto_raw = value.get("next_auto_trigger")
     next_auto = _normalize_timer_label(next_auto_raw)
     if not next_auto:
@@ -1529,10 +1487,6 @@ def _sanitize_picsum_settings(
 
     result.update(
         {
-            "auto_mode": auto_mode,
-            "auto_interval_value": float(interval_value),
-            "auto_interval_unit": interval_unit,
-            "auto_clock_time": clock_time,
             "next_auto_trigger": next_auto,
             "last_auto_trigger": last_auto,
         }
@@ -1559,6 +1513,196 @@ def ensure_timer_defaults(conf: Dict[str, Any]) -> Dict[str, Any]:
     timer_conf = ensure_timer_config(conf)
     conf["timer"] = timer_conf
     return timer_conf
+
+
+def _clock_time_to_offset_minutes(value: Any) -> Optional[float]:
+    normalized = _normalize_clock_time(value)
+    if not normalized:
+        return None
+    hour, minute = map(int, normalized.split(":"))
+    return float(hour * 60 + minute)
+
+
+def migrate_legacy_timer_config(stream_id: str, conf: Dict[str, Any]) -> bool:
+    """Translate legacy per-mode timer fields into the unified timer structure."""
+
+    if not isinstance(conf, dict):
+        return False
+
+    changed = False
+    ensure_timer_defaults(conf)
+    timer_mode = _canonical_timer_mode(conf)
+
+    derived_enabled: Optional[bool] = None
+    derived_interval: Optional[float] = None
+    derived_offset: Optional[float] = None
+
+    def pop_legacy(container: Optional[Dict[str, Any]], key: str) -> Any:
+        nonlocal changed
+        if isinstance(container, dict) and key in container:
+            changed = True
+            return container.pop(key)
+        return None
+
+    def update_enabled(flag: Optional[bool], *, force: bool = False) -> None:
+        nonlocal derived_enabled
+        if flag is None:
+            return
+        value = bool(flag)
+        if force or derived_enabled is None:
+            derived_enabled = value
+        else:
+            derived_enabled = derived_enabled or value
+
+    def update_interval(value: Any, *, force: bool = False) -> None:
+        nonlocal derived_interval
+        try:
+            numeric = float(value)
+        except (TypeError, ValueError):
+            return
+        if numeric <= 0:
+            return
+        if force or derived_interval is None:
+            derived_interval = numeric
+
+    def update_offset(value: Any, *, force: bool = False) -> None:
+        nonlocal derived_offset
+        try:
+            numeric = float(value)
+        except (TypeError, ValueError):
+            return
+        if numeric < 0:
+            return
+        if force or derived_offset is None:
+            derived_offset = numeric
+
+    # Stream-level legacy fields
+    legacy_every = pop_legacy(conf, "every_min")
+    if legacy_every is not None:
+        minutes = _coerce_float(legacy_every, None)
+        if minutes and minutes > 0:
+            update_enabled(True)
+            update_interval(minutes)
+
+    legacy_hourly = pop_legacy(conf, "hourly_fire")
+    if legacy_hourly:
+        update_enabled(True, force=True)
+        update_interval(60.0, force=True)
+
+    legacy_daily = pop_legacy(conf, "daily_trigger")
+    if legacy_daily:
+        offset = _clock_time_to_offset_minutes(legacy_daily)
+        if offset is not None:
+            update_enabled(True, force=True)
+            update_interval(24 * 60.0, force=True)
+            update_offset(offset, force=True)
+
+    legacy_fire_at = pop_legacy(conf, "fire_at")
+    if legacy_fire_at:
+        offset = _clock_time_to_offset_minutes(legacy_fire_at)
+        if offset is not None:
+            update_enabled(True, force=True)
+            update_interval(24 * 60.0, force=True)
+            update_offset(offset, force=True)
+
+    legacy_offset = pop_legacy(conf, "timer_offset")
+    if legacy_offset is None:
+        legacy_offset = pop_legacy(conf, "timer_offset_min")
+    if legacy_offset is not None:
+        offset_value = _coerce_float(legacy_offset, None)
+        if offset_value is not None:
+            update_offset(offset_value)
+
+    legacy_interval = pop_legacy(conf, "timer_interval")
+    if legacy_interval is not None:
+        interval_value = _coerce_float(legacy_interval, None)
+        if interval_value and interval_value > 0:
+            update_interval(interval_value)
+
+    # Mode-specific legacy fields
+    ai_settings = conf.get(AI_SETTINGS_KEY)
+    legacy_ai_mode = pop_legacy(ai_settings, "auto_generate_mode")
+    legacy_ai_interval = pop_legacy(ai_settings, "auto_generate_interval_value")
+    legacy_ai_unit = pop_legacy(ai_settings, "auto_generate_interval_unit")
+    legacy_ai_clock = pop_legacy(ai_settings, "auto_generate_clock_time")
+    legacy_ai_clock_alt = pop_legacy(ai_settings, "auto_generate_clock")
+
+    picsum_settings = conf.get(PICSUM_SETTINGS_KEY)
+    legacy_picsum_mode = pop_legacy(picsum_settings, "auto_mode")
+    legacy_picsum_interval = pop_legacy(picsum_settings, "auto_interval_value")
+    legacy_picsum_unit = pop_legacy(picsum_settings, "auto_interval_unit")
+    legacy_picsum_clock = pop_legacy(picsum_settings, "auto_clock_time")
+
+    def _convert_interval(value: Any, unit: Any) -> Optional[float]:
+        try:
+            numeric = float(value)
+        except (TypeError, ValueError):
+            return None
+        if numeric <= 0:
+            return None
+        unit_key = str(unit).strip().lower() if isinstance(unit, str) else "minutes"
+        seconds = AUTO_GENERATE_INTERVAL_UNITS.get(unit_key, 60.0)
+        minutes = numeric * (seconds / 60.0)
+        if minutes <= 0:
+            return None
+        return minutes
+
+    if timer_mode == AI_MODE:
+        mode_value = str(legacy_ai_mode).strip().lower() if isinstance(legacy_ai_mode, str) else ""
+        if mode_value == "timer":
+            minutes = _convert_interval(legacy_ai_interval, legacy_ai_unit)
+            if minutes:
+                update_enabled(True, force=True)
+                update_interval(minutes, force=True)
+        elif mode_value == "clock":
+            offset = _clock_time_to_offset_minutes(legacy_ai_clock or legacy_ai_clock_alt)
+            if offset is not None:
+                update_enabled(True, force=True)
+                update_interval(24 * 60.0, force=True)
+                update_offset(offset, force=True)
+        elif mode_value == "off":
+            update_enabled(False, force=True)
+    elif timer_mode == MEDIA_MODE_PICSUM:
+        mode_value = str(legacy_picsum_mode).strip().lower() if isinstance(legacy_picsum_mode, str) else ""
+        if mode_value == "timer":
+            minutes = _convert_interval(legacy_picsum_interval, legacy_picsum_unit)
+            if minutes:
+                update_enabled(True, force=True)
+                update_interval(minutes, force=True)
+        elif mode_value == "clock":
+            offset = _clock_time_to_offset_minutes(legacy_picsum_clock)
+            if offset is not None:
+                update_enabled(True, force=True)
+                update_interval(24 * 60.0, force=True)
+                update_offset(offset, force=True)
+        elif mode_value == "off":
+            update_enabled(False, force=True)
+
+    updates: Dict[str, Any] = {}
+    if derived_enabled is not None:
+        updates["enabled"] = bool(derived_enabled)
+    if derived_interval is not None:
+        updates["interval"] = float(derived_interval)
+    if derived_offset is not None:
+        updates["offset"] = max(0.0, float(derived_offset))
+
+    applied = False
+    if updates:
+        timer_manager = TimerManager(
+            mode=timer_mode or conf.get("mode") or "",
+            stream_id=stream_id,
+            config_owner=conf,
+            snap_provider=_timer_snap_enabled,
+        )
+        before = dict(timer_manager.config)
+        timer_manager.apply_updates(updates)
+        if not timer_manager.is_enabled():
+            timer_manager.update_next(None)
+        after = dict(timer_manager.config)
+        applied = before != after
+        changed = changed or applied
+
+    return changed
 
 
 def _canonical_timer_mode(conf: Dict[str, Any]) -> Optional[str]:
@@ -1692,7 +1836,14 @@ def ensure_settings_integrity(data: Dict[str, Any]) -> bool:
             continue
         if not isinstance(conf, dict):
             continue
-        if ensure_tag_defaults(conf):
+        before_conf = deepcopy(conf)
+        ensure_tag_defaults(conf)
+        ensure_ai_defaults(conf)
+        ensure_picsum_defaults(conf)
+        ensure_timer_defaults(conf)
+        if migrate_legacy_timer_config(key, conf):
+            changed = True
+        if conf != before_conf:
             changed = True
     return changed
 
@@ -1772,44 +1923,6 @@ def _sanitize_ai_settings(
             if maybe is None:
                 continue
             current[key] = max(0.0, maybe)
-        elif key == "auto_generate_mode":
-            normalized = value.strip().lower() if isinstance(value, str) else ""
-            if normalized not in AUTO_GENERATE_MODES:
-                fallback = defaults.get(key, "off")
-                if isinstance(fallback, str):
-                    fallback = fallback.strip().lower()
-                else:
-                    fallback = "off"
-                if fallback not in AUTO_GENERATE_MODES:
-                    fallback = "off"
-                normalized = fallback
-            current[key] = normalized
-        elif key == "auto_generate_interval_unit":
-            unit_value = value.strip().lower() if isinstance(value, str) else ""
-            if unit_value not in AUTO_GENERATE_INTERVAL_UNITS:
-                fallback = defaults.get(key, "minutes")
-                if isinstance(fallback, str):
-                    fallback = fallback.strip().lower()
-                else:
-                    fallback = "minutes"
-                if fallback not in AUTO_GENERATE_INTERVAL_UNITS:
-                    fallback = "minutes"
-                unit_value = fallback
-            current[key] = unit_value
-        elif key == "auto_generate_interval_value":
-            maybe = _maybe_float(value)
-            if maybe is None or maybe <= 0:
-                fallback = defaults.get(key, AUTO_GENERATE_DEFAULT_INTERVAL_VALUE)
-                try:
-                    maybe = float(fallback)
-                except (TypeError, ValueError):
-                    maybe = AUTO_GENERATE_DEFAULT_INTERVAL_VALUE
-            current[key] = maybe
-        elif key == "auto_generate_clock_time":
-            normalized = _normalize_clock_time(value)
-            if normalized is None:
-                normalized = _normalize_clock_time(defaults.get(key))
-            current[key] = normalized
         elif key in bool_keys:
             current[key] = _coerce_bool(value, defaults[key])
         elif key == "seed":
@@ -5012,33 +5125,11 @@ def update_stream_timer(stream_id: str):
     allowed_updates = {key: payload[key] for key in ("enabled", "interval", "offset") if key in payload}
     updated_config = timer.apply_updates(allowed_updates)
 
-    if timer_mode == AI_MODE:
-        ai_settings = conf[AI_SETTINGS_KEY]
-        if updated_config["enabled"]:
-            ai_settings["auto_generate_mode"] = "timer"
-            ai_settings["auto_generate_interval_value"] = float(updated_config["interval"])
-            ai_settings["auto_generate_interval_unit"] = "minutes"
-        elif ai_settings.get("auto_generate_mode") == "timer":
-            ai_settings["auto_generate_mode"] = "off"
-        conf["_ai_customized"] = not _ai_settings_match_defaults(ai_settings)
-    elif timer_mode == MEDIA_MODE_PICSUM:
-        picsum_settings = conf.get(PICSUM_SETTINGS_KEY) or {}
-        if updated_config["enabled"]:
-            picsum_settings["auto_mode"] = "timer"
-            picsum_settings["auto_interval_value"] = float(updated_config["interval"])
-            picsum_settings["auto_interval_unit"] = "minutes"
-        elif picsum_settings.get("auto_mode") == "timer":
-            picsum_settings["auto_mode"] = "off"
-        conf[PICSUM_SETTINGS_KEY] = picsum_settings
-
     if updated_config["enabled"]:
         initial_next = timer.compute_next()
         timer.update_next(initial_next)
     else:
         timer.update_next(None)
-        if timer_mode == MEDIA_MODE_PICSUM:
-            picsum_settings = conf.get(PICSUM_SETTINGS_KEY) or {}
-            picsum_settings["next_auto_trigger"] = None
 
     scheduler_ts = time.time()
     if timer_mode == AI_MODE and auto_scheduler is not None:
@@ -5047,13 +5138,20 @@ def update_stream_timer(stream_id: str):
         picsum_scheduler.reschedule(stream_id, base_time=scheduler_ts)
 
     refreshed_config = timer.refresh()
+    next_label = refreshed_config.get("next_run")
+    last_label = refreshed_config.get("last_run")
+
     if timer_mode == AI_MODE:
-        next_label = conf[AI_STATE_KEY].get("next_auto_trigger")
-        last_label = conf[AI_STATE_KEY].get("last_auto_trigger")
-    else:
+        ai_state = conf[AI_STATE_KEY]
+        ai_state["next_auto_trigger"] = next_label
+        if last_label is not None:
+            ai_state["last_auto_trigger"] = last_label
+    elif timer_mode == MEDIA_MODE_PICSUM:
         picsum_state = conf.get(PICSUM_SETTINGS_KEY) or {}
-        next_label = picsum_state.get("next_auto_trigger")
-        last_label = picsum_state.get("last_auto_trigger")
+        picsum_state["next_auto_trigger"] = next_label
+        if last_label is not None:
+            picsum_state["last_auto_trigger"] = last_label
+        conf[PICSUM_SETTINGS_KEY] = picsum_state
 
     save_settings(settings)
     return jsonify({
@@ -5598,72 +5696,25 @@ class AutoGenerateScheduler:
         )
         reference_ts = base_time if base_time is not None else time.time()
 
-        if timer_mode == AI_MODE and timer.is_enabled():
-            next_dt = timer.compute_next(reference=datetime.fromtimestamp(reference_ts))
-            if next_dt is None:
-                with self._lock:
-                    self._next_run.pop(stream_id, None)
-                timer.update_next(None)
-                self._update_state(stream_id, next_auto_trigger=None, last_auto_error=None)
-                return
-            with self._lock:
-                self._next_run[stream_id] = next_dt.timestamp()
-            timer.update_next(next_dt)
-            self._update_state(stream_id, next_auto_trigger=_format_timer_label(next_dt), last_auto_error=None)
-            _log_timer_schedule(stream_id, timer_mode, next_dt, timer.offset_minutes())
-            return
-
-        timer.update_next(None)
-        ai_settings = conf[AI_SETTINGS_KEY]
-        mode_raw = ai_settings.get('auto_generate_mode')
-        mode_value = mode_raw.strip().lower() if isinstance(mode_raw, str) else 'off'
-        if conf.get('mode') != AI_MODE or mode_value not in AUTO_GENERATE_MODES or mode_value == 'off':
+        if timer_mode != AI_MODE or not timer.is_enabled():
+            timer.update_next(None)
             with self._lock:
                 self._next_run.pop(stream_id, None)
             self._update_state(stream_id, next_auto_trigger=None, last_auto_error=None)
             return
-        next_dt = self._compute_next_datetime(conf, mode_value, base_time=base_time)
+
+        next_dt = timer.compute_next(reference=datetime.fromtimestamp(reference_ts))
         if next_dt is None:
+            timer.update_next(None)
             with self._lock:
                 self._next_run.pop(stream_id, None)
             self._update_state(stream_id, next_auto_trigger=None, last_auto_error=None)
             return
         with self._lock:
             self._next_run[stream_id] = next_dt.timestamp()
-        self._update_state(stream_id, next_auto_trigger=_format_timer_label(next_dt))
-
-    def _compute_next_datetime(self, conf: Dict[str, Any], mode_value: str, *, base_time: Optional[float]) -> Optional[datetime]:
-        ai_settings = conf[AI_SETTINGS_KEY]
-        reference_ts = base_time if base_time is not None else time.time()
-        reference_dt = datetime.fromtimestamp(reference_ts)
-        if mode_value == 'timer':
-            interval_value = ai_settings.get('auto_generate_interval_value')
-            try:
-                numeric = float(interval_value)
-            except (TypeError, ValueError):
-                numeric = AUTO_GENERATE_DEFAULT_INTERVAL_VALUE
-            if numeric <= 0:
-                numeric = AUTO_GENERATE_DEFAULT_INTERVAL_VALUE
-            unit_raw = ai_settings.get('auto_generate_interval_unit')
-            unit_value = unit_raw.strip().lower() if isinstance(unit_raw, str) else 'minutes'
-            multiplier = AUTO_GENERATE_INTERVAL_UNITS.get(unit_value, 60.0)
-            interval_seconds = max(AUTO_GENERATE_MIN_INTERVAL_SECONDS, numeric * multiplier)
-            return timer_manager.compute_next_trigger(
-                interval_seconds,
-                reference=reference_dt,
-                snap_to_increment=_timer_snap_enabled(),
-            )
-        if mode_value == 'clock':
-            clock_value = _normalize_clock_time(ai_settings.get('auto_generate_clock_time'))
-            if not clock_value:
-                return None
-            hour, minute = map(int, clock_value.split(':'))
-            base_dt = reference_dt
-            target = base_dt.replace(hour=hour, minute=minute, second=0, microsecond=0)
-            if target <= base_dt:
-                target += timedelta(days=1)
-            return target
-        return None
+        timer.update_next(next_dt)
+        self._update_state(stream_id, next_auto_trigger=_format_timer_label(next_dt), last_auto_error=None)
+        _log_timer_schedule(stream_id, timer_mode, next_dt, timer.offset_minutes())
 
     def _update_state(self, stream_id: str, **updates: Any) -> None:
         conf = settings.get(stream_id)
@@ -5713,35 +5764,8 @@ class AutoGenerateScheduler:
         )
         ai_settings = conf[AI_SETTINGS_KEY]
         prompt = str(ai_settings.get('prompt') or '').strip()
-        if timer_mode == AI_MODE and timer.is_enabled():
-            if not prompt:
-                self._update_state(stream_id, last_auto_error='Prompt is required for auto-generation')
-                self.reschedule(stream_id)
-                return
-            try:
-                _queue_ai_generation(stream_id, ai_settings, trigger_source='auto')
-            except AutoGenerationBusy:
-                self._update_state(stream_id, last_auto_error=None)
-                self.reschedule(stream_id, base_time=time.time())
-            except AutoGenerationPromptMissing as exc:
-                self._update_state(stream_id, last_auto_error=str(exc))
-                self.reschedule(stream_id)
-            except AutoGenerationUnavailable as exc:
-                self._update_state(stream_id, last_auto_error=str(exc))
-                self.reschedule(stream_id)
-            except AutoGenerationError as exc:
-                self._update_state(stream_id, last_auto_error=str(exc))
-                self.reschedule(stream_id)
-            else:
-                timer.mark_trigger()
-                self._update_state(stream_id, last_auto_error=None)
-                self.reschedule(stream_id, base_time=time.time())
-            return
-
-        mode_raw = ai_settings.get('auto_generate_mode')
-        mode_value = mode_raw.strip().lower() if isinstance(mode_raw, str) else 'off'
-        if conf.get('mode') != AI_MODE or mode_value not in AUTO_GENERATE_MODES or mode_value == 'off':
-            self.reschedule(stream_id)
+        if timer_mode != AI_MODE or not timer.is_enabled():
+            self.remove(stream_id)
             return
         if not prompt:
             self._update_state(stream_id, last_auto_error='Prompt is required for auto-generation')
@@ -5762,6 +5786,7 @@ class AutoGenerateScheduler:
             self._update_state(stream_id, last_auto_error=str(exc))
             self.reschedule(stream_id)
         else:
+            timer.mark_trigger()
             self._update_state(stream_id, last_auto_error=None)
             self.reschedule(stream_id, base_time=time.time())
 
@@ -5830,67 +5855,25 @@ class PicsumAutoScheduler:
         reference_ts = base_time if base_time is not None else time.time()
         picsum = conf.get(PICSUM_SETTINGS_KEY) or {}
 
-        if timer_mode == MEDIA_MODE_PICSUM and timer.is_enabled():
-            next_dt = timer.compute_next(reference=datetime.fromtimestamp(reference_ts))
-            if next_dt is None:
-                self.remove(stream_id)
-                return
+        if timer_mode != MEDIA_MODE_PICSUM or not timer.is_enabled():
+            timer.update_next(None)
             with self._lock:
-                self._next_run[stream_id] = next_dt.timestamp()
-            timer.update_next(next_dt)
-            picsum["next_auto_trigger"] = _format_timer_label(next_dt)
-            _log_timer_schedule(stream_id, timer_mode, next_dt, timer.offset_minutes())
+                self._next_run.pop(stream_id, None)
+            picsum["next_auto_trigger"] = None
             return
 
-        timer.update_next(None)
-        picsum = conf.get(PICSUM_SETTINGS_KEY) or {}
-        mode_raw = picsum.get("auto_mode")
-        mode = str(mode_raw).strip().lower() if isinstance(mode_raw, str) else PICSUM_DEFAULT_AUTO_MODE
-        if conf.get("media_mode") != MEDIA_MODE_PICSUM or mode not in PICSUM_AUTO_MODES or mode == "off":
-            self.remove(stream_id)
-            return
-        next_dt = self._compute_next_datetime(conf, mode, base_time=base_time)
+        next_dt = timer.compute_next(reference=datetime.fromtimestamp(reference_ts))
         if next_dt is None:
-            self.remove(stream_id)
+            timer.update_next(None)
+            with self._lock:
+                self._next_run.pop(stream_id, None)
+            picsum["next_auto_trigger"] = None
             return
         with self._lock:
             self._next_run[stream_id] = next_dt.timestamp()
+        timer.update_next(next_dt)
         picsum["next_auto_trigger"] = _format_timer_label(next_dt)
-
-    def _compute_next_datetime(
-        self,
-        conf: Dict[str, Any],
-        mode: str,
-        *,
-        base_time: Optional[float],
-    ) -> Optional[datetime]:
-        picsum = conf.get(PICSUM_SETTINGS_KEY) or {}
-        reference_ts = base_time if base_time is not None else time.time()
-        reference_dt = datetime.fromtimestamp(reference_ts)
-        if mode == "timer":
-            interval_value = _coerce_float(picsum.get("auto_interval_value"), PICSUM_DEFAULT_INTERVAL_VALUE)
-            if interval_value is None or interval_value <= 0:
-                interval_value = PICSUM_DEFAULT_INTERVAL_VALUE
-            unit_raw = picsum.get("auto_interval_unit")
-            unit = str(unit_raw).strip().lower() if isinstance(unit_raw, str) else PICSUM_DEFAULT_INTERVAL_UNIT
-            unit_seconds = AUTO_GENERATE_INTERVAL_UNITS.get(unit, AUTO_GENERATE_INTERVAL_UNITS[PICSUM_DEFAULT_INTERVAL_UNIT])
-            seconds = max(60.0, interval_value * unit_seconds)
-            return timer_manager.compute_next_trigger(
-                seconds,
-                reference=reference_dt,
-                snap_to_increment=_timer_snap_enabled(),
-            )
-        if mode == "clock":
-            clock_value = _normalize_clock_time(picsum.get("auto_clock_time"))
-            if not clock_value:
-                return None
-            hour, minute = map(int, clock_value.split(":"))
-            base_dt = reference_dt
-            target = base_dt.replace(hour=hour, minute=minute, second=0, microsecond=0)
-            if target <= base_dt:
-                target += timedelta(days=1)
-            return target
-        return None
+        _log_timer_schedule(stream_id, timer_mode, next_dt, timer.offset_minutes())
 
     def _loop(self) -> None:
         while not self._stop.is_set():
@@ -5918,6 +5901,9 @@ class PicsumAutoScheduler:
             config_owner=conf,
             snap_provider=_timer_snap_enabled,
         )
+        if timer_mode != MEDIA_MODE_PICSUM or not timer.is_enabled():
+            self.remove(stream_id)
+            return
         result = _refresh_picsum_stream(stream_id)
         if result is None:
             self.remove(stream_id)

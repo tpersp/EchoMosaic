@@ -11,7 +11,7 @@
     {% set _preset_match.value = _preset %}
   {% endif %}
 {% endfor %}
-<div class="timer-section card-section" data-stream="{{ stream_id }}"
+<div class="timer-section" data-stream="{{ stream_id }}"
      data-timer-mode="{{ timer_mode }}"
      data-timer-supported="{{ 'true' if timer_visible else 'false' }}"
      data-timer-enabled="{{ 'true' if _timer.enabled else 'false' }}"
@@ -20,18 +20,19 @@
      data-timer-next="{{ _next_run }}"
      {% if not timer_visible %}hidden{% endif %}>
   <div class="timer-section-header">
-    <h4 class="timer-section-title">Timer Settings</h4>
-  </div>
-  <div class="timer-row timer-toggle-row">
-    <label class="toggle inline">
+    <div class="timer-section-title">
+      <span class="timer-section-icon" aria-hidden="true">⏱</span>
+      <span>Timer Settings</span>
+    </div>
+    <label class="toggle inline timer-toggle">
       <input type="checkbox" class="timer-enable-toggle" {% if _timer.enabled %}checked{% endif %}>
       <span class="toggle-switch" aria-hidden="true"></span>
       <span class="toggle-label">Enable Timer</span>
     </label>
   </div>
-  <div class="timer-row timer-interval-row">
-    <label for="timer-interval-preset-{{ stream_id }}">Interval</label>
-    <div class="timer-interval-controls">
+  <div class="timer-section-body">
+    <label class="timer-field-label" for="timer-interval-preset-{{ stream_id }}">Interval</label>
+    <div class="timer-field-control timer-interval-control">
       <select id="timer-interval-preset-{{ stream_id }}" class="timer-interval-preset">
         {% for _preset in _presets %}
         <option value="{{ _preset }}" {% if _preset_match.value == _preset %}selected{% endif %}>{{ _preset }} min</option>
@@ -43,13 +44,11 @@
         <span class="timer-unit-label">min</span>
       </div>
     </div>
-  </div>
-  <div class="timer-row timer-offset-row">
-    <label for="timer-offset-{{ stream_id }}">Offset (min)</label>
-    <input id="timer-offset-{{ stream_id }}" type="number" class="timer-offset-input" min="0" step="1" value="{{ _offset_str }}">
-  </div>
-  <div class="timer-row timer-next-row">
-    <span class="timer-next-label">Next run:</span>
-    <span class="timer-next-value">{{ _next_run if _next_run else '&mdash;' }}</span>
+    <label class="timer-field-label" for="timer-offset-{{ stream_id }}">Offset (min)</label>
+    <div class="timer-field-control">
+      <input id="timer-offset-{{ stream_id }}" type="number" class="timer-offset-input" min="0" step="1" value="{{ _offset_str }}">
+    </div>
+    <span class="timer-field-label timer-next-label">Next run</span>
+    <small class="timer-next-value" aria-live="polite">{{ _next_run if _next_run else '&mdash;' }}</small>
   </div>
 </div>
