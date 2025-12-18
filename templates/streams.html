@@ -42,20 +42,20 @@
         {% if main_id %}
         <div class="mosaic-cell main">
           {% set conf = stream_lookup[main_id] %}
-          <iframe src="{{ url_for('render_stream', name=(conf.label if conf.label else main_id)|slugify) }}" allow="autoplay" loading="lazy" scrolling="no"></iframe>
+          <iframe src="{{ url_for('render_stream', name=(conf.label if conf.label else main_id)|slugify) }}" allow="autoplay; encrypted-media; picture-in-picture; fullscreen" allowfullscreen loading="lazy" scrolling="no"></iframe>
         </div>
           {% if pip_id %}
           {% set pip_conf = stream_lookup.get(pip_id) %}
           {% if pip_conf %}
           <div class="mosaic-cell pip">
-            <iframe src="{{ url_for('render_stream', name=(pip_conf.label if pip_conf.label else pip_id)|slugify) }}" allow="autoplay" loading="lazy" scrolling="no"></iframe>
+            <iframe src="{{ url_for('render_stream', name=(pip_conf.label if pip_conf.label else pip_id)|slugify) }}" allow="autoplay; encrypted-media; picture-in-picture; fullscreen" allowfullscreen loading="lazy" scrolling="no"></iframe>
           </div>
           {% endif %}
           {% endif %}
         {% else %}
           {% for stream_id, conf in stream_items %}
           <div class="mosaic-cell">
-            <iframe src="{{ url_for('render_stream', name=(conf.label if conf.label else stream_id)|slugify) }}" allow="autoplay" loading="lazy" scrolling="no"></iframe>
+            <iframe src="{{ url_for('render_stream', name=(conf.label if conf.label else stream_id)|slugify) }}" allow="autoplay; encrypted-media; picture-in-picture; fullscreen" allowfullscreen loading="lazy" scrolling="no"></iframe>
           </div>
           {% endfor %}
         {% endif %}
@@ -102,7 +102,7 @@
             {% if stream_id in stream_lookup %}
             {% set conf = stream_lookup[stream_id] %}
             <div class="mosaic-cell" style="grid-area: {{ area }};">
-              <iframe src="{{ url_for('render_stream', name=(conf.label if conf.label else stream_id)|slugify) }}" allow="autoplay" loading="lazy" scrolling="no"></iframe>
+              <iframe src="{{ url_for('render_stream', name=(conf.label if conf.label else stream_id)|slugify) }}" allow="autoplay; encrypted-media; picture-in-picture; fullscreen" allowfullscreen loading="lazy" scrolling="no"></iframe>
             </div>
             {% endif %}
           {% endfor %}
@@ -110,7 +110,7 @@
         {% else %}
           {% for stream_id, conf in stream_items %}
           <div class="mosaic-cell">
-            <iframe src="{{ url_for('render_stream', name=(conf.label if conf.label else stream_id)|slugify) }}" allow="autoplay" loading="lazy" scrolling="no"></iframe>
+            <iframe src="{{ url_for('render_stream', name=(conf.label if conf.label else stream_id)|slugify) }}" allow="autoplay; encrypted-media; picture-in-picture; fullscreen" allowfullscreen loading="lazy" scrolling="no"></iframe>
           </div>
           {% endfor %}
         {% endif %}
@@ -120,7 +120,7 @@
         {% if limit %}{% set items = items[:limit] %}{% endif %}
         {% for stream_id, conf in items %}
         <div class="mosaic-cell">
-          <iframe src="{{ url_for('render_stream', name=(conf.label if conf.label else stream_id)|slugify) }}" allow="autoplay" loading="lazy" scrolling="no"></iframe>
+          <iframe src="{{ url_for('render_stream', name=(conf.label if conf.label else stream_id)|slugify) }}" allow="autoplay; encrypted-media; picture-in-picture; fullscreen" allowfullscreen loading="lazy" scrolling="no"></iframe>
         </div>
         {% endfor %}
       {% endif %}
@@ -135,7 +135,7 @@
     {% if stream_items %}
       {% for stream_id, conf in stream_items %}
       <div class="mosaic-cell">
-        <iframe src="{{ url_for('render_stream', name=(conf.label if conf.label else stream_id)|slugify) }}" allow="autoplay" loading="lazy" scrolling="no"></iframe>
+        <iframe src="{{ url_for('render_stream', name=(conf.label if conf.label else stream_id)|slugify) }}" allow="autoplay; encrypted-media; picture-in-picture; fullscreen" allowfullscreen loading="lazy" scrolling="no"></iframe>
       </div>
       {% endfor %}
     {% else %}
