@@ -14,9 +14,51 @@ if [ ! -f "$CONFIG_FILE" ]; then
   exit 1
 fi
 
-INSTALL_DIR=$(jq -r '.INSTALL_DIR' "$CONFIG_FILE")
-SERVICE_NAME=$(jq -r '.SERVICE_NAME' "$CONFIG_FILE")
-BRANCH=$(jq -r '.UPDATE_BRANCH' "$CONFIG_FILE")
+PYTHON_READ=""
+if command -v python3 >/dev/null 2>&1; then
+  PYTHON_READ="python3"
+elif command -v python >/dev/null 2>&1; then
+  PYTHON_READ="python"
+fi
+
+if [ -n "$PYTHON_READ" ]; then
+  mapfile -t CONFIG_VALUES < <("$PYTHON_READ" - "$CONFIG_FILE" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+config_path = Path(sys.argv[1])
+try:
+    data = json.loads(config_path.read_text(encoding="utf-8"))
+except Exception:
+    data = {}
+
+def get_value(key: str, default: str) -> str:
+    if isinstance(data, dict):
+        value = data.get(key, default)
+    else:
+        value = default
+    if value in (None, ""):
+        value = default
+    return str(value)
+
+print(get_value("INSTALL_DIR", "/opt/echomosaic"))
+print(get_value("SERVICE_NAME", "echomosaic.service"))
+print(get_value("UPDATE_BRANCH", "main"))
+PY
+)
+  INSTALL_DIR="${CONFIG_VALUES[0]:-/opt/echomosaic}"
+  SERVICE_NAME="${CONFIG_VALUES[1]:-echomosaic.service}"
+  BRANCH="${CONFIG_VALUES[2]:-main}"
+else
+  if ! command -v jq >/dev/null 2>&1; then
+    echo "Error: python or jq is required to read $CONFIG_FILE."
+    exit 1
+  fi
+  INSTALL_DIR=$(jq -r '.INSTALL_DIR' "$CONFIG_FILE")
+  SERVICE_NAME=$(jq -r '.SERVICE_NAME' "$CONFIG_FILE")
+  BRANCH=$(jq -r '.UPDATE_BRANCH' "$CONFIG_FILE")
+fi
 
 if [ ! -d "$INSTALL_DIR/.git" ]; then
   echo "Error: $INSTALL_DIR does not appear to be a git repository."

@@ -19,6 +19,7 @@ INSTALL_DIR="${INSTALL_DIR:-$default_install_dir}"
 default_port="5000"
 read -r -p "Enter the port the server should listen on [${default_port}]: " PORT
 PORT="${PORT:-$default_port}"
+SERVICE_NAME="echomosaic.service"
 echo "\nInstalling system packages…"
 sudo apt-get update
 sudo apt-get install -y python3 python3-venv python3-pip ffmpeg
@@ -32,13 +33,45 @@ echo "\nCreating virtual environment…"
 sudo -u "$SERVICE_USER" python3 -m venv "$INSTALL_DIR/venv"
 sudo -u "$SERVICE_USER" "$INSTALL_DIR/venv/bin/pip" install --upgrade pip
 sudo -u "$SERVICE_USER" "$INSTALL_DIR/venv/bin/pip" install -r "$INSTALL_DIR/requirements.txt"
-# == Step: (Optional) Configure IMAGE_DIR (CIFS or local) ==
-# This app uses a hard-coded IMAGE_DIR in app.py.
-# We either mount a CIFS share (default //10.10.10.40/viewers -> /mnt/viewers)
-# and point IMAGE_DIR there, or set a local folder and point IMAGE_DIR to that.
-APP_FILE="$INSTALL_DIR/app.py"
+# == Step: (Optional) Configure MEDIA_PATHS (CIFS or local) ==
+# MEDIA_PATHS lives in config.json (or config.default.json as a fallback).
+# We either mount a CIFS share (default //192.168.1.0/images -> /mnt/viewers)
+# and point MEDIA_PATHS there, or set a local folder and point MEDIA_PATHS to that.
+update_config() {
+  local target_path="$1"
+  sudo -u "$SERVICE_USER" python3 - "$INSTALL_DIR" "$target_path" "$SERVICE_NAME" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+install_dir = Path(sys.argv[1]).expanduser().resolve()
+target_path = sys.argv[2]
+service_name = sys.argv[3]
+config_path = install_dir / "config.json"
+default_path = install_dir / "config.default.json"
+
+data = {}
+for candidate in (config_path, default_path):
+    if candidate.is_file():
+        try:
+            data = json.loads(candidate.read_text(encoding="utf-8"))
+        except Exception:
+            data = {}
+        if isinstance(data, dict) and data:
+            break
+
+if not isinstance(data, dict):
+    data = {}
+
+data["MEDIA_PATHS"] = [target_path]
+data["INSTALL_DIR"] = str(install_dir)
+data["SERVICE_NAME"] = service_name
+data.setdefault("UPDATE_BRANCH", "main")
+config_path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+PY
+}
 echo
-echo "== Optional: Configure a network share for IMAGE_DIR =="
+echo "== Optional: Configure a network share for MEDIA_PATHS =="
 read -r -p "Mount a CIFS network share for images? (y/n): " mount_answer
 if [[ "$mount_answer" =~ ^[Yy]$ ]]; then
   # Ensure cifs-utils is available
@@ -95,20 +128,19 @@ if [[ "$mount_answer" =~ ^[Yy]$ ]]; then
   else
     echo "Mounted $SERVER_SHARE at $MOUNT_POINT."
   fi
-  # Update IMAGE_DIR in app.py to the chosen mount point
-  echo "Setting IMAGE_DIR in app.py -> $MOUNT_POINT"
-  sudo sed -i -E 's|^IMAGE_DIR\s*=\s*".*".*|IMAGE_DIR = "'"$MOUNT_POINT"'"  # Adjust if needed|' "$APP_FILE"
+  # Update MEDIA_PATHS in config.json to the chosen mount point
+  echo "Setting MEDIA_PATHS in config.json -> $MOUNT_POINT"
+  update_config "$MOUNT_POINT"
 else
   echo
   echo "No CIFS share selected. Using a local folder for images."
-  LOCAL_DIR="$INSTALL_DIR/uploads"
+  LOCAL_DIR="$INSTALL_DIR/media"
   sudo mkdir -p "$LOCAL_DIR"
   sudo chown "$SERVICE_USER:$SERVICE_USER" "$LOCAL_DIR"
-  echo "Setting IMAGE_DIR in app.py -> $LOCAL_DIR"
-  sudo sed -i -E 's|^IMAGE_DIR\s*=\s*".*".*|IMAGE_DIR = "'"$LOCAL_DIR"'"  # Adjust if needed|' "$APP_FILE"
+  echo "Setting MEDIA_PATHS in config.json -> $LOCAL_DIR"
+  update_config "$LOCAL_DIR"
 fi
 echo "\nCreating systemd service…"
-SERVICE_NAME="echomosaic.service"
 SERVICE_PATH="/etc/systemd/system/${SERVICE_NAME}"
 sudo tee "$SERVICE_PATH" > /dev/null <<EOF
 [Unit]
@@ -119,7 +151,7 @@ Type=simple
 User=$SERVICE_USER
 WorkingDirectory=$INSTALL_DIR
 Environment="PATH=$INSTALL_DIR/venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
-ExecStart=$INSTALL_DIR/venv/bin/gunicorn -w 2 -k eventlet --bind 0.0.0.0:$PORT --timeout 120 --graceful-timeout 30 --keep-alive 5 --no-sendfile app:app
+ExecStart=$INSTALL_DIR/venv/bin/gunicorn -w 1 -k eventlet --bind 0.0.0.0:$PORT --timeout 120 --graceful-timeout 30 --keep-alive 5 --no-sendfile app:app
 Restart=always
 [Install]
 WantedBy=multi-user.target

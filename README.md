@@ -12,7 +12,7 @@ EchoMosaic is a self-hosted web dashboard for curating image, video, and AI-gene
 ## Limitations and Open Work
 EchoMosaic is still evolving. The most notable gaps are:
 - No authentication or user accounts; anyone who can reach the server can control it.
-- `IMAGE_DIR` still lives in `app.py`, so changing media paths requires editing the file or running the installer prompt.
+- `MEDIA_PATHS` lives in `config.json`, so changing media roots requires editing that file or re-running the installer prompt.
 - Livestream HLS lookups use a blocking `yt-dlp` call and are not cached yet.
 - Low-bandwidth and slideshow-sync modes are not implemented.
 - Real-time update logs, server-side rendered playback, and system health dashboards are tracked in `IDEAS.md`.
@@ -37,7 +37,7 @@ chmod +x install.sh
 sudo ./install.sh
 ```
 
-During the prompts you can choose the service account, install path (default `/opt/echomosaic`), listening port, and whether to mount a CIFS share for media. The script also updates `IMAGE_DIR` inside `app.py` to point at the chosen location.
+During the prompts you can choose the service account, install path (default `/opt/echomosaic`), listening port, and whether to mount a CIFS share for media. The script also updates `MEDIA_PATHS` inside `config.json` to point at the chosen location.
 
 ### Manual setup
 If you prefer to manage everything yourself:
@@ -54,7 +54,7 @@ If you prefer to manage everything yourself:
    pip install --upgrade pip
    pip install -r requirements.txt
    ```
-3. Adjust `IMAGE_DIR` near the top of `app.py` so it matches where your media lives.
+3. Adjust `MEDIA_PATHS` inside `config.json` so it matches where your media lives.
 4. Start the development server.
    ```
    python app.py
@@ -64,7 +64,8 @@ If you prefer to manage everything yourself:
 For systemd or reverse proxy setups, you can use `install.sh` and `update.sh` as references.
 
 ## Configuration Notes
-- `IMAGE_DIR` controls the root media location. Update it manually or re-run the installer script if you move your library.
+- `MEDIA_PATHS` controls the root media location. Update it manually or re-run the installer script if you move your library.
+- Gunicorn should run with a single worker unless you add shared state and a Socket.IO message queue; multiple workers will cause stream data to appear/disappear.
 - `config.json` stores settings for the update helper (install path, service name, branch) and Stable Horde defaults (model, output folders, etc.).
 - Stream definitions, groups, tags, and AI presets live in `settings.json`. Use the Settings page to export/import backups.
 
@@ -91,4 +92,3 @@ Bug reports, fixes, and modest feature additions are welcome. Please open an iss
 
 ## License
 EchoMosaic is available under the MIT License (see `LICENSE`).
-
