@@ -226,9 +226,20 @@ def build_media_roots(paths: Iterable[str], *, log_warnings: bool = False) -> Li
 
     roots: List[MediaRoot] = []
     seen_aliases: set[str] = set()
+    seen_paths: set[str] = set()
 
     for index, raw in enumerate(_normalize_media_paths(paths)):
         path = Path(raw).expanduser()
+        try:
+            resolved = path.resolve(strict=False)
+        except OSError:
+            resolved = path.absolute()
+        resolved_key = resolved.as_posix()
+        if resolved_key in seen_paths:
+            if log_warnings:
+                logger.warning("Duplicate media path '%s' skipped", path)
+            continue
+        seen_paths.add(resolved_key)
         alias = _derive_alias(path, seen_aliases, index)
         display_name = path.name or alias
         if log_warnings:

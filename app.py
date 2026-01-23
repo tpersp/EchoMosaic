@@ -39,7 +39,7 @@ else:
     _ORIGINAL_ENGINEIO_HANDLE_REQUEST = engineio.server.Server.handle_request
 
 try:
-    from PIL import Image, ImageDraw, ImageFont
+    from PIL import Image, ImageDraw, ImageFont, ImageOps
 except ModuleNotFoundError:  # pragma: no cover - optional dependency handling
     class _MissingPillowModule:
         def __getattr__(self, item: str) -> Any:
@@ -48,7 +48,7 @@ except ModuleNotFoundError:  # pragma: no cover - optional dependency handling
                 "Install it via 'pip install Pillow'."
             )
 
-    Image = ImageDraw = ImageFont = _MissingPillowModule()  # type: ignore[assignment]
+    Image = ImageDraw = ImageFont = ImageOps = _MissingPillowModule()  # type: ignore[assignment]
 
 try:
     import cv2  # type: ignore[import]
@@ -296,6 +296,7 @@ THUMBNAIL_SIZE_PRESETS = {
     "medium": (1024, 1024),
     "full": None,  # Alias for the original size
 }
+MAX_IMAGE_DIMENSION = 8192
 DASHBOARD_THUMBNAIL_SIZE = (128, 72)
 THUMBNAIL_JPEG_QUALITY = 60
 IMAGE_CACHE_TIMEOUT = 60 * 60 * 24 * 7  # One week default for conditional responses
@@ -585,6 +586,11 @@ def _split_virtual_media_path(value: Union[str, Path]) -> Tuple[str, str]:
     text = str(value).strip()
     if not text:
         return PRIMARY_MEDIA_ROOT.alias, ""
+    if ":/" in text:
+        alias, remainder = text.split(":/", 1)
+        alias = alias.strip()
+        if alias in MEDIA_ROOT_LOOKUP:
+            return alias, remainder.strip("/")
     if os.path.isabs(text):
         resolved = Path(text).resolve()
         for root in MEDIA_ROOTS:
@@ -1103,6 +1109,8 @@ def _refresh_embed_metadata(
     _set_runtime_embed_metadata(stream_id, sanitized)
     return sanitized
 IMAGE_CACHE_LOCK = threading.Lock()
+RESIZED_IMAGE_LOCKS: Dict[Path, threading.Lock] = {}
+RESIZED_IMAGE_LOCKS_GUARD = threading.Lock()
 STREAM_RUNTIME_STATE: Dict[str, Dict[str, Any]] = {}
 STREAM_RUNTIME_LOCK = threading.Lock()
 
@@ -1161,7 +1169,13 @@ def _normalize_folder_key(folder: Optional[str]) -> str:
     normalized = str(folder).strip()
     if normalized in {"", "all", "."}:
         return "all"
-    return normalized.replace("\\", "/").strip("/")
+    normalized = normalized.replace("\\", "/").strip("/")
+    if ":/" in normalized:
+        alias, remainder = normalized.split(":/", 1)
+        if alias in MEDIA_ROOT_LOOKUP:
+            remainder = remainder.strip("/")
+            normalized = f"{alias}/{remainder}" if remainder else alias
+    return normalized
 
 
 def _resolve_folder_path(folder_key: str) -> Optional[Tuple[config_manager.MediaRoot, Path]]:
@@ -1184,16 +1198,17 @@ def _resolve_folder_path(folder_key: str) -> Optional[Tuple[config_manager.Media
 def _scan_root_for_cache(
     root: config_manager.MediaRoot,
     base_path: Path,
-) -> Tuple[List[Dict[str, str]], Dict[str, float]]:
-    dir_markers: Dict[str, float] = {}
+) -> Tuple[List[Dict[str, str]], Dict[str, Tuple[int, int]]]:
+    dir_markers: Dict[str, Tuple[int, int]] = {}
     base_key = os.fspath(base_path)
     try:
-        dir_markers[base_key] = os.stat(base_path).st_mtime
+        stat_info = os.stat(base_path)
+        dir_markers[base_key] = (stat_info.st_mtime_ns, stat_info.st_ctime_ns)
     except FileNotFoundError:
-        dir_markers[base_key] = 0.0
+        dir_markers[base_key] = (0, 0)
         return [], dir_markers
     except OSError:
-        dir_markers[base_key] = 0.0
+        dir_markers[base_key] = (0, 0)
         return [], dir_markers
 
     media: List[Dict[str, str]] = []
@@ -1203,9 +1218,10 @@ def _scan_root_for_cache(
         walk_key = os.fspath(walk_path)
         if walk_path != base_path:
             try:
-                dir_markers[walk_key] = os.stat(walk_path).st_mtime
+                stat_info = os.stat(walk_path)
+                dir_markers[walk_key] = (stat_info.st_mtime_ns, stat_info.st_ctime_ns)
             except OSError:
-                dir_markers[walk_key] = time.time()
+                dir_markers[walk_key] = (0, 0)
         for file_name in files:
             if _should_ignore_media_name(file_name):
                 continue
@@ -1228,11 +1244,11 @@ def _scan_root_for_cache(
     return media, dir_markers
 
 
-def _scan_folder_for_cache(folder_key: str) -> Tuple[List[Dict[str, str]], Dict[str, float]]:
+def _scan_folder_for_cache(folder_key: str) -> Tuple[List[Dict[str, str]], Dict[str, Tuple[int, int]]]:
     """Scan configured media directories and build the cached payload for a folder key."""
     if folder_key == "all":
         combined_media: List[Dict[str, str]] = []
-        combined_markers: Dict[str, float] = {}
+        combined_markers: Dict[str, Tuple[int, int]] = {}
         for root in AVAILABLE_MEDIA_ROOTS:
             media_entries, dir_markers = _scan_root_for_cache(root, root.path)
             combined_media.extend(media_entries)
@@ -1247,16 +1263,19 @@ def _scan_folder_for_cache(folder_key: str) -> Tuple[List[Dict[str, str]], Dict[
     return _scan_root_for_cache(root, target_dir)
 
 
-def _directory_markers_changed(markers: Dict[str, float]) -> bool:
+def _directory_markers_changed(markers: Dict[str, Tuple[int, int]]) -> bool:
     """Return True when any tracked directory timestamp has diverged."""
-    for path, previous_mtime in markers.items():
+    for path, previous_marker in markers.items():
+        if not isinstance(previous_marker, tuple):
+            return True
         try:
-            current_mtime = os.stat(path).st_mtime
+            stat_info = os.stat(path)
         except FileNotFoundError:
             return True
         except OSError:
             return True
-        if current_mtime != previous_mtime:
+        current_marker = (stat_info.st_mtime_ns, stat_info.st_ctime_ns)
+        if current_marker != previous_marker:
             return True
     return False
 
@@ -1293,6 +1312,34 @@ def refresh_image_cache(folder: str = "all", force: bool = False) -> List[str]:
     with IMAGE_CACHE_LOCK:
         IMAGE_CACHE[folder_key] = entry
     return list(images)
+
+
+def _cache_folder_for_path(path: Optional[str]) -> Optional[str]:
+    if not path:
+        return None
+    normalized = _normalize_folder_key(path)
+    if normalized == "all":
+        return "all"
+    alias, relative = _split_virtual_media_path(normalized)
+    if alias not in MEDIA_ROOT_LOOKUP:
+        return normalized
+    rel_path = Path(relative) if relative else Path()
+    resolved = _resolve_virtual_media_path(normalized)
+    if resolved is not None and resolved.exists() and resolved.is_file():
+        rel_path = rel_path.parent
+    elif rel_path.suffix.lower() in MEDIA_EXTENSIONS:
+        rel_path = rel_path.parent
+    rel_text = rel_path.as_posix() if str(rel_path) not in {"", "."} else ""
+    return _build_virtual_media_path(alias, rel_text)
+
+
+def _invalidate_media_cache(path: Optional[str]) -> None:
+    keys = ["all"]
+    folder_key = _cache_folder_for_path(path)
+    if folder_key and folder_key not in keys:
+        keys.append(folder_key)
+    for key in keys:
+        refresh_image_cache(key, force=True)
 
 
 def initialize_image_cache() -> None:
@@ -4217,13 +4264,15 @@ def get_subfolders(hide_nsfw: bool = False) -> List[str]:
         if hide_nsfw and _path_contains_nsfw(root.alias):
             continue
         try:
-            with os.scandir(root.path) as scan:
-                for entry in scan:
-                    if not entry.is_dir():
+            for walk_root, dirnames, _ in os.walk(root.path):
+                dirnames[:] = [name for name in dirnames if not _should_ignore_media_name(name)]
+                base = Path(walk_root)
+                for dirname in dirnames:
+                    try:
+                        relative = (base / dirname).resolve().relative_to(root.path.resolve())
+                    except ValueError:
                         continue
-                    if _should_ignore_media_name(entry.name):
-                        continue
-                    folder_key = _build_virtual_media_path(root.alias, entry.name)
+                    folder_key = _build_virtual_media_path(root.alias, relative.as_posix())
                     if hide_nsfw and _path_contains_nsfw(folder_key):
                         continue
                     _add(folder_key)
@@ -4288,6 +4337,7 @@ def api_media_create_folder():
     except MediaManagerError as exc:
         return _media_error_response(exc)
     logger.info("media.create_folder parent=%s name=%s", parent or "", name)
+    _invalidate_media_cache(new_path)
     return jsonify({"path": new_path, "name": _virtual_leaf(new_path)})
 
 
@@ -4306,6 +4356,8 @@ def api_media_rename():
     except MediaManagerError as exc:
         return _media_error_response(exc)
     logger.info("media.rename path=%s new_name=%s", target_path, new_name)
+    _invalidate_media_cache(target_path)
+    _invalidate_media_cache(updated)
     return jsonify({"path": updated, "name": _virtual_leaf(updated)})
 
 
@@ -4323,6 +4375,7 @@ def api_media_delete():
     except MediaManagerError as exc:
         return _media_error_response(exc)
     logger.info("media.delete path=%s", target)
+    _invalidate_media_cache(target)
     return jsonify({"ok": True})
 
 
@@ -4338,6 +4391,7 @@ def api_media_upload():
     except MediaManagerError as exc:
         return _media_error_response(exc)
     logger.info("media.upload path=%s count=%d", destination, len(saved))
+    _invalidate_media_cache(destination)
     return jsonify({"uploaded": saved, "count": len(saved)})
 
 
@@ -7093,6 +7147,79 @@ def notes():
     return jsonify({"status": "saved"})
 
 
+def _acquire_resized_image_lock(path: Path) -> threading.Lock:
+    with RESIZED_IMAGE_LOCKS_GUARD:
+        lock = RESIZED_IMAGE_LOCKS.get(path)
+        if lock is None:
+            lock = threading.Lock()
+            RESIZED_IMAGE_LOCKS[path] = lock
+        return lock
+
+
+def _parse_image_resize_request() -> Optional[Tuple[int, int]]:
+    size_key = (request.args.get("size") or "").strip().lower()
+    if size_key:
+        if size_key == "full":
+            return None
+        preset = THUMBNAIL_SIZE_PRESETS.get(size_key)
+        if preset:
+            return preset
+    width = _as_int(request.args.get("width"), 0)
+    height = _as_int(request.args.get("height"), 0)
+    if width <= 0 and height <= 0:
+        return None
+    if width <= 0:
+        width = height
+    if height <= 0:
+        height = width
+    width = min(max(1, width), MAX_IMAGE_DIMENSION)
+    height = min(max(1, height), MAX_IMAGE_DIMENSION)
+    return (width, height)
+
+
+def _get_resized_image_path(
+    virtual_path: str,
+    source_path: Path,
+    bounds: Tuple[int, int],
+) -> Optional[Path]:
+    if source_path.suffix.lower() not in IMAGE_EXTENSIONS:
+        return None
+    alias, relative = _split_virtual_media_path(virtual_path)
+    root = MEDIA_ROOT_LOOKUP.get(alias)
+    if root is None:
+        return None
+    try:
+        stat_info = source_path.stat()
+    except OSError:
+        return None
+    key_source = f"{alias}:{relative}:{bounds[0]}x{bounds[1]}:{stat_info.st_mtime_ns}"
+    cache_key = hashlib.sha1(key_source.encode("utf-8")).hexdigest()
+    cache_dir = root.path / THUMBNAIL_SUBDIR
+    cache_path = cache_dir / f"{cache_key}.jpg"
+    if cache_path.exists():
+        return cache_path
+    lock = _acquire_resized_image_lock(cache_path)
+    with lock:
+        if cache_path.exists():
+            return cache_path
+        try:
+            with Image.open(source_path) as img:
+                img = ImageOps.exif_transpose(img)
+                target_width = min(bounds[0], img.width)
+                target_height = min(bounds[1], img.height)
+                if target_width >= img.width and target_height >= img.height:
+                    return source_path
+                img.thumbnail((target_width, target_height), IMAGE_THUMBNAIL_FILTER)
+                if img.mode != "RGB":
+                    img = img.convert("RGB")
+                cache_dir.mkdir(parents=True, exist_ok=True)
+                img.save(cache_path, "JPEG", quality=THUMBNAIL_JPEG_QUALITY)
+        except Exception as exc:  # pragma: no cover - defensive fallback
+            logger.debug("Failed to resize image %s: %s", source_path, exc)
+            return None
+    return cache_path
+
+
 def _send_image_response(path: Union[str, Path]):
     """Return an image response with consistent caching headers."""
     abs_path = os.fspath(path)
@@ -7126,8 +7253,13 @@ def _send_video_response(path: Union[str, Path]):
 @app.route("/stream/image/<path:image_path>")
 def serve_image(image_path):
     full_path = _resolve_virtual_media_path(image_path)
-    if full_path is None or not full_path.exists():
+    if full_path is None or not full_path.exists() or not full_path.is_file():
         return "Not found", 404
+    bounds = _parse_image_resize_request()
+    if bounds:
+        resized = _get_resized_image_path(image_path, full_path, bounds)
+        if resized is not None and resized != full_path:
+            return _send_image_response(resized)
     return _send_image_response(full_path)
 
 
