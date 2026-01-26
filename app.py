@@ -7182,7 +7182,11 @@ def _get_resized_image_path(
     source_path: Path,
     bounds: Tuple[int, int],
 ) -> Optional[Path]:
-    if source_path.suffix.lower() not in IMAGE_EXTENSIONS:
+    suffix = source_path.suffix.lower()
+    if suffix not in IMAGE_EXTENSIONS:
+        return None
+    if suffix == ".gif":
+        # Preserve animated GIFs by serving the original file.
         return None
     alias, relative = _split_virtual_media_path(virtual_path)
     root = MEDIA_ROOT_LOOKUP.get(alias)

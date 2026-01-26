@@ -4780,7 +4780,12 @@ function applyPicsumSettings(card, settings, opts = {}) {
           }
           if (kind === 'image') {
             const img = document.createElement('img');
-            img.src = `/stream/image/${item.path}?size=thumb`;
+            const lowerPath = String(item.path).toLowerCase();
+            if (lowerPath.endsWith('.gif')) {
+              img.src = `/stream/image/${item.path}?raw=1`;
+            } else {
+              img.src = `/stream/image/${item.path}?size=thumb`;
+            }
             img.alt = item.path;
             tile.appendChild(img);
           } else {

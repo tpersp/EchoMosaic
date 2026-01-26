@@ -575,6 +575,10 @@ function computeSizedImageUrl(path, container) {
   if (/^(https?:)?\/\//i.test(path) || path.startsWith('data:')) {
     return path;
   }
+  const lowerPath = String(path).toLowerCase();
+  if (lowerPath.endsWith('.gif')) {
+    return `/stream/image/${path}`;
+  }
   const base = `/stream/image/${path}`;
   if (imageQuality !== 'auto') {
     const params = new URLSearchParams({ size: imageQuality });

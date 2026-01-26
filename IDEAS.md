@@ -4,7 +4,7 @@ A running list of ideas and future improvements. Add new items anywhere below.
 
 ## Bugs: 
 - [ ] Folders are shown twice. they shouldn't be.
-- [ ] Images uploaded with big JPG doesn't show up in media, and is not used in show rotation..
+- [ ] Images uploaded with capital "JPG" doesn't show up in media, and is not used in show rotation..
 - [ ] Folders created isn't always shown in the dashboard.
 - [ ] It created a folder via UI, it uploaded images to the folder via UI, but the dashboard does not show images or folders created. 
 
