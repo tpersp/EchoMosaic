@@ -1673,6 +1673,12 @@ def _sanitize_sync_timer_entry(timer_id: str, payload: Any) -> Dict[str, Any]:
 
 def sanitize_sync_timers_collection(raw: Any) -> Dict[str, Dict[str, Any]]:
     sanitized: Dict[str, Dict[str, Any]] = {}
+    def _sync_slugify(value: str) -> str:
+        text = (value or "").strip().lower()
+        text = re.sub(r"[^a-z0-9]+", "-", text)
+        text = re.sub(r"-+", "-", text).strip("-")
+        return text
+
     if isinstance(raw, dict):
         items = raw.items()
     elif isinstance(raw, list):
@@ -1688,7 +1694,7 @@ def sanitize_sync_timers_collection(raw: Any) -> Dict[str, Dict[str, Any]]:
     for timer_id, payload in items:
         if not isinstance(timer_id, str):
             continue
-        slug = _slugify(timer_id)
+        slug = _sync_slugify(timer_id)
         if not slug:
             continue
         sanitized[slug] = _sanitize_sync_timer_entry(slug, payload)
@@ -6763,8 +6769,14 @@ def sync_timers_collection():
         payload = {}
     label = payload.get("label") or payload.get("name") or "Timer"
     interval = payload.get("interval", SYNC_TIMER_DEFAULT_INTERVAL)
-    requested_id = payload.get("id") or _slugify(str(label))
-    timer_id = _slugify(str(requested_id)) if requested_id else ""
+    def _sync_slugify(value: str) -> str:
+        text = (value or "").strip().lower()
+        text = re.sub(r"[^a-z0-9]+", "-", text)
+        text = re.sub(r"-+", "-", text).strip("-")
+        return text
+
+    requested_id = payload.get("id") or _sync_slugify(str(label))
+    timer_id = _sync_slugify(str(requested_id)) if requested_id else ""
     if not timer_id:
         timer_id = f"timer-{secrets.token_hex(2)}"
 
