@@ -565,7 +565,7 @@ function clearPendingSwitch() {
     clearTimeout(pendingSwitchTimeout);
     pendingSwitchTimeout = null;
   }
-  if (pendingSyncPreload && pendingSyncPreload.parentNode) {
+  if (pendingSyncPreload && pendingSyncPreload.parentNode === document.body) {
     pendingSyncPreload.remove();
   }
   pendingSyncPreload = null;
