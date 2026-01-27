@@ -4960,7 +4960,7 @@ function applyPicsumSettings(card, settings, opts = {}) {
 
     const syncActive = isImage && syncSelect && (syncSelect.value || card.dataset.syncTimer);
     if (durationDiv) durationDiv.style.display = (isRandom && (isImage || isVideo) && !syncActive) ? '' : 'none';
-    if (shuffleLabel) shuffleLabel.style.display = (isRandom && (isImage || isVideo) && !syncActive) ? '' : 'none';
+    if (shuffleLabel) shuffleLabel.style.display = (isRandom && (isImage || isVideo)) ? '' : 'none';
     if (syncRow) syncRow.style.display = (isRandom && isImage) ? '' : 'none';
     if (syncSelect && syncOffsetInput) {
       const disabled = !(syncSelect.value || '').trim();
