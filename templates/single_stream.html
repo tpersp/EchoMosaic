@@ -725,7 +725,9 @@ async function displaySingleImage(path, container) {
     updateBackdropSource('');
     return;
   }
-  container.textContent = 'Loading...';
+  if (!container.firstElementChild) {
+    container.textContent = 'Loading...';
+  }
   try {
     const sizedUrl = computeSizedImageUrl(path, container);
     const preload = startPreload(sizedUrl);

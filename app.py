@@ -3793,21 +3793,25 @@ class StreamPlaybackManager:
         if not timer_id:
             return
         targets: List[str] = []
+        offset_map: Dict[float, List[str]] = {}
         with self._lock:
             for stream_id, state in self._states.items():
                 if not state.sync_active() or state.sync_timer_id != timer_id:
                     continue
                 if force_refresh:
                     targets.append(stream_id)
+                    offset_map.setdefault(float(state.sync_offset or 0.0), []).append(stream_id)
                 else:
                     self._align_sync_schedule(state)
         if force_refresh:
-            switch_at = time.time() + SYNC_SWITCH_LEAD_SECONDS
-            for stream_id in targets:
-                payload = self._advance_stream(stream_id, reason="sync_group")
-                if payload:
-                    payload["switch_at"] = switch_at
-                    self._emit_state(payload, room=stream_id)
+            base_switch_at = time.time() + SYNC_SWITCH_LEAD_SECONDS
+            for offset, stream_ids in offset_map.items():
+                switch_at = base_switch_at + float(offset or 0.0)
+                for stream_id in stream_ids:
+                    payload = self._advance_stream(stream_id, reason="sync_group")
+                    if payload:
+                        payload["switch_at"] = switch_at
+                        self._emit_state(payload, room=stream_id)
 
     def remove_stream(self, stream_id: str) -> None:
         with self._lock:
@@ -4126,7 +4130,7 @@ class StreamPlaybackManager:
             now = time.time()
             next_deadline: Optional[float] = None
             due_streams: List[str] = []
-            sync_groups: Dict[str, List[str]] = {}
+            sync_groups: Dict[Tuple[str, float], List[str]] = {}
             sync_payloads: List[Dict[str, Any]] = []
             with self._lock:
                 for stream_id, state in self._states.items():
@@ -4135,10 +4139,22 @@ class StreamPlaybackManager:
                     is_due = False
                     if not state.is_paused:
                         deadline = state.next_auto_event
+                        if state.sync_active():
+                            timer_conf = self._resolve_sync_timer(state)
+                            if timer_conf:
+                                deadline = compute_next_sync_tick(
+                                    now,
+                                    timer_conf["interval"],
+                                    state.sync_offset,
+                                )
+                                state.next_auto_event = deadline
                         if deadline is not None:
                             if deadline <= now:
                                 if state.sync_active() and state.sync_timer_id:
-                                    sync_groups.setdefault(state.sync_timer_id, []).append(stream_id)
+                                    sync_groups.setdefault(
+                                        (state.sync_timer_id, state.sync_offset),
+                                        [],
+                                    ).append(stream_id)
                                 else:
                                     due_streams.append(stream_id)
                                 is_due = True
@@ -4160,8 +4176,9 @@ class StreamPlaybackManager:
                 if payload:
                     self._emit_state(payload, room=stream_id)
             if sync_groups:
-                switch_at = time.time() + SYNC_SWITCH_LEAD_SECONDS
-                for stream_ids in sync_groups.values():
+                base_switch_at = time.time() + SYNC_SWITCH_LEAD_SECONDS
+                for (timer_id, offset), stream_ids in sync_groups.items():
+                    switch_at = base_switch_at + float(offset or 0.0)
                     for stream_id in stream_ids:
                         payload = self._advance_stream(stream_id, reason="auto_sync")
                         if payload:
