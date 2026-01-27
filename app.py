@@ -480,6 +480,7 @@ SYNC_TIMER_DEFAULT_LABEL = "Master"
 SYNC_TIMER_MIN_INTERVAL = 1.0
 SYNC_TIMER_MAX_INTERVAL = 24 * 60 * 60.0
 SYNC_TIMER_MIN_OFFSET = 0.0
+SYNC_SWITCH_LEAD_SECONDS = 0.25
 SYNC_SUPPORTED_MEDIA_MODES = {MEDIA_MODE_IMAGE}
 
 DEFAULT_MEDIA_ROOT_PATH = Path(os.path.abspath("./media")).resolve()
@@ -3801,9 +3802,11 @@ class StreamPlaybackManager:
                 else:
                     self._align_sync_schedule(state)
         if force_refresh:
+            switch_at = time.time() + SYNC_SWITCH_LEAD_SECONDS
             for stream_id in targets:
                 payload = self._advance_stream(stream_id, reason="sync_group")
                 if payload:
+                    payload["switch_at"] = switch_at
                     self._emit_state(payload, room=stream_id)
 
     def remove_stream(self, stream_id: str) -> None:
@@ -4123,6 +4126,7 @@ class StreamPlaybackManager:
             now = time.time()
             next_deadline: Optional[float] = None
             due_streams: List[str] = []
+            sync_groups: Dict[str, List[str]] = {}
             sync_payloads: List[Dict[str, Any]] = []
             with self._lock:
                 for stream_id, state in self._states.items():
@@ -4133,7 +4137,10 @@ class StreamPlaybackManager:
                         deadline = state.next_auto_event
                         if deadline is not None:
                             if deadline <= now:
-                                due_streams.append(stream_id)
+                                if state.sync_active() and state.sync_timer_id:
+                                    sync_groups.setdefault(state.sync_timer_id, []).append(stream_id)
+                                else:
+                                    due_streams.append(stream_id)
                                 is_due = True
                             else:
                                 if next_deadline is None or deadline < next_deadline:
@@ -4152,6 +4159,14 @@ class StreamPlaybackManager:
                 payload = self._advance_stream(stream_id, reason="auto")
                 if payload:
                     self._emit_state(payload, room=stream_id)
+            if sync_groups:
+                switch_at = time.time() + SYNC_SWITCH_LEAD_SECONDS
+                for stream_ids in sync_groups.values():
+                    for stream_id in stream_ids:
+                        payload = self._advance_stream(stream_id, reason="auto_sync")
+                        if payload:
+                            payload["switch_at"] = switch_at
+                            self._emit_state(payload, room=stream_id)
             for payload in sync_payloads:
                 self._emit_state(payload, event=SYNC_TIME_EVENT)
             if next_deadline is None:

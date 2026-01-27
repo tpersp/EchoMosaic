@@ -45,6 +45,9 @@ let currentMediaController = null;
 let serverPlaybackState = null;
 let activeMediaPath = null;
 let usingSynchronizedPlayback = false;
+let pendingSwitchTimeout = null;
+let pendingSwitchPayload = null;
+let pendingSyncPreload = null;
 const VIDEO_PLAYBACK_MODES = new Set(['duration', 'until_end', 'loop']);
 let youTubePlayer = null;
 let youTubeApiPromise = null;
@@ -548,12 +551,25 @@ function disableSynchronizedStream() {
   if (!usingSynchronizedPlayback) {
     return;
   }
+  clearPendingSwitch();
   usingSynchronizedPlayback = false;
   serverPlaybackState = null;
   activeMediaPath = null;
   if (socket.connected) {
     socket.emit('stream_unsubscribe', { stream_id: streamId });
   }
+}
+
+function clearPendingSwitch() {
+  if (pendingSwitchTimeout) {
+    clearTimeout(pendingSwitchTimeout);
+    pendingSwitchTimeout = null;
+  }
+  if (pendingSyncPreload && pendingSyncPreload.parentNode) {
+    pendingSyncPreload.remove();
+  }
+  pendingSyncPreload = null;
+  pendingSwitchPayload = null;
 }
 
 setMediaController(createNoopMediaController());
@@ -892,6 +908,7 @@ function renderServerVideo(media, state, container) {
 }
 
 function startSynchronizedStream(config, container) {
+  clearPendingSwitch();
   usingSynchronizedPlayback = true;
   cancelRotation = () => {};
   clearPlaybackTimer();
@@ -938,6 +955,7 @@ function handleStreamUpdate(payload) {
   }
   const media = payload.media;
   if (!media || !media.path) {
+    clearPendingSwitch();
     activeMediaPath = null;
     teardownActiveVideo();
     const message = payload.error === 'no_media' ? 'No media available' : 'Stream idle';
@@ -946,6 +964,52 @@ function handleStreamUpdate(payload) {
     return;
   }
   const kind = detectMediaKind(media.path, media.kind);
+  if (kind === 'image') {
+    const switchAt = Number(payload.switch_at);
+    if (Number.isFinite(switchAt)) {
+      const now = Date.now() / 1000;
+      const serverNow = Number(payload.server_time);
+      const clockOffset = Number.isFinite(serverNow) ? (now - serverNow) : 0;
+      const localSwitchAt = switchAt + clockOffset;
+      const delayMs = Math.round((localSwitchAt - now) * 1000);
+      if (delayMs > 20) {
+        clearPendingSwitch();
+        const sizedUrl = computeSizedImageUrl(media.path, container);
+        const preload = startPreload(sizedUrl);
+        pendingSyncPreload = preload.element;
+        pendingSwitchPayload = payload;
+        pendingSwitchTimeout = setTimeout(() => {
+          if (pendingSwitchPayload !== payload || !usingSynchronizedPlayback) {
+            clearPendingSwitch();
+            return;
+          }
+          preload.ready
+            .then(img => {
+              if (!usingSynchronizedPlayback || pendingSwitchPayload !== payload) {
+                img.remove();
+                return;
+              }
+              prepareImageForDisplay(img);
+              container.replaceChildren(img);
+              updateBackdropSource(img.currentSrc || img.src || sizedUrl);
+              activeMediaPath = media.path;
+              clearPendingSwitch();
+            })
+            .catch(err => {
+              console.error('Failed to preload synchronized image', err);
+              clearPendingSwitch();
+              renderServerImage(media, payload, container).catch(error => {
+                console.error('Failed to render synchronized image', error);
+                container.textContent = 'Unable to load media';
+                updateBackdropSource('');
+              });
+            });
+        }, delayMs);
+        return;
+      }
+    }
+  }
+  clearPendingSwitch();
   if (kind === 'video') {
     renderServerVideo(media, payload, container);
   } else {
