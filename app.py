@@ -4139,7 +4139,7 @@ class StreamPlaybackManager:
                     is_due = False
                     if not state.is_paused:
                         deadline = state.next_auto_event
-                        if state.sync_active():
+                        if state.sync_active() and deadline is None:
                             timer_conf = self._resolve_sync_timer(state)
                             if timer_conf:
                                 deadline = compute_next_sync_tick(
