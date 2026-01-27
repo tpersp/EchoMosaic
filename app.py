@@ -1635,12 +1635,10 @@ def default_sync_timer_entry(
     *,
     label: str = SYNC_TIMER_DEFAULT_LABEL,
     interval: float = SYNC_TIMER_DEFAULT_INTERVAL,
-    offset: float = 0.0,
 ) -> Dict[str, Any]:
     return {
         "label": label,
         "interval": interval,
-        "offset": offset,
     }
 
 
@@ -1667,13 +1665,9 @@ def _sanitize_sync_timer_entry(timer_id: str, payload: Any) -> Dict[str, Any]:
         interval = base["interval"]
     interval = max(SYNC_TIMER_MIN_INTERVAL, min(SYNC_TIMER_MAX_INTERVAL, interval))
 
-    offset_raw = incoming.get("offset", base.get("offset", 0.0))
-    offset = _sanitize_sync_offset(offset_raw, interval=interval)
-
     return {
         "label": label,
         "interval": round(interval, 3),
-        "offset": offset,
     }
 
 
@@ -1736,7 +1730,6 @@ def get_sync_timers_snapshot() -> List[Dict[str, Any]]:
                 "id": timer_id,
                 "label": entry.get("label") or timer_id,
                 "interval": entry.get("interval"),
-                "offset": entry.get("offset", 0.0),
             }
         )
     payload.sort(key=lambda item: str(item.get("label") or item.get("id") or "").lower())
@@ -3789,6 +3782,24 @@ class StreamPlaybackManager:
             else:
                 self._restore_default_schedule(state)
 
+    def sync_timer_group(self, timer_id: str, *, force_refresh: bool = False) -> None:
+        if not timer_id:
+            return
+        targets: List[str] = []
+        with self._lock:
+            for stream_id, state in self._states.items():
+                if not state.sync_active() or state.sync_timer_id != timer_id:
+                    continue
+                if force_refresh:
+                    targets.append(stream_id)
+                else:
+                    self._align_sync_schedule(state)
+        if force_refresh:
+            for stream_id in targets:
+                payload = self._advance_stream(stream_id, reason="sync_group")
+                if payload:
+                    self._emit_state(payload, room=stream_id)
+
     def remove_stream(self, stream_id: str) -> None:
         with self._lock:
             self._states.pop(stream_id, None)
@@ -4010,20 +4021,13 @@ class StreamPlaybackManager:
         if not isinstance(entry, dict):
             return None
         interval = _coerce_float(entry.get("interval"), 0.0)
-        offset = _coerce_float(entry.get("offset"), 0.0)
         try:
             interval = float(interval)
         except (TypeError, ValueError):
             interval = 0.0
-        try:
-            offset = float(offset)
-        except (TypeError, ValueError):
-            offset = 0.0
         if math.isnan(interval) or math.isinf(interval) or interval <= 0:
             return None
-        if math.isnan(offset) or math.isinf(offset):
-            offset = 0.0
-        return {"interval": interval, "offset": offset}
+        return {"interval": interval}
 
     def _align_sync_schedule(self, state: StreamPlaybackState) -> None:
         if not state.sync_active() or state.is_paused or not state.current_media:
@@ -4035,7 +4039,7 @@ class StreamPlaybackManager:
         next_tick = compute_next_sync_tick(
             now,
             timer_conf["interval"],
-            timer_conf["offset"] + state.sync_offset,
+            state.sync_offset,
         )
         if next_tick is None:
             return
@@ -4086,7 +4090,7 @@ class StreamPlaybackManager:
                         next_tick = compute_next_sync_tick(
                             now,
                             timer_conf["interval"],
-                            timer_conf["offset"] + state.sync_offset,
+                            state.sync_offset,
                         )
                         if next_tick is not None:
                             duration = max(0.1, next_tick - now)
@@ -5306,6 +5310,7 @@ def update_stream_settings(stream_id):
     ensure_timer_defaults(conf)
     ensure_sync_defaults(conf)
     previous_mode = conf.get("mode")
+    previous_sync = dict(conf.get(SYNC_CONFIG_KEY)) if isinstance(conf.get(SYNC_CONFIG_KEY), dict) else {}
 
     stream_url_changed = False
     media_mode_changed = False
@@ -5481,6 +5486,15 @@ def update_stream_settings(stream_id):
     )
     if playback_manager is not None:
         playback_manager.update_stream_config(stream_id, conf)
+        current_sync = conf.get(SYNC_CONFIG_KEY) if isinstance(conf.get(SYNC_CONFIG_KEY), dict) else {}
+        sync_timer_id = current_sync.get("timer_id")
+        sync_offset = current_sync.get("offset")
+        sync_changed = (
+            previous_sync.get("timer_id") != sync_timer_id
+            or previous_sync.get("offset") != sync_offset
+        )
+        if sync_changed and sync_timer_id:
+            playback_manager.sync_timer_group(sync_timer_id, force_refresh=True)
     save_settings(settings)
     if auto_scheduler is not None:
         auto_scheduler.reschedule(stream_id)
@@ -6732,7 +6746,6 @@ def _sync_timer_payload(timer_id: str, entry: Dict[str, Any]) -> Dict[str, Any]:
         "id": timer_id,
         "label": entry.get("label") or timer_id,
         "interval": entry.get("interval"),
-        "offset": entry.get("offset", 0.0),
     }
 
 
@@ -6750,7 +6763,6 @@ def sync_timers_collection():
         payload = {}
     label = payload.get("label") or payload.get("name") or "Timer"
     interval = payload.get("interval", SYNC_TIMER_DEFAULT_INTERVAL)
-    offset = payload.get("offset", 0.0)
     requested_id = payload.get("id") or _slugify(str(label))
     timer_id = _slugify(str(requested_id)) if requested_id else ""
     if not timer_id:
@@ -6765,7 +6777,7 @@ def sync_timers_collection():
         timer_id = f"{base_id}-{suffix}"
         suffix += 1
 
-    entry = _sanitize_sync_timer_entry(timer_id, {"label": label, "interval": interval, "offset": offset})
+    entry = _sanitize_sync_timer_entry(timer_id, {"label": label, "interval": interval})
     timers[timer_id] = entry
     settings[SYNC_TIMERS_KEY] = timers
     save_settings(settings)
@@ -6808,7 +6820,7 @@ def sync_timer_item(timer_id: str):
     if not isinstance(payload, dict):
         payload = {}
     merged = dict(entry)
-    for key in ("label", "interval", "offset"):
+    for key in ("label", "interval"):
         if key in payload:
             merged[key] = payload[key]
     updated = _sanitize_sync_timer_entry(timer_id, merged)
@@ -6823,6 +6835,7 @@ def sync_timer_item(timer_id: str):
             if sync_conf.get("timer_id") == timer_id:
                 playback_manager.update_stream_config(stream_id, conf)
                 playback_manager.realign_sync_timer(stream_id)
+        playback_manager.sync_timer_group(timer_id, force_refresh=True)
     _emit_sync_timer_update()
     return jsonify({"timer": _sync_timer_payload(timer_id, updated), "timers": get_sync_timers_snapshot()})
 

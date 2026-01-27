@@ -113,7 +113,6 @@
       <div class="sync-manager-actions">
         <input type="text" id="sync-timer-label" placeholder="Timer name" autocomplete="off" />
         <input type="number" id="sync-timer-interval" min="1" step="1" placeholder="Interval (sec)" />
-        <input type="number" id="sync-timer-offset" min="0" step="1" placeholder="Offset (sec)" />
         <button type="button" id="sync-timer-add-btn">Add</button>
       </div>
       <p class="sync-manager-hint">Timers drive synchronized changes across random image/GIF streams. Assign one per stream and use the offset to stagger.</p>
@@ -1024,7 +1023,6 @@
   const syncManagerList = document.getElementById('sync-manager-list');
   const syncTimerLabelInput = document.getElementById('sync-timer-label');
   const syncTimerIntervalInput = document.getElementById('sync-timer-interval');
-  const syncTimerOffsetInput = document.getElementById('sync-timer-offset');
   const syncTimerAddBtn = document.getElementById('sync-timer-add-btn');
   const tagDatalist = document.getElementById('global-tag-options');
   const systemMonitor = document.getElementById('system-monitor');
@@ -1789,6 +1787,13 @@
       if (offsetInput) {
         offsetInput.disabled = !(select.value || '').trim();
       }
+      if (card) {
+        const mediaMode = card.dataset.mediaMode || 'image';
+        const modeSelect = card.querySelector('.mode-select');
+        const streamUrlInput = card.querySelector('.stream-url-input');
+        const modeValue = modeSelect ? modeSelect.value : '';
+        applyModeState(card, mediaMode, modeValue, streamUrlInput ? streamUrlInput.value : '');
+      }
     });
   }
 
@@ -1827,12 +1832,6 @@
       const intervalValue = Number(timer.interval);
       intervalInput.value = Number.isFinite(intervalValue) ? intervalValue : 10;
       intervalInput.className = 'sync-manager-interval';
-      const offsetInput = document.createElement('input');
-      offsetInput.type = 'number';
-      offsetInput.min = '0';
-      offsetInput.step = '1';
-      offsetInput.value = Number(timer.offset || 0);
-      offsetInput.className = 'sync-manager-offset';
       const usageEl = document.createElement('span');
       usageEl.className = 'sync-manager-usage';
       const count = usage.get(timer.id) || 0;
@@ -1844,8 +1843,7 @@
       saveBtn.addEventListener('click', () => {
         updateSyncTimer(timer.id, {
           label: labelInput.value,
-          interval: intervalInput.value,
-          offset: offsetInput.value
+          interval: intervalInput.value
         });
       });
       const deleteBtn = document.createElement('button');
@@ -1858,7 +1856,6 @@
       });
       row.appendChild(labelInput);
       row.appendChild(intervalInput);
-      row.appendChild(offsetInput);
       row.appendChild(usageEl);
       row.appendChild(saveBtn);
       row.appendChild(deleteBtn);
@@ -1869,15 +1866,13 @@
   async function createSyncTimer() {
     const label = syncTimerLabelInput ? syncTimerLabelInput.value.trim() : '';
     const interval = syncTimerIntervalInput ? syncTimerIntervalInput.value : '';
-    const offset = syncTimerOffsetInput ? syncTimerOffsetInput.value : '';
     try {
       const res = await fetch('/api/sync_timers', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           label: label || 'Timer',
-          interval: interval || undefined,
-          offset: offset || 0
+          interval: interval || undefined
         })
       });
       const data = await res.json();
@@ -1887,7 +1882,6 @@
       applySyncTimerUpdate(data.timers);
       if (syncTimerLabelInput) syncTimerLabelInput.value = '';
       if (syncTimerIntervalInput) syncTimerIntervalInput.value = '';
-      if (syncTimerOffsetInput) syncTimerOffsetInput.value = '';
       showNotification('Sync timer created');
     } catch (err) {
       const message = err && err.message ? err.message : 'Failed to create sync timer';
@@ -2883,6 +2877,7 @@
         offsetInput.value = Number.isFinite(offsetVal) ? String(offsetVal) : '0';
         offsetInput.disabled = !(select && select.value);
       }
+      applyModeState(card, conf.media_mode || conf.mode || card.dataset.mediaMode, conf.mode || '', card.querySelector('.stream-url-input')?.value || '');
     }
     if (conf.picsum_settings !== undefined) {
       applyPicsumSettings(card, conf.picsum_settings);
@@ -4412,6 +4407,7 @@
               offsetInput.value = Number.isFinite(offsetVal) ? String(offsetVal) : '0';
               offsetInput.disabled = !(syncSelect && syncSelect.value);
             }
+            applyModeState(card, updatedMediaMode, effectiveMode, urlInputEl ? urlInputEl.value : '');
           }
           if (data.new_config && data.new_config.image_quality !== undefined) {
             const qualitySelect = card.querySelector('.image-quality-select');
@@ -4962,8 +4958,9 @@ function applyPicsumSettings(card, settings, opts = {}) {
       }
     }
 
-    if (durationDiv) durationDiv.style.display = (isRandom && (isImage || isVideo)) ? '' : 'none';
-    if (shuffleLabel) shuffleLabel.style.display = (isRandom && (isImage || isVideo)) ? '' : 'none';
+    const syncActive = isImage && syncSelect && (syncSelect.value || card.dataset.syncTimer);
+    if (durationDiv) durationDiv.style.display = (isRandom && (isImage || isVideo) && !syncActive) ? '' : 'none';
+    if (shuffleLabel) shuffleLabel.style.display = (isRandom && (isImage || isVideo) && !syncActive) ? '' : 'none';
     if (syncRow) syncRow.style.display = (isRandom && isImage) ? '' : 'none';
     if (syncSelect && syncOffsetInput) {
       const disabled = !(syncSelect.value || '').trim();
@@ -5482,6 +5479,7 @@ function applyPicsumSettings(card, settings, opts = {}) {
           card.dataset.syncTimer = syncSelect.value || '';
           updateSyncDisabled();
           saveSettings(streamId, buildSyncPayload());
+          applyModeState(card, getCurrentMediaMode(), modeSelect ? modeSelect.value : '', getStreamUrl());
         });
       }
       if (syncOffsetInput) {
