@@ -3,14 +3,15 @@
 A running list of ideas and future improvements. Add new items anywhere below.
 
 ## Bugs: 
-- [ ] Folders are shown twice. they shouldn't be.
-- [ ] Images uploaded with capital "JPG" doesn't show up in media, and is not used in show rotation..
-- [ ] Folders created isn't always shown in the dashboard.
-- [ ] It created a folder via UI, it uploaded images to the folder via UI, but the dashboard does not show images or folders created. 
+- [x] Folders are shown twice. they shouldn't be.
+- [x] Images uploaded with capital "JPG" doesn't show up in media, and is not used in show rotation..
+- [x] Folders created isn't always shown in the dashboard.
+- [x] It created a folder via UI, it uploaded images to the folder via UI, but the dashboard does not show images or folders created. 
 
 ## Active Ideas
 - [ ] Stream real-time update logs via Socket.IO instead of the current client-side animation.
 - [ ] Enable minimizing of streams in dashboard, so only streamname and menu button is visible, for better overview.
+- [ ] give the option of  syncrhronization between streams so they change their image the same exact time. this option should be able go be chosen on any image/gif stream. possibly by the the ability to create a timer and then selecting on the stream that it should follow timer x.  the individual streams should then have an option to stagger from the timer with x seconds, so images can change in a pretty way, instead of just random timing.
 
 ## Suggestions from a friend
 - [ ] [2025-09-08] Add optional authentication or simple login with a session cache so casual users are not blocked but the dashboard and update endpoints are protected from anyone on the network. - Note: I'm not sure this is necessary for a local only service that i built for myself.
@@ -76,4 +77,3 @@ Notes
 - Use checkboxes to track status (unchecked = planned, checked = done).
 - Optionally prefix entries with a date, e.g. `[2025-09-07] Idea text...`.
 - Group related items under short headings if this grows large.
-
