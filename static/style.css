@@ -266,6 +266,48 @@ a {
   border-radius: 4px;
   box-shadow: 0 0 6px rgba(0,0,0,0.4);
 }
+.stream-card.is-minimized {
+  padding: 0.5rem 0.6rem;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  overflow: visible;
+}
+.stream-card.is-minimized .card-header {
+  margin-bottom: 0;
+  align-items: center;
+  flex: 1 1 auto;
+}
+.stream-card.is-minimized .card-header h2 {
+  font-size: 0.95rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.stream-card.is-minimized .thumbnail-wrapper {
+  margin-bottom: 0;
+  flex: 0 0 auto;
+}
+.stream-card.is-minimized .thumbnail-area {
+  width: 110px;
+  max-width: 110px;
+  border-radius: 4px;
+}
+.stream-card.is-minimized .thumbnail-placeholder {
+  font-size: 0.7rem;
+}
+.stream-card.is-minimized .thumbnail-refresh-btn,
+.stream-card.is-minimized .thumbnail-badge,
+.stream-card.is-minimized .thumbnail-updated,
+.stream-card.is-minimized .form-grid,
+.stream-card.is-minimized .image-picker,
+.stream-card.is-minimized .selected-image-row,
+.stream-card.is-minimized .ai-summary,
+.stream-card.is-minimized .ai-generator,
+.stream-card.is-minimized .ai-modal-backdrop,
+.stream-card.is-minimized .timer-section {
+  display: none !important;
+}
 
 .tag-editor,
 .tag-filter-input {

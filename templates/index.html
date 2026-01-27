@@ -137,6 +137,7 @@
           <button class="menu-button" aria-haspopup="true" aria-expanded="false" title="More"><span class="burger"></span></button>
           <div class="menu-dropdown" hidden>
             <button class="menu-rename" data-stream="{{ stream_id }}">Rename</button>
+            <button class="menu-minimize" data-stream="{{ stream_id }}">Minimize</button>
             <button class="menu-remove" data-stream="{{ stream_id }}">Remove</button>
           </div>
         </div>
@@ -642,6 +643,30 @@
       try { localStorage.setItem('theme', next); } catch(e){}
     });
   })();
+
+  const minimizedStorageKey = 'dashboardMinimized';
+  function loadMinimizedSet() {
+    try {
+      const raw = JSON.parse(localStorage.getItem(minimizedStorageKey) || '[]');
+      return Array.isArray(raw) ? new Set(raw) : new Set();
+    } catch (e) {
+      return new Set();
+    }
+  }
+  function persistMinimizedSet(set) {
+    try { localStorage.setItem(minimizedStorageKey, JSON.stringify(Array.from(set))); } catch (e) {}
+  }
+  function applyMinimizedState(card, minimized) {
+    if (!card) return;
+    card.classList.toggle('is-minimized', minimized);
+    card.dataset.minimized = minimized ? 'true' : 'false';
+    const toggleBtn = card.querySelector('.menu-minimize');
+    if (toggleBtn) {
+      toggleBtn.textContent = minimized ? 'Expand' : 'Minimize';
+      toggleBtn.setAttribute('aria-pressed', minimized ? 'true' : 'false');
+    }
+  }
+  const minimizedStreamSet = loadMinimizedSet();
 
   const socket = io();
   let currentSocketId = null;
@@ -2746,6 +2771,8 @@
     if (e.target.classList.contains('menu-remove')) {
       const id = e.target.dataset.stream;
       if (confirm('Delete ' + id + '?')) {
+        minimizedStreamSet.delete(id);
+        persistMinimizedSet(minimizedStreamSet);
         fetch('/streams/' + encodeURIComponent(id), {method:'DELETE'})
           .then(res => res.json())
           .then(data => {
@@ -5110,6 +5137,9 @@ function applyPicsumSettings(card, settings, opts = {}) {
   document.addEventListener('DOMContentLoaded', () => {
     document.querySelectorAll('.stream-card').forEach(card => {
       const streamId = card.dataset.stream;
+      if (streamId) {
+        applyMinimizedState(card, minimizedStreamSet.has(streamId));
+      }
       initThumbnail(card);
       if (streamId) {
         updateNowPlaying(card, {
@@ -5130,6 +5160,22 @@ function applyPicsumSettings(card, settings, opts = {}) {
           document.querySelectorAll('.card-menu .menu-dropdown').forEach(dd => dd.hidden = true);
           menuDd.hidden = isOpen;
           menuBtn.setAttribute('aria-expanded', String(!isOpen));
+        });
+      }
+      const minimizeBtn = card.querySelector('.menu-minimize');
+      if (minimizeBtn && streamId) {
+        minimizeBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const next = !card.classList.contains('is-minimized');
+          applyMinimizedState(card, next);
+          if (next) {
+            minimizedStreamSet.add(streamId);
+          } else {
+            minimizedStreamSet.delete(streamId);
+          }
+          persistMinimizedSet(minimizedStreamSet);
+          if (menuDd) menuDd.hidden = true;
+          if (menuBtn) menuBtn.setAttribute('aria-expanded', 'false');
         });
       }
       // Folder change
