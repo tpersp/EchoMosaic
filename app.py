@@ -2,6 +2,7 @@ import base64
 import json
 import atexit
 import logging
+import math
 import os
 import re
 import shutil
@@ -471,6 +472,15 @@ TIMER_MODE_LABELS = {
     AI_MODE: "AI Images",
     MEDIA_MODE_PICSUM: "Picsum",
 }
+
+SYNC_CONFIG_KEY = "sync"
+SYNC_TIMERS_KEY = "_sync_timers"
+SYNC_TIMER_DEFAULT_INTERVAL = 10.0
+SYNC_TIMER_DEFAULT_LABEL = "Master"
+SYNC_TIMER_MIN_INTERVAL = 1.0
+SYNC_TIMER_MAX_INTERVAL = 24 * 60 * 60.0
+SYNC_TIMER_MIN_OFFSET = 0.0
+SYNC_SUPPORTED_MEDIA_MODES = {MEDIA_MODE_IMAGE}
 
 DEFAULT_MEDIA_ROOT_PATH = Path(os.path.abspath("./media")).resolve()
 
@@ -1562,6 +1572,190 @@ def ensure_timer_defaults(conf: Dict[str, Any]) -> Dict[str, Any]:
     return timer_conf
 
 
+def default_sync_config() -> Dict[str, Any]:
+    return {
+        "timer_id": None,
+        "offset": 0.0,
+    }
+
+
+def _sanitize_sync_offset(value: Any, *, interval: Optional[float] = None) -> float:
+    offset = _coerce_float(value, 0.0)
+    if offset is None or isinstance(offset, bool):
+        offset = 0.0
+    try:
+        offset = float(offset)
+    except (TypeError, ValueError):
+        offset = 0.0
+    if math.isnan(offset) or math.isinf(offset):
+        offset = 0.0
+    offset = max(SYNC_TIMER_MIN_OFFSET, offset)
+    if interval is not None and interval > 0:
+        offset = offset % float(interval)
+    return round(offset, 3)
+
+
+def sanitize_sync_config(
+    payload: Any,
+    *,
+    defaults: Optional[Dict[str, Any]] = None,
+    timers: Optional[Dict[str, Dict[str, Any]]] = None,
+) -> Dict[str, Any]:
+    base = dict(defaults or default_sync_config())
+    incoming = dict(payload) if isinstance(payload, dict) else {}
+    timer_raw = incoming.get("timer_id", base.get("timer_id"))
+    timer_id = timer_raw.strip() if isinstance(timer_raw, str) else None
+    if not timer_id:
+        timer_id = None
+
+    interval = None
+    if timers and timer_id and timer_id in timers:
+        interval = _coerce_float(timers[timer_id].get("interval"), None)
+    elif timer_id and timers is not None and timer_id not in timers:
+        timer_id = None
+
+    offset_raw = incoming.get("offset", base.get("offset", 0.0))
+    offset = _sanitize_sync_offset(offset_raw, interval=interval)
+
+    return {
+        "timer_id": timer_id,
+        "offset": offset,
+    }
+
+
+def ensure_sync_defaults(conf: Dict[str, Any], *, timers: Optional[Dict[str, Dict[str, Any]]] = None) -> Dict[str, Any]:
+    if timers is None:
+        timers = settings.get(SYNC_TIMERS_KEY, {}) if isinstance(settings, dict) else {}
+    sanitized = sanitize_sync_config(conf.get(SYNC_CONFIG_KEY), defaults=conf.get(SYNC_CONFIG_KEY), timers=timers)
+    conf[SYNC_CONFIG_KEY] = sanitized
+    return sanitized
+
+
+def default_sync_timer_entry(
+    *,
+    label: str = SYNC_TIMER_DEFAULT_LABEL,
+    interval: float = SYNC_TIMER_DEFAULT_INTERVAL,
+    offset: float = 0.0,
+) -> Dict[str, Any]:
+    return {
+        "label": label,
+        "interval": interval,
+        "offset": offset,
+    }
+
+
+def default_sync_timers() -> Dict[str, Dict[str, Any]]:
+    return {
+        "master": default_sync_timer_entry(),
+    }
+
+
+def _sanitize_sync_timer_entry(timer_id: str, payload: Any) -> Dict[str, Any]:
+    base = default_sync_timer_entry()
+    incoming = dict(payload) if isinstance(payload, dict) else {}
+    label_raw = incoming.get("label", timer_id or base["label"])
+    label = str(label_raw).strip() if label_raw is not None else base["label"]
+    if not label:
+        label = base["label"]
+
+    interval = _coerce_float(incoming.get("interval", base["interval"]), base["interval"])
+    try:
+        interval = float(interval)
+    except (TypeError, ValueError):
+        interval = base["interval"]
+    if math.isnan(interval) or math.isinf(interval) or interval <= 0:
+        interval = base["interval"]
+    interval = max(SYNC_TIMER_MIN_INTERVAL, min(SYNC_TIMER_MAX_INTERVAL, interval))
+
+    offset_raw = incoming.get("offset", base.get("offset", 0.0))
+    offset = _sanitize_sync_offset(offset_raw, interval=interval)
+
+    return {
+        "label": label,
+        "interval": round(interval, 3),
+        "offset": offset,
+    }
+
+
+def sanitize_sync_timers_collection(raw: Any) -> Dict[str, Dict[str, Any]]:
+    sanitized: Dict[str, Dict[str, Any]] = {}
+    if isinstance(raw, dict):
+        items = raw.items()
+    elif isinstance(raw, list):
+        items = []
+        for entry in raw:
+            if not isinstance(entry, dict):
+                continue
+            timer_id = entry.get("id")
+            items.append((timer_id, entry))
+    else:
+        return sanitized
+
+    for timer_id, payload in items:
+        if not isinstance(timer_id, str):
+            continue
+        slug = _slugify(timer_id)
+        if not slug:
+            continue
+        sanitized[slug] = _sanitize_sync_timer_entry(slug, payload)
+    return sanitized
+
+
+def ensure_sync_timers(data: Dict[str, Any]) -> bool:
+    raw = data.get(SYNC_TIMERS_KEY)
+    if raw is None:
+        data[SYNC_TIMERS_KEY] = default_sync_timers()
+        return True
+    sanitized = sanitize_sync_timers_collection(raw)
+    if sanitized != raw:
+        data[SYNC_TIMERS_KEY] = sanitized
+        return True
+    return False
+
+
+def get_sync_timer_config(timer_id: Optional[str]) -> Optional[Dict[str, Any]]:
+    if not timer_id:
+        return None
+    timers = settings.get(SYNC_TIMERS_KEY)
+    if not isinstance(timers, dict):
+        return None
+    entry = timers.get(timer_id)
+    return entry if isinstance(entry, dict) else None
+
+
+def get_sync_timers_snapshot() -> List[Dict[str, Any]]:
+    timers = settings.get(SYNC_TIMERS_KEY)
+    if not isinstance(timers, dict):
+        return []
+    payload: List[Dict[str, Any]] = []
+    for timer_id, entry in timers.items():
+        if not isinstance(entry, dict):
+            continue
+        payload.append(
+            {
+                "id": timer_id,
+                "label": entry.get("label") or timer_id,
+                "interval": entry.get("interval"),
+                "offset": entry.get("offset", 0.0),
+            }
+        )
+    payload.sort(key=lambda item: str(item.get("label") or item.get("id") or "").lower())
+    return payload
+
+
+def compute_next_sync_tick(now_ts: float, interval: float, offset: float) -> Optional[float]:
+    if interval <= 0:
+        return None
+    interval = float(interval)
+    offset = max(SYNC_TIMER_MIN_OFFSET, float(offset))
+    if interval > 0:
+        offset = offset % interval
+    if now_ts < offset:
+        return offset
+    cycles = math.floor((now_ts - offset) / interval) + 1
+    return offset + (cycles * interval)
+
+
 def _clock_time_to_offset_minutes(value: Any) -> Optional[float]:
     normalized = _normalize_clock_time(value)
     if not normalized:
@@ -1873,6 +2067,9 @@ def ensure_tag_defaults(conf: Dict[str, Any]) -> bool:
 
 def ensure_settings_integrity(data: Dict[str, Any]) -> bool:
     changed = False
+    if ensure_sync_timers(data):
+        changed = True
+    timers = data.get(SYNC_TIMERS_KEY, {}) if isinstance(data.get(SYNC_TIMERS_KEY), dict) else {}
     tags = data.get(GLOBAL_TAGS_KEY)
     normalized_tags = _normalize_tag_collection(tags)
     if tags != normalized_tags:
@@ -1888,6 +2085,7 @@ def ensure_settings_integrity(data: Dict[str, Any]) -> bool:
         ensure_ai_defaults(conf)
         ensure_picsum_defaults(conf)
         ensure_timer_defaults(conf)
+        ensure_sync_defaults(conf, timers=timers)
         if migrate_legacy_timer_config(key, conf):
             changed = True
         if conf != before_conf:
@@ -2078,6 +2276,7 @@ def default_stream_config():
         AI_STATE_KEY: default_ai_state(),
         "_ai_customized": False,
         "timer": default_timer_config(),
+        SYNC_CONFIG_KEY: default_sync_config(),
     }
 
 
@@ -2177,6 +2376,7 @@ def _sanitize_imported_stream_config(stream_id: str, raw_conf: Any) -> Dict[str,
     conf[PICSUM_SETTINGS_KEY] = _sanitize_picsum_settings(picsum_raw, defaults=default_picsum_settings())
     conf['_picsum_seed_custom'] = bool(conf.get('_picsum_seed_custom', False))
     ensure_timer_defaults(conf)
+    ensure_sync_defaults(conf)
     conf["embed_metadata"] = _sanitize_embed_metadata(conf.get("embed_metadata"))
     ensure_background_defaults(conf)
     return conf
@@ -2246,12 +2446,14 @@ def _prepare_settings_import(data: Dict[str, Any]) -> Tuple[Dict[str, Any], List
         sanitized['_ai_defaults'] = deepcopy(AI_FALLBACK_DEFAULTS)
     presets_raw = data.get(AI_PRESETS_KEY)
     sanitized[AI_PRESETS_KEY] = _sorted_presets(_sanitize_ai_presets(presets_raw))
+    sync_timers_raw = data.get(SYNC_TIMERS_KEY)
+    sanitized[SYNC_TIMERS_KEY] = sanitize_sync_timers_collection(sync_timers_raw)
     groups_raw = data.get('_groups')
     sanitized['_groups'] = _sanitize_group_collection_for_import(groups_raw, valid_streams)
     for key, value in data.items():
         if not isinstance(key, str) or not key.startswith('_'):
             continue
-        if key in {GLOBAL_TAGS_KEY, '_notes', '_ai_defaults', '_groups', AI_PRESETS_KEY}:
+        if key in {GLOBAL_TAGS_KEY, '_notes', '_ai_defaults', '_groups', AI_PRESETS_KEY, SYNC_TIMERS_KEY}:
             continue
         sanitized[key] = deepcopy(value)
     return sanitized, warnings
@@ -3217,11 +3419,14 @@ class StreamPlaybackState:
         self._source_signature: Optional[Tuple[Any, ...]] = None
         self._duration_signature: Optional[Tuple[Any, ...]] = None
         self.last_sync_emit: float = 0.0
+        self.sync_timer_id: Optional[str] = None
+        self.sync_offset: float = 0.0
 
     def apply_config(self, conf: Dict[str, Any]) -> Dict[str, bool]:
         previous_should_run = self.should_run()
         previous_source_signature = self._source_signature
         previous_duration_signature = self._duration_signature
+        previous_sync_signature = (self.sync_timer_id, self.sync_offset)
 
         mode_raw = conf.get("mode")
         new_mode = mode_raw.strip().lower() if isinstance(mode_raw, str) else "random"
@@ -3262,6 +3467,23 @@ class StreamPlaybackState:
             new_volume = self.video_volume
         new_volume = max(0.0, min(1.0, new_volume))
 
+        sync_conf = conf.get(SYNC_CONFIG_KEY) if isinstance(conf, dict) else None
+        new_sync_timer_id: Optional[str] = None
+        new_sync_offset = 0.0
+        if isinstance(sync_conf, dict):
+            timer_raw = sync_conf.get("timer_id")
+            if isinstance(timer_raw, str):
+                candidate = timer_raw.strip()
+                new_sync_timer_id = candidate or None
+            offset_raw = sync_conf.get("offset")
+            try:
+                offset_value = float(offset_raw)
+            except (TypeError, ValueError):
+                offset_value = 0.0
+            if math.isnan(offset_value) or math.isinf(offset_value):
+                offset_value = 0.0
+            new_sync_offset = max(0.0, offset_value)
+
         self.mode = new_mode
         self.media_mode = new_media_mode
         self.folder = new_folder
@@ -3270,6 +3492,8 @@ class StreamPlaybackState:
         self.duration_setting = new_duration
         self.video_playback_mode = new_playback_mode
         self.video_volume = new_volume
+        self.sync_timer_id = new_sync_timer_id
+        self.sync_offset = new_sync_offset
 
         new_source_signature = (self.mode, self.media_mode, self.folder, self.hide_nsfw, self.shuffle)
         new_duration_signature = (self.duration_setting, self.video_playback_mode)
@@ -3280,14 +3504,23 @@ class StreamPlaybackState:
         enabled_changed = previous_should_run != self.should_run()
         sources_changed = new_source_signature != previous_source_signature
         duration_changed = new_duration_signature != previous_duration_signature
+        sync_changed = (new_sync_timer_id, new_sync_offset) != previous_sync_signature
         return {
             "enabled_changed": enabled_changed,
             "sources_changed": sources_changed,
             "duration_changed": duration_changed,
+            "sync_changed": sync_changed,
         }
 
     def should_run(self) -> bool:
         return self.mode == "random" and self.media_mode in (MEDIA_MODE_IMAGE, MEDIA_MODE_VIDEO)
+
+    def sync_active(self) -> bool:
+        return (
+            bool(self.sync_timer_id)
+            and self.mode == "random"
+            and self.media_mode in SYNC_SUPPORTED_MEDIA_MODES
+        )
 
     def reset_state(self) -> None:
         self.current_media = None
@@ -3372,8 +3605,10 @@ class StreamPlaybackState:
         playback_mode: Optional[str],
         history_index: Optional[int] = None,
         add_to_history: bool = True,
+        now: Optional[float] = None,
     ) -> None:
-        now = time.time()
+        if now is None:
+            now = time.time()
         actual_duration = duration if duration is None or duration > 0 else None
         self.current_media = dict(media)
         self.duration = actual_duration
@@ -3532,12 +3767,27 @@ class StreamPlaybackManager:
             elif apply_result.get("enabled_changed") or apply_result.get("sources_changed") or apply_result.get("duration_changed"):
                 state.reset_state()
                 needs_refresh = True
+            elif apply_result.get("sync_changed"):
+                if state.sync_active():
+                    self._align_sync_schedule(state)
+                else:
+                    self._restore_default_schedule(state)
         if payload_to_emit:
             self._emit_state(payload_to_emit, room=stream_id)
         if needs_refresh:
             payload = self._advance_stream(stream_id, reason="config")
             if payload:
                 self._emit_state(payload, room=stream_id)
+
+    def realign_sync_timer(self, stream_id: str) -> None:
+        with self._lock:
+            state = self._states.get(stream_id)
+            if not state:
+                return
+            if state.sync_active():
+                self._align_sync_schedule(state)
+            else:
+                self._restore_default_schedule(state)
 
     def remove_stream(self, stream_id: str) -> None:
         with self._lock:
@@ -3575,6 +3825,8 @@ class StreamPlaybackManager:
                 return None
             media_copy = dict(media)
             state.set_media(media_copy, duration=duration, source="history_prev", playback_mode=playback_mode, history_index=target_index, add_to_history=False)
+            if state.sync_active():
+                self._align_sync_schedule(state)
             payload = state.to_payload()
             media_mode = state.media_mode
         runtime_args = {
@@ -3608,6 +3860,8 @@ class StreamPlaybackManager:
                     if media:
                         media_copy = dict(media)
                         state.set_media(media_copy, duration=duration, source="history_next", playback_mode=playback_mode, history_index=target_index, add_to_history=False)
+                        if state.sync_active():
+                            self._align_sync_schedule(state)
                         state_to_emit = state.to_payload()
                     else:
                         state_to_emit = None
@@ -3749,6 +4003,59 @@ class StreamPlaybackManager:
                 return duration
         return max(1.0, float(state.duration_setting))
 
+    def _resolve_sync_timer(self, state: StreamPlaybackState) -> Optional[Dict[str, float]]:
+        if not state.sync_active():
+            return None
+        entry = get_sync_timer_config(state.sync_timer_id)
+        if not isinstance(entry, dict):
+            return None
+        interval = _coerce_float(entry.get("interval"), 0.0)
+        offset = _coerce_float(entry.get("offset"), 0.0)
+        try:
+            interval = float(interval)
+        except (TypeError, ValueError):
+            interval = 0.0
+        try:
+            offset = float(offset)
+        except (TypeError, ValueError):
+            offset = 0.0
+        if math.isnan(interval) or math.isinf(interval) or interval <= 0:
+            return None
+        if math.isnan(offset) or math.isinf(offset):
+            offset = 0.0
+        return {"interval": interval, "offset": offset}
+
+    def _align_sync_schedule(self, state: StreamPlaybackState) -> None:
+        if not state.sync_active() or state.is_paused or not state.current_media:
+            return
+        timer_conf = self._resolve_sync_timer(state)
+        if not timer_conf:
+            return
+        now = time.time()
+        next_tick = compute_next_sync_tick(
+            now,
+            timer_conf["interval"],
+            timer_conf["offset"] + state.sync_offset,
+        )
+        if next_tick is None:
+            return
+        state.next_auto_event = next_tick
+        state.duration = max(0.1, next_tick - now)
+
+    def _restore_default_schedule(self, state: StreamPlaybackState) -> None:
+        if state.is_paused or not state.current_media:
+            return
+        now = time.time()
+        duration = self._compute_duration(state, state.current_media)
+        if duration is None:
+            state.duration = None
+            state.next_auto_event = None
+            return
+        position = state.get_position(now)
+        remaining = max(0.1, duration - position)
+        state.duration = duration
+        state.next_auto_event = now + remaining
+
     def _advance_stream(self, stream_id: str, *, reason: str) -> Optional[Dict[str, Any]]:
         payload: Optional[Dict[str, Any]]
         runtime_args: Dict[str, Any]
@@ -3770,9 +4077,24 @@ class StreamPlaybackManager:
                     "force_thumbnail": True,
                 }
             else:
+                now = time.time()
                 duration = self._compute_duration(state, media)
+                next_tick: Optional[float] = None
+                if state.sync_active():
+                    timer_conf = self._resolve_sync_timer(state)
+                    if timer_conf:
+                        next_tick = compute_next_sync_tick(
+                            now,
+                            timer_conf["interval"],
+                            timer_conf["offset"] + state.sync_offset,
+                        )
+                        if next_tick is not None:
+                            duration = max(0.1, next_tick - now)
                 playback_mode = state.video_playback_mode if media.get("kind") == "video" else None
-                state.set_media(media, duration=duration, source=reason, playback_mode=playback_mode)
+                state.set_media(media, duration=duration, source=reason, playback_mode=playback_mode, now=now)
+                if next_tick is not None:
+                    state.next_auto_event = next_tick
+                    state.duration = duration
                 payload = state.to_payload()
                 runtime_args = {
                     "path": media.get("path"),
@@ -4177,6 +4499,7 @@ for k, v in list(settings.items()):
         ensure_picsum_defaults(v)
         ensure_background_defaults(v)
         ensure_tag_defaults(v)
+        ensure_sync_defaults(v)
         mode_value = v.get("video_playback_mode")
         if not isinstance(mode_value, str) or mode_value.lower().strip() not in VIDEO_PLAYBACK_MODES:
             v["video_playback_mode"] = "duration"
@@ -4759,10 +5082,12 @@ def dashboard():
         else:
             conf["image_quality"] = quality.strip().lower()
         ensure_timer_defaults(conf)
+        ensure_sync_defaults(conf)
         ensure_background_defaults(conf)
         ensure_tag_defaults(conf)
         _refresh_embed_metadata(stream_id, conf)
     groups = sorted(list(settings.get("_groups", {}).keys()))
+    sync_timers = get_sync_timers_snapshot()
     return render_template(
         "index.html",
         subfolders=subfolders,
@@ -4770,6 +5095,7 @@ def dashboard():
         stream_settings=streams,
         groups=groups,
         global_tags=get_global_tags(),
+        sync_timers=sync_timers,
         post_processors=STABLE_HORDE_POST_PROCESSORS,
         max_loras=STABLE_HORDE_MAX_LORAS,
         clip_skip_range=STABLE_HORDE_CLIP_SKIP_RANGE,
@@ -4829,6 +5155,7 @@ def mosaic_streams():
         if not isinstance(conf, dict):
             continue
         ensure_timer_defaults(conf)
+        ensure_sync_defaults(conf)
         ensure_background_defaults(conf)
         ensure_tag_defaults(conf)
         _refresh_embed_metadata(stream_id, conf)
@@ -4944,6 +5271,7 @@ def get_stream_settings(stream_id):
     ensure_ai_defaults(conf)
     ensure_picsum_defaults(conf)
     ensure_timer_defaults(conf)
+    ensure_sync_defaults(conf)
     ensure_background_defaults(conf)
     ensure_tag_defaults(conf)
     return jsonify(conf)
@@ -4956,6 +5284,7 @@ def get_stream_playback_state(stream_id):
     conf = settings.get(stream_id)
     if conf is None or not isinstance(conf, dict):
         return jsonify({"error": f"No stream '{stream_id}' found"}), 404
+    ensure_sync_defaults(conf)
     state = playback_manager.get_state(stream_id)
     if state is None:
         playback_manager.update_stream_config(stream_id, conf)
@@ -4975,6 +5304,7 @@ def update_stream_settings(stream_id):
     ensure_ai_defaults(conf)
     ensure_picsum_defaults(conf)
     ensure_timer_defaults(conf)
+    ensure_sync_defaults(conf)
     previous_mode = conf.get("mode")
 
     stream_url_changed = False
@@ -5085,6 +5415,14 @@ def update_stream_settings(stream_id):
         conf[PICSUM_SETTINGS_KEY] = _sanitize_picsum_settings(
             conf.get(PICSUM_SETTINGS_KEY),
             defaults=default_picsum_settings(),
+        )
+
+    if SYNC_CONFIG_KEY in data:
+        timers = settings.get(SYNC_TIMERS_KEY, {}) if isinstance(settings.get(SYNC_TIMERS_KEY), dict) else {}
+        conf[SYNC_CONFIG_KEY] = sanitize_sync_config(
+            data.get(SYNC_CONFIG_KEY),
+            defaults=conf.get(SYNC_CONFIG_KEY),
+            timers=timers,
         )
 
     media_mode = conf.get("media_mode")
@@ -6387,6 +6725,106 @@ def api_timer_settings():
 
     stream_summary = _apply_timer_snap_setting(requested)
     return jsonify({"timer_snap_enabled": requested, "streams": stream_summary})
+
+
+def _sync_timer_payload(timer_id: str, entry: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        "id": timer_id,
+        "label": entry.get("label") or timer_id,
+        "interval": entry.get("interval"),
+        "offset": entry.get("offset", 0.0),
+    }
+
+
+def _emit_sync_timer_update() -> None:
+    safe_emit("sync_timers_updated", {"timers": get_sync_timers_snapshot()})
+
+
+@app.route("/api/sync_timers", methods=["GET", "POST"])
+def sync_timers_collection():
+    if request.method == "GET":
+        return jsonify({"timers": get_sync_timers_snapshot()})
+
+    payload = request.get_json(silent=True) or {}
+    if not isinstance(payload, dict):
+        payload = {}
+    label = payload.get("label") or payload.get("name") or "Timer"
+    interval = payload.get("interval", SYNC_TIMER_DEFAULT_INTERVAL)
+    offset = payload.get("offset", 0.0)
+    requested_id = payload.get("id") or _slugify(str(label))
+    timer_id = _slugify(str(requested_id)) if requested_id else ""
+    if not timer_id:
+        timer_id = f"timer-{secrets.token_hex(2)}"
+
+    timers = settings.get(SYNC_TIMERS_KEY)
+    if not isinstance(timers, dict):
+        timers = {}
+    base_id = timer_id
+    suffix = 1
+    while timer_id in timers:
+        timer_id = f"{base_id}-{suffix}"
+        suffix += 1
+
+    entry = _sanitize_sync_timer_entry(timer_id, {"label": label, "interval": interval, "offset": offset})
+    timers[timer_id] = entry
+    settings[SYNC_TIMERS_KEY] = timers
+    save_settings(settings)
+    _emit_sync_timer_update()
+    return jsonify({"timer": _sync_timer_payload(timer_id, entry), "timers": get_sync_timers_snapshot()}), 201
+
+
+@app.route("/api/sync_timers/<timer_id>", methods=["PUT", "DELETE"])
+def sync_timer_item(timer_id: str):
+    if not timer_id:
+        return jsonify({"error": "Timer id required"}), 400
+    timers = settings.get(SYNC_TIMERS_KEY)
+    if not isinstance(timers, dict):
+        timers = {}
+    entry = timers.get(timer_id)
+    if not isinstance(entry, dict):
+        return jsonify({"error": "Timer not found"}), 404
+
+    if request.method == "DELETE":
+        timers.pop(timer_id, None)
+        settings[SYNC_TIMERS_KEY] = timers
+        affected: List[str] = []
+        for stream_id, conf in settings.items():
+            if not isinstance(conf, dict) or stream_id.startswith("_"):
+                continue
+            raw_sync = conf.get(SYNC_CONFIG_KEY) if isinstance(conf.get(SYNC_CONFIG_KEY), dict) else {}
+            was_using = raw_sync.get("timer_id") == timer_id
+            sync_conf = ensure_sync_defaults(conf, timers=timers)
+            if was_using:
+                conf[SYNC_CONFIG_KEY] = {"timer_id": None, "offset": sync_conf.get("offset", 0.0)}
+                affected.append(stream_id)
+                if playback_manager is not None:
+                    playback_manager.update_stream_config(stream_id, conf)
+                safe_emit("refresh", {"stream_id": stream_id, "config": conf, "tags": get_global_tags()})
+        save_settings(settings)
+        _emit_sync_timer_update()
+        return jsonify({"status": "deleted", "affected_streams": affected, "timers": get_sync_timers_snapshot()})
+
+    payload = request.get_json(silent=True) or {}
+    if not isinstance(payload, dict):
+        payload = {}
+    merged = dict(entry)
+    for key in ("label", "interval", "offset"):
+        if key in payload:
+            merged[key] = payload[key]
+    updated = _sanitize_sync_timer_entry(timer_id, merged)
+    timers[timer_id] = updated
+    settings[SYNC_TIMERS_KEY] = timers
+    save_settings(settings)
+    if playback_manager is not None:
+        for stream_id, conf in settings.items():
+            if not isinstance(conf, dict) or stream_id.startswith("_"):
+                continue
+            sync_conf = ensure_sync_defaults(conf, timers=timers)
+            if sync_conf.get("timer_id") == timer_id:
+                playback_manager.update_stream_config(stream_id, conf)
+                playback_manager.realign_sync_timer(stream_id)
+    _emit_sync_timer_update()
+    return jsonify({"timer": _sync_timer_payload(timer_id, updated), "timers": get_sync_timers_snapshot()})
 
 
 @app.route("/restore_points", methods=["GET", "POST"])

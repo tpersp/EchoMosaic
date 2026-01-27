@@ -104,6 +104,22 @@
     </div>
   </div>
 
+  <div class="stream-card" id="sync-manager">
+    <div class="card-header">
+      <h2>Sync Timers</h2>
+    </div>
+    <div class="sync-manager-body">
+      <div id="sync-manager-list" class="sync-manager-list"></div>
+      <div class="sync-manager-actions">
+        <input type="text" id="sync-timer-label" placeholder="Timer name" autocomplete="off" />
+        <input type="number" id="sync-timer-interval" min="1" step="1" placeholder="Interval (sec)" />
+        <input type="number" id="sync-timer-offset" min="0" step="1" placeholder="Offset (sec)" />
+        <button type="button" id="sync-timer-add-btn">Add</button>
+      </div>
+      <p class="sync-manager-hint">Timers drive synchronized changes across random image/GIF streams. Assign one per stream and use the offset to stagger.</p>
+    </div>
+  </div>
+
   <div id="dashboard-grid" class="dashboard-grid">
     {# Generate a card for each stream dynamically #}
 {% for stream_id, conf in stream_settings.items() %}
@@ -111,7 +127,7 @@
     {% set embed_title = embed_meta.title if embed_meta and embed_meta.title else '' %}
     {% set embed_type = embed_meta.content_type if embed_meta and embed_meta.content_type else '' %}
     {% set embed_provider = embed_meta.provider if embed_meta and embed_meta.provider else '' %}
-    <div class="stream-card" data-stream="{{ stream_id }}" data-hide-nsfw="{{ "true" if conf.hide_nsfw|default(False) else "false" }}" data-tags='{{ (conf.tags|default([]))|tojson }}' data-selected-path="{{ conf.selected_image or '' }}" data-selected-kind="{{ conf.selected_media_kind or '' }}" data-video-mode="{{ conf.video_playback_mode|default('duration') }}" data-video-volume="{{ conf.video_volume|default(1.0) }}" data-media-mode="{{ conf.media_mode|default('image') }}" data-picsum-seed="{{ conf.picsum_settings.seed if conf.picsum_settings and conf.picsum_settings.seed is not none else '' }}" data-embed-title="{{ embed_title }}" data-embed-type="{{ embed_type }}" data-embed-provider="{{ embed_provider }}">
+    <div class="stream-card" data-stream="{{ stream_id }}" data-hide-nsfw="{{ "true" if conf.hide_nsfw|default(False) else "false" }}" data-tags='{{ (conf.tags|default([]))|tojson }}' data-selected-path="{{ conf.selected_image or '' }}" data-selected-kind="{{ conf.selected_media_kind or '' }}" data-video-mode="{{ conf.video_playback_mode|default('duration') }}" data-video-volume="{{ conf.video_volume|default(1.0) }}" data-media-mode="{{ conf.media_mode|default('image') }}" data-picsum-seed="{{ conf.picsum_settings.seed if conf.picsum_settings and conf.picsum_settings.seed is not none else '' }}" data-sync-timer="{{ conf.sync.timer_id if conf.sync and conf.sync.timer_id else '' }}" data-sync-offset="{{ conf.sync.offset if conf.sync and conf.sync.offset is not none else 0 }}" data-embed-title="{{ embed_title }}" data-embed-type="{{ embed_type }}" data-embed-provider="{{ embed_provider }}">
       <div class="card-header">
         <div class="card-header-info">
           <div class="title-row">
@@ -260,6 +276,25 @@
           <div class="inline-controls">
             <input id="duration-{{ stream_id }}" type="number" class="duration-input" data-stream="{{ stream_id }}" value="{{ conf.duration }}" min="1" style="max-width: 110px;">
             <label class="toggle inline" title="Randomize order each time"><input type="checkbox" class="shuffle-chk" data-stream="{{ stream_id }}" {% if conf.shuffle %} checked {% endif %}><span class="toggle-switch"></span><span class="toggle-label">Shuffle</span></label>
+          </div>
+        </div>
+
+        {% set sync_conf = conf.sync or {} %}
+        {% set sync_timer_id = sync_conf.timer_id if sync_conf and sync_conf.timer_id else '' %}
+        {% set sync_offset = sync_conf.offset if sync_conf and sync_conf.offset is not none else 0 %}
+        <div class="form-row sync-row" {% if media_mode != 'image' or mode_value != 'random' %} style="display:none;" {% endif %}>
+          <label for="sync-timer-{{ stream_id }}">Sync timer</label>
+          <div class="sync-controls" data-stream="{{ stream_id }}">
+            <select id="sync-timer-{{ stream_id }}" class="sync-timer-select" data-stream="{{ stream_id }}">
+              <option value="">Off</option>
+              {% for timer in sync_timers %}
+                <option value="{{ timer.id }}" {% if sync_timer_id == timer.id %}selected{% endif %}>{{ timer.label }} ({{ timer.interval|round(2) }}s)</option>
+              {% endfor %}
+            </select>
+            <div class="sync-offset-control">
+              <input type="number" class="sync-offset-input" min="0" step="1" value="{{ sync_offset }}">
+              <span class="sync-offset-label">sec offset</span>
+            </div>
           </div>
         </div>
 
@@ -986,6 +1021,11 @@
   const tagManagerList = document.getElementById('tag-manager-list');
   const newTagInput = document.getElementById('new-tag-input');
   const createTagBtn = document.getElementById('create-tag-btn');
+  const syncManagerList = document.getElementById('sync-manager-list');
+  const syncTimerLabelInput = document.getElementById('sync-timer-label');
+  const syncTimerIntervalInput = document.getElementById('sync-timer-interval');
+  const syncTimerOffsetInput = document.getElementById('sync-timer-offset');
+  const syncTimerAddBtn = document.getElementById('sync-timer-add-btn');
   const tagDatalist = document.getElementById('global-tag-options');
   const systemMonitor = document.getElementById('system-monitor');
   const systemMonitorElements = systemMonitor ? {
@@ -1141,6 +1181,21 @@
       globalTagState.map.set(tag.toLowerCase(), tag);
     }
   });
+
+  const initialSyncTimers = {{ sync_timers|tojson }};
+  const syncTimerState = {
+    list: Array.isArray(initialSyncTimers) ? initialSyncTimers.slice() : [],
+    map: new Map()
+  };
+  function rebuildSyncTimerMap() {
+    syncTimerState.map.clear();
+    syncTimerState.list.forEach(timer => {
+      if (timer && timer.id) {
+        syncTimerState.map.set(timer.id, timer);
+      }
+    });
+  }
+  rebuildSyncTimerMap();
   const cardTagsMap = new Map();
   const activeTagFilters = [];
   let currentSortMode = 'default';
@@ -1682,6 +1737,196 @@
     updateTagDatalist();
     reconcileFilterTags();
     renderTagManager();
+  }
+
+  function formatSyncInterval(value) {
+    const num = Number(value);
+    if (!Number.isFinite(num)) {
+      return '--';
+    }
+    const rounded = Number(num.toFixed(2));
+    return String(rounded).replace(/\.0+$/, '');
+  }
+
+  function collectSyncUsage() {
+    const usage = new Map();
+    document.querySelectorAll('.stream-card[data-stream]').forEach(card => {
+      const timerId = card.dataset.syncTimer || '';
+      if (timerId) {
+        usage.set(timerId, (usage.get(timerId) || 0) + 1);
+      }
+    });
+    return usage;
+  }
+
+  function updateSyncTimerSelects() {
+    const selects = document.querySelectorAll('.sync-timer-select');
+    selects.forEach(select => {
+      const card = select.closest('.stream-card');
+      const current = (card && card.dataset.syncTimer) ? card.dataset.syncTimer : (select.value || '');
+      select.innerHTML = '';
+      const offOpt = document.createElement('option');
+      offOpt.value = '';
+      offOpt.textContent = 'Off';
+      select.appendChild(offOpt);
+      syncTimerState.list.forEach(timer => {
+        if (!timer || !timer.id) return;
+        const opt = document.createElement('option');
+        opt.value = timer.id;
+        const label = timer.label || timer.id;
+        opt.textContent = `${label} (${formatSyncInterval(timer.interval)}s)`;
+        select.appendChild(opt);
+      });
+      if (current && syncTimerState.map.has(current)) {
+        select.value = current;
+      } else {
+        select.value = '';
+      }
+      if (card) {
+        card.dataset.syncTimer = select.value;
+      }
+      const offsetInput = card ? card.querySelector('.sync-offset-input') : null;
+      if (offsetInput) {
+        offsetInput.disabled = !(select.value || '').trim();
+      }
+    });
+  }
+
+  function applySyncTimerUpdate(timers) {
+    syncTimerState.list = Array.isArray(timers) ? timers.slice() : [];
+    rebuildSyncTimerMap();
+    renderSyncManager();
+    updateSyncTimerSelects();
+  }
+
+  function renderSyncManager() {
+    if (!syncManagerList) {
+      return;
+    }
+    syncManagerList.innerHTML = '';
+    if (!syncTimerState.list.length) {
+      const empty = document.createElement('p');
+      empty.className = 'sync-manager-empty';
+      empty.textContent = 'No sync timers defined yet.';
+      syncManagerList.appendChild(empty);
+      return;
+    }
+    const usage = collectSyncUsage();
+    syncTimerState.list.forEach(timer => {
+      if (!timer || !timer.id) return;
+      const row = document.createElement('div');
+      row.className = 'sync-manager-item';
+      const labelInput = document.createElement('input');
+      labelInput.type = 'text';
+      labelInput.value = timer.label || timer.id;
+      labelInput.className = 'sync-manager-label';
+      const intervalInput = document.createElement('input');
+      intervalInput.type = 'number';
+      intervalInput.min = '1';
+      intervalInput.step = '1';
+      const intervalValue = Number(timer.interval);
+      intervalInput.value = Number.isFinite(intervalValue) ? intervalValue : 10;
+      intervalInput.className = 'sync-manager-interval';
+      const offsetInput = document.createElement('input');
+      offsetInput.type = 'number';
+      offsetInput.min = '0';
+      offsetInput.step = '1';
+      offsetInput.value = Number(timer.offset || 0);
+      offsetInput.className = 'sync-manager-offset';
+      const usageEl = document.createElement('span');
+      usageEl.className = 'sync-manager-usage';
+      const count = usage.get(timer.id) || 0;
+      usageEl.textContent = `${count} stream${count === 1 ? '' : 's'}`;
+      const saveBtn = document.createElement('button');
+      saveBtn.type = 'button';
+      saveBtn.textContent = 'Save';
+      saveBtn.className = 'sync-manager-save';
+      saveBtn.addEventListener('click', () => {
+        updateSyncTimer(timer.id, {
+          label: labelInput.value,
+          interval: intervalInput.value,
+          offset: offsetInput.value
+        });
+      });
+      const deleteBtn = document.createElement('button');
+      deleteBtn.type = 'button';
+      deleteBtn.textContent = 'Delete';
+      deleteBtn.className = 'sync-manager-delete';
+      deleteBtn.addEventListener('click', () => {
+        if (!confirm(`Delete sync timer "${timer.label || timer.id}"?`)) return;
+        deleteSyncTimer(timer.id);
+      });
+      row.appendChild(labelInput);
+      row.appendChild(intervalInput);
+      row.appendChild(offsetInput);
+      row.appendChild(usageEl);
+      row.appendChild(saveBtn);
+      row.appendChild(deleteBtn);
+      syncManagerList.appendChild(row);
+    });
+  }
+
+  async function createSyncTimer() {
+    const label = syncTimerLabelInput ? syncTimerLabelInput.value.trim() : '';
+    const interval = syncTimerIntervalInput ? syncTimerIntervalInput.value : '';
+    const offset = syncTimerOffsetInput ? syncTimerOffsetInput.value : '';
+    try {
+      const res = await fetch('/api/sync_timers', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          label: label || 'Timer',
+          interval: interval || undefined,
+          offset: offset || 0
+        })
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data && data.error ? data.error : 'Failed to create sync timer');
+      }
+      applySyncTimerUpdate(data.timers);
+      if (syncTimerLabelInput) syncTimerLabelInput.value = '';
+      if (syncTimerIntervalInput) syncTimerIntervalInput.value = '';
+      if (syncTimerOffsetInput) syncTimerOffsetInput.value = '';
+      showNotification('Sync timer created');
+    } catch (err) {
+      const message = err && err.message ? err.message : 'Failed to create sync timer';
+      showNotification(message);
+    }
+  }
+
+  async function updateSyncTimer(timerId, payload) {
+    try {
+      const res = await fetch(`/api/sync_timers/${encodeURIComponent(timerId)}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload || {})
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data && data.error ? data.error : 'Failed to update sync timer');
+      }
+      applySyncTimerUpdate(data.timers);
+      showNotification('Sync timer updated');
+    } catch (err) {
+      const message = err && err.message ? err.message : 'Failed to update sync timer';
+      showNotification(message);
+    }
+  }
+
+  async function deleteSyncTimer(timerId) {
+    try {
+      const res = await fetch(`/api/sync_timers/${encodeURIComponent(timerId)}`, { method: 'DELETE' });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data && data.error ? data.error : 'Failed to delete sync timer');
+      }
+      applySyncTimerUpdate(data.timers || []);
+      showNotification('Sync timer deleted');
+    } catch (err) {
+      const message = err && err.message ? err.message : 'Failed to delete sync timer';
+      showNotification(message);
+    }
   }
 
   function reconcileFilterTags() {
@@ -2546,6 +2791,12 @@
     }
   });
 
+  socket.on('sync_timers_updated', (data) => {
+    if (data && Array.isArray(data.timers)) {
+      applySyncTimerUpdate(data.timers);
+    }
+  });
+
   socket.on('refresh', (data) => {
     const streamId = data && data.stream_id;
     const conf = data && data.config;
@@ -2615,6 +2866,22 @@
       if (volumeSlider) {
         const pct = Math.max(0, Math.min(1, Number.isFinite(volumeValue) ? volumeValue : 1)) * 100;
         volumeSlider.value = String(Math.round(pct));
+      }
+    }
+    if (conf.sync !== undefined) {
+      const syncConf = conf.sync || {};
+      const timerId = typeof syncConf.timer_id === 'string' ? syncConf.timer_id : '';
+      const offsetVal = Number(syncConf.offset);
+      card.dataset.syncTimer = timerId || '';
+      card.dataset.syncOffset = Number.isFinite(offsetVal) ? String(offsetVal) : '0';
+      const select = card.querySelector('.sync-timer-select');
+      if (select) {
+        select.value = syncTimerState.map.has(timerId) ? timerId : '';
+      }
+      const offsetInput = card.querySelector('.sync-offset-input');
+      if (offsetInput) {
+        offsetInput.value = Number.isFinite(offsetVal) ? String(offsetVal) : '0';
+        offsetInput.disabled = !(select && select.value);
       }
     }
     if (conf.picsum_settings !== undefined) {
@@ -4130,6 +4397,22 @@
               volumeSlider.value = String(Math.round(pct));
             }
           }
+          if (data.new_config && data.new_config.sync !== undefined) {
+            const syncConf = data.new_config.sync || {};
+            const timerId = typeof syncConf.timer_id === 'string' ? syncConf.timer_id : '';
+            const offsetVal = Number(syncConf.offset);
+            card.dataset.syncTimer = timerId || '';
+            card.dataset.syncOffset = Number.isFinite(offsetVal) ? String(offsetVal) : '0';
+            const syncSelect = card.querySelector('.sync-timer-select');
+            if (syncSelect) {
+              syncSelect.value = syncTimerState.map.has(timerId) ? timerId : '';
+            }
+            const offsetInput = card.querySelector('.sync-offset-input');
+            if (offsetInput) {
+              offsetInput.value = Number.isFinite(offsetVal) ? String(offsetVal) : '0';
+              offsetInput.disabled = !(syncSelect && syncSelect.value);
+            }
+          }
           if (data.new_config && data.new_config.image_quality !== undefined) {
             const qualitySelect = card.querySelector('.image-quality-select');
             if (qualitySelect) {
@@ -4633,6 +4916,9 @@ function applyPicsumSettings(card, settings, opts = {}) {
     const durationDiv = card.querySelector('.duration-container');
     const shuffleChk = card.querySelector('.shuffle-chk');
     const shuffleLabel = shuffleChk ? shuffleChk.closest('label') : null;
+    const syncRow = card.querySelector('.sync-row');
+    const syncSelect = card.querySelector('.sync-timer-select');
+    const syncOffsetInput = card.querySelector('.sync-offset-input');
     const urlDiv = card.querySelector('.stream-url-container');
     const playingRow = card.querySelector('.playing-row');
     const imagePicker = card.querySelector('.image-picker');
@@ -4678,6 +4964,11 @@ function applyPicsumSettings(card, settings, opts = {}) {
 
     if (durationDiv) durationDiv.style.display = (isRandom && (isImage || isVideo)) ? '' : 'none';
     if (shuffleLabel) shuffleLabel.style.display = (isRandom && (isImage || isVideo)) ? '' : 'none';
+    if (syncRow) syncRow.style.display = (isRandom && isImage) ? '' : 'none';
+    if (syncSelect && syncOffsetInput) {
+      const disabled = !(syncSelect.value || '').trim();
+      syncOffsetInput.disabled = disabled;
+    }
     if (urlDiv) urlDiv.style.display = isLivestream ? '' : 'none';
     if (playingRow) playingRow.style.display = isLivestream ? '' : 'none';
     if (imagePicker) imagePicker.style.display = (isSpecific && (isImage || isVideo)) ? '' : 'none';
@@ -5164,6 +5455,48 @@ function applyPicsumSettings(card, settings, opts = {}) {
           saveSettings(streamId, { shuffle: e.target.checked });
         });
       }
+      const syncSelect = card.querySelector('.sync-timer-select');
+      const syncOffsetInput = card.querySelector('.sync-offset-input');
+      const buildSyncPayload = () => {
+        const timerId = syncSelect ? (syncSelect.value || '') : '';
+        const offsetValue = syncOffsetInput ? Number(syncOffsetInput.value) : 0;
+        return {
+          sync: {
+            timer_id: timerId || null,
+            offset: Number.isFinite(offsetValue) ? offsetValue : 0
+          }
+        };
+      };
+      const updateSyncDisabled = () => {
+        if (syncOffsetInput) {
+          syncOffsetInput.disabled = !(syncSelect && syncSelect.value);
+        }
+      };
+      if (syncSelect) {
+        const initial = card.dataset.syncTimer || '';
+        if (initial) {
+          syncSelect.value = syncTimerState.map.has(initial) ? initial : '';
+        }
+        updateSyncDisabled();
+        syncSelect.addEventListener('change', () => {
+          card.dataset.syncTimer = syncSelect.value || '';
+          updateSyncDisabled();
+          saveSettings(streamId, buildSyncPayload());
+        });
+      }
+      if (syncOffsetInput) {
+        const initialOffset = Number(card.dataset.syncOffset);
+        if (Number.isFinite(initialOffset)) {
+          syncOffsetInput.value = String(initialOffset);
+        }
+        syncOffsetInput.addEventListener('change', () => {
+          if (!syncSelect || !syncSelect.value) {
+            return;
+          }
+          card.dataset.syncOffset = syncOffsetInput.value || '0';
+          saveSettings(streamId, buildSyncPayload());
+        });
+      }
       // URL helpers: type badge + background embed test + save
       function setUrlBadge(url) {
         const badge = card.querySelector('.url-type-badge');
@@ -5328,6 +5661,19 @@ function applyPicsumSettings(card, settings, opts = {}) {
         if (e.key === 'Enter') {
           e.preventDefault();
           createGlobalTag();
+        }
+      });
+    }
+    renderSyncManager();
+    updateSyncTimerSelects();
+    if (syncTimerAddBtn) {
+      syncTimerAddBtn.addEventListener('click', createSyncTimer);
+    }
+    if (syncTimerLabelInput) {
+      syncTimerLabelInput.addEventListener('keydown', e => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          createSyncTimer();
         }
       });
     }
