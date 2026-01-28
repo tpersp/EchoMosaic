@@ -134,12 +134,16 @@
             <h2><a class="stream-link" href="{{ url_for('render_stream', name=(conf.label if conf.label else stream_id)|slugify) }}" target="_blank">{{ conf.label if conf.label else stream_id|capitalize }}</a></h2>
           </div>
         </div>
-        <div class="card-menu" data-stream="{{ stream_id }}">
-          <button class="menu-button" aria-haspopup="true" aria-expanded="false" title="More"><span class="burger"></span></button>
-          <div class="menu-dropdown" hidden>
-            <button class="menu-rename" data-stream="{{ stream_id }}">Rename</button>
-            <button class="menu-minimize" data-stream="{{ stream_id }}">Minimize</button>
-            <button class="menu-remove" data-stream="{{ stream_id }}">Remove</button>
+        <div class="card-actions">
+          <button class="minimize-button" type="button" aria-pressed="false" aria-label="Minimize" title="Minimize">
+            <span class="minimize-icon" aria-hidden="true"></span>
+          </button>
+          <div class="card-menu" data-stream="{{ stream_id }}">
+            <button class="menu-button" aria-haspopup="true" aria-expanded="false" title="More"><span class="burger"></span></button>
+            <div class="menu-dropdown" hidden>
+              <button class="menu-rename" data-stream="{{ stream_id }}">Rename</button>
+              <button class="menu-remove" data-stream="{{ stream_id }}">Remove</button>
+            </div>
           </div>
         </div>
       </div>
@@ -661,10 +665,12 @@
     if (!card) return;
     card.classList.toggle('is-minimized', minimized);
     card.dataset.minimized = minimized ? 'true' : 'false';
-    const toggleBtn = card.querySelector('.menu-minimize');
+    const toggleBtn = card.querySelector('.minimize-button');
     if (toggleBtn) {
-      toggleBtn.textContent = minimized ? 'Expand' : 'Minimize';
+      const label = minimized ? 'Expand' : 'Minimize';
       toggleBtn.setAttribute('aria-pressed', minimized ? 'true' : 'false');
+      toggleBtn.setAttribute('aria-label', label);
+      toggleBtn.setAttribute('title', label);
     }
   }
   const minimizedStreamSet = loadMinimizedSet();
@@ -5216,7 +5222,7 @@ function applyPicsumSettings(card, settings, opts = {}) {
           menuBtn.setAttribute('aria-expanded', String(!isOpen));
         });
       }
-      const minimizeBtn = card.querySelector('.menu-minimize');
+      const minimizeBtn = card.querySelector('.minimize-button');
       if (minimizeBtn && streamId) {
         minimizeBtn.addEventListener('click', (e) => {
           e.stopPropagation();

@@ -282,21 +282,23 @@ a {
   box-shadow: 0 0 6px rgba(0,0,0,0.4);
 }
 .stream-card.is-minimized {
-  padding: 0.5rem 0.6rem;
+  padding: 0.55rem 0.6rem 0.6rem;
   display: flex;
-  align-items: center;
-  gap: 0.75rem;
-  overflow: visible;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.4rem;
 }
 .stream-card.is-minimized .thumbnail-wrapper {
-  order: 1;
-  margin-bottom: 0;
-  flex: 0 0 auto;
-}
-.stream-card.is-minimized .card-header {
   order: 2;
   margin-bottom: 0;
-  align-items: center;
+  display: flex;
+  justify-content: center;
+  width: 100%;
+}
+.stream-card.is-minimized .card-header {
+  order: 1;
+  margin-bottom: 0;
+  align-items: flex-start;
   flex: 1 1 auto;
   min-width: 0;
 }
@@ -305,13 +307,16 @@ a {
 }
 .stream-card.is-minimized .card-header h2 {
   font-size: 0.95rem;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  white-space: normal;
+  overflow: visible;
+  word-break: break-word;
+}
+.stream-card.is-minimized .title-row {
+  flex-wrap: wrap;
 }
 .stream-card.is-minimized .thumbnail-area {
-  width: 110px;
-  max-width: 110px;
+  width: 84px;
+  max-width: 84px;
   border-radius: 4px;
 }
 .stream-card.is-minimized .thumbnail-placeholder {
@@ -795,7 +800,34 @@ a {
 .stream-card h2 { margin: 0; font-size: 1.05rem; }
 .stream-card h2 a { color: var(--text); text-decoration: none; }
 /* Card menu (burger) */
-.card-menu { position: relative; margin-left: auto; }
+.card-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-left: auto;
+}
+.minimize-button {
+  background: var(--surface-alt);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 6px;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.minimize-button .minimize-icon::before {
+  content: "▾";
+  display: block;
+  font-size: 0.9rem;
+  line-height: 1;
+}
+.minimize-button[aria-pressed="true"] .minimize-icon::before {
+  content: "▴";
+}
+.card-menu { position: relative; margin-left: 0; }
 .menu-button {
   background: var(--surface-alt);
   border: 1px solid var(--border);
