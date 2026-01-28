@@ -3805,12 +3805,11 @@ class StreamPlaybackManager:
                     self._align_sync_schedule(state)
         if force_refresh:
             base_switch_at = time.time() + SYNC_SWITCH_LEAD_SECONDS
-            for offset, stream_ids in offset_map.items():
-                switch_at = base_switch_at + float(offset or 0.0)
+            for stream_ids in offset_map.values():
                 for stream_id in stream_ids:
                     payload = self._advance_stream(stream_id, reason="sync_group")
                     if payload:
-                        payload["switch_at"] = switch_at
+                        payload["switch_at"] = base_switch_at
                         self._emit_state(payload, room=stream_id)
 
     def remove_stream(self, stream_id: str) -> None:
@@ -4177,12 +4176,11 @@ class StreamPlaybackManager:
                     self._emit_state(payload, room=stream_id)
             if sync_groups:
                 base_switch_at = time.time() + SYNC_SWITCH_LEAD_SECONDS
-                for (timer_id, offset), stream_ids in sync_groups.items():
-                    switch_at = base_switch_at + float(offset or 0.0)
+                for stream_ids in sync_groups.values():
                     for stream_id in stream_ids:
                         payload = self._advance_stream(stream_id, reason="auto_sync")
                         if payload:
-                            payload["switch_at"] = switch_at
+                            payload["switch_at"] = base_switch_at
                             self._emit_state(payload, room=stream_id)
             for payload in sync_payloads:
                 self._emit_state(payload, event=SYNC_TIME_EVENT)
