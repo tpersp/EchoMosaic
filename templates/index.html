@@ -70,6 +70,7 @@
   <div class="controls">
     <button id="add-stream">Add Stream</button>
     <button id="open-mosaic">View Streams</button>
+    <button id="toggle-minimize-all">Minimize All</button>
   </div>
 
   <div class="filter-bar" id="filter-bar">
@@ -1034,6 +1035,7 @@
   const notification = document.getElementById('notification');
   const addStreamBtn = document.getElementById('add-stream');
   const openMosaicBtn = document.getElementById('open-mosaic');
+  const toggleMinimizeAllBtn = document.getElementById('toggle-minimize-all');
   
   // Group Manager elements
   const groupTiles = document.getElementById('group-tiles');
@@ -1064,6 +1066,25 @@
     playlist: 'Playlist',
     live: 'Live',
   };
+
+  function updateMinimizeAllButton() {
+    if (!toggleMinimizeAllBtn) return;
+    const cards = document.querySelectorAll('.stream-card[data-stream]');
+    if (!cards.length) {
+      toggleMinimizeAllBtn.textContent = 'Minimize All';
+      toggleMinimizeAllBtn.disabled = true;
+      return;
+    }
+    toggleMinimizeAllBtn.disabled = false;
+    const allMinimized = Array.from(cards).every(card => card.classList.contains('is-minimized'));
+    toggleMinimizeAllBtn.textContent = allMinimized ? 'Expand All' : 'Minimize All';
+  }
+
+  function syncMinimizedGridState() {
+    if (!dashboardGrid) return;
+    dashboardGrid.classList.toggle('compact-grid', minimizedStreamSet.size > 0);
+    updateMinimizeAllButton();
+  }
 
   function normalizeNumber(value) {
     return typeof value === 'number' && Number.isFinite(value) ? value : null;
@@ -1512,6 +1533,25 @@
   if (openMosaicBtn) {
     openMosaicBtn.addEventListener('click', () => {
       window.open('/stream', '_blank');
+    });
+  }
+  if (toggleMinimizeAllBtn) {
+    toggleMinimizeAllBtn.addEventListener('click', () => {
+      const cards = Array.from(document.querySelectorAll('.stream-card[data-stream]'));
+      if (!cards.length) return;
+      const allMinimized = cards.every(card => card.classList.contains('is-minimized'));
+      cards.forEach(card => {
+        const streamId = card.dataset.stream;
+        if (!streamId) return;
+        applyMinimizedState(card, !allMinimized);
+        if (allMinimized) {
+          minimizedStreamSet.delete(streamId);
+        } else {
+          minimizedStreamSet.add(streamId);
+        }
+      });
+      persistMinimizedSet(minimizedStreamSet);
+      syncMinimizedGridState();
     });
   }
 
@@ -2773,6 +2813,7 @@
       if (confirm('Delete ' + id + '?')) {
         minimizedStreamSet.delete(id);
         persistMinimizedSet(minimizedStreamSet);
+        syncMinimizedGridState();
         fetch('/streams/' + encodeURIComponent(id), {method:'DELETE'})
           .then(res => res.json())
           .then(data => {
@@ -5135,7 +5176,20 @@ function applyPicsumSettings(card, settings, opts = {}) {
   }
 
   document.addEventListener('DOMContentLoaded', () => {
-    document.querySelectorAll('.stream-card').forEach(card => {
+    const allCards = Array.from(document.querySelectorAll('.stream-card'));
+    const streamCards = allCards.filter(card => card.dataset.stream);
+    const presentIds = new Set(streamCards.map(card => card.dataset.stream));
+    let minimizedChanged = false;
+    minimizedStreamSet.forEach(id => {
+      if (!presentIds.has(id)) {
+        minimizedStreamSet.delete(id);
+        minimizedChanged = true;
+      }
+    });
+    if (minimizedChanged) {
+      persistMinimizedSet(minimizedStreamSet);
+    }
+    streamCards.forEach(card => {
       const streamId = card.dataset.stream;
       if (streamId) {
         applyMinimizedState(card, minimizedStreamSet.has(streamId));
@@ -5174,6 +5228,7 @@ function applyPicsumSettings(card, settings, opts = {}) {
             minimizedStreamSet.delete(streamId);
           }
           persistMinimizedSet(minimizedStreamSet);
+          syncMinimizedGridState();
           if (menuDd) menuDd.hidden = true;
           if (menuBtn) menuBtn.setAttribute('aria-expanded', 'false');
         });
@@ -5675,6 +5730,7 @@ function applyPicsumSettings(card, settings, opts = {}) {
       const initialModeValue = modeSelect ? (modeSelect.value || '').toLowerCase() : ((initialMediaMode === 'livestream' || initialMediaMode === 'ai') ? initialMediaMode : 'random');
       applyModeState(card, initialMediaMode, initialModeValue, urlInput ? urlInput.value : '');
     });
+    syncMinimizedGridState();
     originalCardOrder = Array.from(cardTagsMap.keys());
     renderTagManager();
     renderFilterChips();

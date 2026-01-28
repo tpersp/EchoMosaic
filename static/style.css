@@ -220,7 +220,22 @@ a {
   display: grid;
   gap: 1rem;
   /* Widen cards so controls don’t feel cramped */
-  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  --card-min: 320px;
+  grid-template-columns: repeat(auto-fit, minmax(var(--card-min), 1fr));
+}
+
+.dashboard-grid.compact-grid {
+  --card-min: 220px;
+}
+
+.dashboard-grid.compact-grid .stream-card:not(.is-minimized) {
+  grid-column: span 2;
+}
+
+@media (max-width: 720px) {
+  .dashboard-grid.compact-grid .stream-card:not(.is-minimized) {
+    grid-column: span 1;
+  }
 }
 
 /* Group manager styles */
@@ -273,20 +288,26 @@ a {
   gap: 0.75rem;
   overflow: visible;
 }
+.stream-card.is-minimized .thumbnail-wrapper {
+  order: 1;
+  margin-bottom: 0;
+  flex: 0 0 auto;
+}
 .stream-card.is-minimized .card-header {
+  order: 2;
   margin-bottom: 0;
   align-items: center;
   flex: 1 1 auto;
+  min-width: 0;
+}
+.stream-card.is-minimized .card-header-info {
+  min-width: 0;
 }
 .stream-card.is-minimized .card-header h2 {
   font-size: 0.95rem;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-}
-.stream-card.is-minimized .thumbnail-wrapper {
-  margin-bottom: 0;
-  flex: 0 0 auto;
 }
 .stream-card.is-minimized .thumbnail-area {
   width: 110px;
