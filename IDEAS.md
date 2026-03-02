@@ -12,6 +12,7 @@ A running list of ideas and future improvements. Add new items anywhere below.
 - [ ] Stream real-time update logs via Socket.IO instead of the current client-side animation.
 - [ ] Enable minimizing of streams in dashboard, so only streamname and menu button is visible, for better overview.
 - [x] [2026-01-27] Sync timers for random image/GIF streams so multiple streams change at the exact same time. Includes a global Sync Timers manager (create/edit/delete timers with interval + base offset), per-stream timer selection, and per-stream stagger offset in seconds to create cascading transitions instead of fully random timing.
+- [ ] Reduce RAM usage without limiting useability or performance.
 
 ## Suggestions from a friend
 - [ ] [2025-09-08] Add optional authentication or simple login with a session cache so casual users are not blocked but the dashboard and update endpoints are protected from anyone on the network. - Note: I'm not sure this is necessary for a local only service that i built for myself.

@@ -1,4 +1,5 @@
 import base64
+import errno
 import json
 import atexit
 import logging
@@ -302,6 +303,8 @@ DASHBOARD_THUMBNAIL_SIZE = (128, 72)
 THUMBNAIL_JPEG_QUALITY = 60
 IMAGE_CACHE_TIMEOUT = 60 * 60 * 24 * 7  # One week default for conditional responses
 IMAGE_CACHE_CONTROL_MAX_AGE = 31536000  # One year for browser Cache-Control headers
+BAD_MEDIA_LOG_TTL = 60 * 10
+_BAD_MEDIA_LOG_CACHE: Dict[str, float] = {}
 
 IMAGE_QUALITY_CHOICES = {"auto", "thumb", "medium", "full"}
 
@@ -7720,15 +7723,24 @@ def _get_resized_image_path(
 def _send_image_response(path: Union[str, Path]):
     """Return an image response with consistent caching headers."""
     abs_path = os.fspath(path)
-    stat = os.stat(abs_path)
-    etag_source = f"{stat.st_mtime_ns}-{stat.st_size}".encode("utf-8")
-    etag_value = generate_etag(etag_source)
-    response = send_file(
-        abs_path,
-        conditional=True,
-        max_age=IMAGE_CACHE_TIMEOUT,
-        etag=etag_value,
-    )
+    try:
+        stat = os.stat(abs_path)
+        etag_source = f"{stat.st_mtime_ns}-{stat.st_size}".encode("utf-8")
+        etag_value = generate_etag(etag_source)
+        response = send_file(
+            abs_path,
+            conditional=True,
+            max_age=IMAGE_CACHE_TIMEOUT,
+            etag=etag_value,
+        )
+    except (FileNotFoundError, PermissionError) as exc:
+        _log_bad_media_once(abs_path, exc)
+        return _media_unavailable_response(abs_path)
+    except OSError as exc:
+        if getattr(exc, "errno", None) == errno.EINVAL:
+            _log_bad_media_once(abs_path, exc)
+            return _media_unavailable_response(abs_path)
+        raise
     # Long-lived cache headers let browsers reuse thumbnails/originals without redownloading.
     # max_age mirrors Flask's cache_timeout value for forward compatibility.
     response.headers["Cache-Control"] = f"public, max-age={IMAGE_CACHE_CONTROL_MAX_AGE}"
@@ -7738,13 +7750,40 @@ def _send_image_response(path: Union[str, Path]):
 def _send_video_response(path: Union[str, Path]):
     """Support streaming video files with caching and range requests."""
     abs_path = os.fspath(path)
-    response = send_file(
-        abs_path,
-        conditional=True,
-    )
+    try:
+        response = send_file(
+            abs_path,
+            conditional=True,
+        )
+    except (FileNotFoundError, PermissionError) as exc:
+        _log_bad_media_once(abs_path, exc)
+        return _media_unavailable_response(abs_path)
+    except OSError as exc:
+        if getattr(exc, "errno", None) == errno.EINVAL:
+            _log_bad_media_once(abs_path, exc)
+            return _media_unavailable_response(abs_path)
+        raise
     response.headers.setdefault("Cache-Control", f"public, max-age={IMAGE_CACHE_TIMEOUT}")
     response.headers.setdefault("Accept-Ranges", "bytes")
     return response
+
+
+def _log_bad_media_once(path: str, exc: BaseException) -> None:
+    now = time.time()
+    last_log = _BAD_MEDIA_LOG_CACHE.get(path, 0.0)
+    if now - last_log >= BAD_MEDIA_LOG_TTL:
+        logger.warning("Media unavailable path=%s exc=%r", path, exc)
+        _BAD_MEDIA_LOG_CACHE[path] = now
+
+
+def _media_unavailable_response(path: str):
+    return jsonify(
+        {
+            "error": "media_unavailable",
+            "path": path,
+            "detail": "backend_read_error",
+        }
+    ), 404
 
 
 @app.route("/stream/image/<path:image_path>")
