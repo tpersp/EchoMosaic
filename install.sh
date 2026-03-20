@@ -19,7 +19,12 @@ INSTALL_DIR="${INSTALL_DIR:-$default_install_dir}"
 default_port="5000"
 read -r -p "Enter the port the server should listen on [${default_port}]: " PORT
 PORT="${PORT:-$default_port}"
-SERVICE_NAME="echomosaic.service"
+
+# Prompt for systemd service name (default: echomosaic.service)
+default_service="echomosaic.service"
+read -r -p "Enter the systemd service name [${default_service}]: " SERVICE_NAME
+SERVICE_NAME="${SERVICE_NAME:-$default_service}"
+
 echo "\nInstalling system packages…"
 sudo apt-get update
 sudo apt-get install -y python3 python3-venv python3-pip ffmpeg
