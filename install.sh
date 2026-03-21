@@ -7,23 +7,41 @@
 #   4. Configures and enables a systemd service so the app starts on boot.
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Parse arguments
+IS_DEV=false
+if [[ "${1:-}" == "--dev" ]]; then
+  IS_DEV=true
+  echo "Development mode enabled via --dev flag."
+fi
+
+# Set defaults based on mode
+if [ "$IS_DEV" = true ]; then
+  default_install_dir="$HOME/.local/share/echomosaic-dev"
+  default_port="5001"
+  default_service="echomosaic-dev.service"
+  BRANCH="dev"
+else
+  default_install_dir="$HOME/.local/share/echomosaic"
+  default_port="5000"
+  default_service="echomosaic.service"
+  BRANCH="main"
+fi
+
 # Prompt for the service user (default: current user)
 default_user="$(whoami)"
 read -r -p "Enter the user account that should run the service [${default_user}]: " SERVICE_USER
 SERVICE_USER="${SERVICE_USER:-$default_user}"
-# Prompt for installation directory (default: ~/.local/share/echomosaic)
-default_install_dir="$HOME/.local/share/echomosaic"
+# Prompt for installation directory
 read -r -p "Enter installation directory [${default_install_dir}]: " INSTALL_DIR
 INSTALL_DIR="${INSTALL_DIR:-$default_install_dir}"
 # Expand tilde if present
 INSTALL_DIR="${INSTALL_DIR/#\~/$HOME}"
-# Prompt for HTTP port (default: 5001)
-default_port="5001"
+# Prompt for HTTP port
 read -r -p "Enter the port the server should listen on [${default_port}]: " PORT
 PORT="${PORT:-$default_port}"
 
-# Prompt for systemd service name (default: echomosaic.service)
-default_service="echomosaic.service"
+# Prompt for systemd service name
 read -r -p "Enter the systemd service name [${default_service}]: " SERVICE_NAME
 SERVICE_NAME="${SERVICE_NAME:-$default_service}"
 
@@ -45,7 +63,7 @@ python3 -m venv "$INSTALL_DIR/venv"
 # and point MEDIA_PATHS there, or set a local folder and point MEDIA_PATHS to that.
 update_config() {
   local target_path="$1"
-  python3 - "$INSTALL_DIR" "$target_path" "$SERVICE_NAME" <<'PY'
+  python3 - "$INSTALL_DIR" "$target_path" "$SERVICE_NAME" "$BRANCH" <<'PY'
 import json
 import sys
 from pathlib import Path
@@ -53,6 +71,7 @@ from pathlib import Path
 install_dir = Path(sys.argv[1]).expanduser().resolve()
 target_path = sys.argv[2]
 service_name = sys.argv[3]
+branch = sys.argv[4]
 config_path = install_dir / "config.json"
 default_path = install_dir / "config.default.json"
 
@@ -72,7 +91,7 @@ if not isinstance(data, dict):
 data["MEDIA_PATHS"] = [target_path]
 data["INSTALL_DIR"] = str(install_dir)
 data["SERVICE_NAME"] = service_name
-data.setdefault("UPDATE_BRANCH", "main")
+data["UPDATE_BRANCH"] = branch
 config_path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
 PY
 }
@@ -157,6 +176,7 @@ After=network.target
 Type=simple
 WorkingDirectory=$INSTALL_DIR
 Environment="PATH=$INSTALL_DIR/venv/bin:$PATH"
+$( [ "$IS_DEV" = true ] && echo 'Environment="FLASK_ENV=development"' )
 ExecStart=$INSTALL_DIR/venv/bin/gunicorn -w 1 -k eventlet --bind 0.0.0.0:$PORT --timeout 120 --graceful-timeout 30 --keep-alive 5 --no-sendfile app:app
 Restart=always
 [Install]

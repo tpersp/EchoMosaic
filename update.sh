@@ -60,7 +60,7 @@ else
   BRANCH=$(jq -r '.UPDATE_BRANCH' "$CONFIG_FILE")
 fi
 
-if [ ! -d "$INSTALL_DIR/.git" ]; then
+if ! git -C "$INSTALL_DIR" rev-parse --is-inside-work-tree &>/dev/null; then
   echo "Error: $INSTALL_DIR does not appear to be a git repository."
   exit 1
 fi
