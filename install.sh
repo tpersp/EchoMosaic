@@ -17,8 +17,8 @@ read -r -p "Enter installation directory [${default_install_dir}]: " INSTALL_DIR
 INSTALL_DIR="${INSTALL_DIR:-$default_install_dir}"
 # Expand tilde if present
 INSTALL_DIR="${INSTALL_DIR/#\~/$HOME}"
-# Prompt for HTTP port (default: 5000)
-default_port="5000"
+# Prompt for HTTP port (default: 5001)
+default_port="5001"
 read -r -p "Enter the port the server should listen on [${default_port}]: " PORT
 PORT="${PORT:-$default_port}"
 

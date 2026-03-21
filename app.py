@@ -50,6 +50,18 @@ class LRUCache:
             if len(self.cache) > self.maxsize:
                 self.cache.popitem(last=False)
 
+    def pop(self, key: Any, *args: Any) -> Any:
+        with self.lock:
+            return self.cache.pop(key, *args)
+
+    def keys(self):
+        with self.lock:
+            return list(self.cache.keys())
+
+    def __len__(self) -> int:
+        with self.lock:
+            return len(self.cache)
+
 try:
     import engineio.payload  # type: ignore[import]
     import engineio.server  # type: ignore[import]
@@ -280,14 +292,6 @@ def safe_emit(
     **kwargs: Any,
 ) -> None:
     """Emit a Socket.IO event defensively, ignoring disconnected clients."""
-
-    global _last_emit_timestamp
-    with _emit_throttle_lock:
-        now = time.monotonic()
-        wait_for = _emit_min_interval - (now - _last_emit_timestamp)
-        if wait_for > 0:
-            time.sleep(wait_for)
-        _last_emit_timestamp = time.monotonic()
     try:
         socketio.emit(
             event_name,
@@ -298,9 +302,15 @@ def safe_emit(
             skip_sid=skip_sid,
             **kwargs,
         )
-    except (OSError, BrokenPipeError) as exc:  # pragma: no cover - expected on disconnects
+    except (OSError, BrokenPipeError) as exc:  # pragma: no cover
         app.logger.warning(
             "[SocketIO] Tried to emit to disconnected client for event '%s': %s",
+            event_name,
+            exc,
+        )
+    except Exception as exc:
+        app.logger.error(
+            "[SocketIO] Failed to emit event '%s': %s",
             event_name,
             exc,
         )
@@ -1066,6 +1076,10 @@ def _build_youtube_metadata(
     return metadata
 
 
+_YOUTUBE_IN_FLIGHT: Set[str] = set()
+_YOUTUBE_IN_FLIGHT_LOCK = threading.Lock()
+
+
 def _youtube_oembed_lookup(
     url: str,
     details: Dict[str, Any],
@@ -1082,30 +1096,36 @@ def _youtube_oembed_lookup(
             and now - cached.get("timestamp", 0) < YOUTUBE_OEMBED_CACHE_TTL
         ):
             return dict(cached.get("data", {}))
-    if requests is None:
-        return _build_youtube_metadata(details, None)
-    try:
-        response = requests.get(
-            YOUTUBE_OEMBED_ENDPOINT,
-            params={"url": url, "format": "json"},
-            timeout=6,
-        )
-        response.raise_for_status()
-        payload = response.json()
-    except Exception as exc:
-        logger.debug("YouTube oEmbed lookup failed for %s: %s", url, exc)
-        with YOUTUBE_OEMBED_CACHE_LOCK:
-            cached = YOUTUBE_OEMBED_CACHE.get(cache_key)
-            if cached:
-                return dict(cached.get("data", {}))
-        return _build_youtube_metadata(details, None)
 
-    metadata = _build_youtube_metadata(details, payload)
-    timestamp = datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
-    metadata["fetched_at"] = timestamp
-    with YOUTUBE_OEMBED_CACHE_LOCK:
-        YOUTUBE_OEMBED_CACHE[cache_key] = {"data": dict(metadata), "timestamp": now}
-    return metadata
+    # Check for in-flight requests to avoid redundant work and blocking
+    with _YOUTUBE_IN_FLIGHT_LOCK:
+        if url in _YOUTUBE_IN_FLIGHT:
+            return _build_youtube_metadata(details, None)
+        _YOUTUBE_IN_FLIGHT.add(url)
+
+    def _async_fetch_oembed():
+        try:
+            response = requests.get(
+                YOUTUBE_OEMBED_ENDPOINT,
+                params={"url": url, "format": "json"},
+                timeout=6,
+            )
+            response.raise_for_status()
+            payload = response.json()
+            metadata = _build_youtube_metadata(details, payload)
+            timestamp = datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
+            metadata["fetched_at"] = timestamp
+            with YOUTUBE_OEMBED_CACHE_LOCK:
+                YOUTUBE_OEMBED_CACHE[cache_key] = {"data": dict(metadata), "timestamp": time.time()}
+        except Exception as exc:
+            logger.debug("Async YouTube oEmbed lookup failed for %s: %s", url, exc)
+            # We don't need to do anything else; the next attempt will try again
+        finally:
+            with _YOUTUBE_IN_FLIGHT_LOCK:
+                _YOUTUBE_IN_FLIGHT.discard(url)
+
+    eventlet.spawn(_async_fetch_oembed)
+    return _build_youtube_metadata(details, None)
 
 
 def _set_runtime_embed_metadata(stream_id: str, metadata: Optional[Dict[str, Any]]) -> None:
@@ -1147,11 +1167,12 @@ def _refresh_embed_metadata(
     conf["embed_metadata"] = sanitized
     _set_runtime_embed_metadata(stream_id, sanitized)
     return sanitized
-IMAGE_CACHE_LOCK = threading.Lock()
-RESIZED_IMAGE_LOCKS: Dict[Path, threading.Lock] = {}
+IMAGE_CACHE_LOCK = threading.Lock()  # Kept for external callers; LRUCache also has internal lock
+RESIZED_IMAGE_LOCKS: LRUCache = LRUCache(maxsize=512)
 RESIZED_IMAGE_LOCKS_GUARD = threading.Lock()
 STREAM_RUNTIME_STATE: Dict[str, Dict[str, Any]] = {}
 STREAM_RUNTIME_LOCK = threading.Lock()
+_VIDEO_DURATION_CACHE: LRUCache = LRUCache(maxsize=128)  # Cache video durations to avoid cv2 re-probes
 
 YOUTUBE_DOMAINS = {
     "youtube.com",
@@ -2482,10 +2503,49 @@ def load_settings():
     # Start with no streams; dashboard can add them dynamically.
     return {}
 
-def save_settings(data):
-    with open(SETTINGS_FILE, "w") as f:
-        json.dump(data, f, indent=4)
+SETTINGS_WRITE_LOCK = threading.Lock()
 
+def save_settings(data):
+    with SETTINGS_WRITE_LOCK:
+        try:
+            temp_file = SETTINGS_FILE + ".tmp"
+            with open(temp_file, "w") as f:
+                json.dump(data, f, indent=4)
+                f.flush()
+                # Ensure it's on disk
+                os.fsync(f.fileno())
+            os.replace(temp_file, SETTINGS_FILE)
+        except Exception as exc:
+            app.logger.error("Failed to save settings: %s", exc)
+            raise
+
+_pending_settings_save = None
+
+
+def save_settings_debounced():
+    """Queue a settings save with a debounce delay to reduce disk I/O."""
+    global _pending_settings_save
+    if _pending_settings_save is not None:
+        _pending_settings_save.cancel()
+    _pending_settings_save = eventlet.spawn_after(2.0, _do_debounced_save)
+
+
+def _do_debounced_save():
+    global _pending_settings_save
+    _pending_settings_save = None
+    save_settings(settings)
+
+
+def flush_settings_save():
+    """Immediately perform any pending settings save before shutdown."""
+    global _pending_settings_save
+    if _pending_settings_save is not None:
+        _pending_settings_save.cancel()
+        _pending_settings_save = None
+        save_settings(settings)
+
+
+atexit.register(flush_settings_save)
 
 @app.route("/settings/export", methods=["GET"])
 def export_settings_download():
@@ -2565,7 +2625,7 @@ def import_settings():
         ensure_picsum_defaults(conf)
 
     ensure_settings_integrity(settings)
-    save_settings(settings)
+    save_settings_debounced()
 
     with ai_jobs_lock:
         for stream_id in removed:
@@ -2816,8 +2876,8 @@ class HLSCacheEntry:
     error: Optional[str] = None
 
 
-HLS_CACHE: Dict[str, HLSCacheEntry] = {}
-HLS_JOBS: Dict[str, Future] = {}
+HLS_CACHE: LRUCache = LRUCache(maxsize=256)
+HLS_JOBS: LRUCache = LRUCache(maxsize=128)
 HLS_METRICS: Dict[str, int] = {
     "hits": 0,
     "misses": 0,
@@ -2882,7 +2942,7 @@ def _update_ai_state(stream_id: str, updates: Dict[str, Any], *, persist: bool =
     state = conf[AI_STATE_KEY]
     state.update(updates)
     if persist:
-        save_settings(settings)
+        save_settings_debounced()
     _emit_ai_update(stream_id, state)
     return state
 
@@ -3227,7 +3287,7 @@ def _run_ai_generation(
             media_mode=MEDIA_MODE_AI,
             source='ai_generation',
         )
-        save_settings(settings)
+        save_settings_debounced()
         _emit_ai_update(stream_id, conf[AI_STATE_KEY])
         if job_manager.should_emit(stream_id):
             safe_emit('refresh', {'stream_id': stream_id, 'config': conf})
@@ -3247,7 +3307,7 @@ def _run_ai_generation(
 
 settings = load_settings()
 if ensure_settings_integrity(settings):
-    save_settings(settings)
+    save_settings_debounced()
 # Normalize embed metadata placeholders for existing streams
 for stream_id, conf in list(settings.items()):
     if not isinstance(stream_id, str) or stream_id.startswith("_"):
@@ -3437,6 +3497,7 @@ class StreamPlaybackState:
         self.last_sync_emit: float = 0.0
         self.sync_timer_id: Optional[str] = None
         self.sync_offset: float = 0.0
+        self._thumbnail_cache: Optional[Dict[str, Any]] = None
 
     def apply_config(self, conf: Dict[str, Any]) -> Dict[str, bool]:
         previous_should_run = self.should_run()
@@ -3643,6 +3704,7 @@ class StreamPlaybackState:
             if self.history_index < len(self.history) - 1:
                 self.history = self.history[: self.history_index + 1]
             self._append_history_entry(media, playback_mode)
+            self._thumbnail_cache = None  # Invalidate thumbnail cache on media change
         elif history_index is not None:
             self.history_index = history_index
 
@@ -3683,8 +3745,10 @@ class StreamPlaybackState:
             "error": self.error,
             "source": self.last_reason,
             "server_time": now,
-            "thumbnail": _get_runtime_thumbnail_payload(self.stream_id),
+            "thumbnail": self._thumbnail_cache or _get_runtime_thumbnail_payload(self.stream_id),
         }
+        if self._thumbnail_cache is None:
+            self._thumbnail_cache = payload.get("thumbnail")
         return payload
 
     def to_sync_payload(self, now: Optional[float] = None) -> Dict[str, Any]:
@@ -3712,9 +3776,19 @@ def _compute_video_duration_seconds(rel_path: Optional[str]) -> Optional[float]:
         return None
     if cv2 is None:
         return None
+    # Check the duration cache first (keyed on path + mtime)
+    try:
+        mtime_ns = absolute.stat().st_mtime_ns
+    except OSError:
+        mtime_ns = 0
+    cache_key = f"{rel_path}:{mtime_ns}"
+    cached = _VIDEO_DURATION_CACHE.get(cache_key)
+    if cached is not None:
+        return cached if cached > 0 else None
     capture = cv2.VideoCapture(str(absolute))
     if not capture.isOpened():
         capture.release()
+        _VIDEO_DURATION_CACHE[cache_key] = -1.0  # Cache negative result
         return None
     duration = None
     try:
@@ -3731,7 +3805,9 @@ def _compute_video_duration_seconds(rel_path: Optional[str]) -> Optional[float]:
     finally:
         capture.release()
     if duration is None or duration <= 0:
+        _VIDEO_DURATION_CACHE[cache_key] = -1.0  # Cache negative result
         return None
+    _VIDEO_DURATION_CACHE[cache_key] = float(duration)
     return float(duration)
 
 
@@ -4189,6 +4265,7 @@ class StreamPlaybackManager:
             for stream_id in due_streams:
                 payload = self._advance_stream(stream_id, reason="auto")
                 if payload:
+                    payload["switch_at"] = time.time() + SYNC_SWITCH_LEAD_SECONDS
                     self._emit_state(payload, room=stream_id)
             if sync_groups:
                 base_switch_at = time.time() + SYNC_SWITCH_LEAD_SECONDS
@@ -4201,9 +4278,9 @@ class StreamPlaybackManager:
             for payload in sync_payloads:
                 self._emit_state(payload, event=SYNC_TIME_EVENT)
             if next_deadline is None:
-                sleep_for = 1.0
+                sleep_for = STREAM_SYNC_INTERVAL_SECONDS
             else:
-                sleep_for = max(0.1, min(1.0, next_deadline - time.time()))
+                sleep_for = max(0.1, min(STREAM_SYNC_INTERVAL_SECONDS, next_deadline - time.time()))
             self._stop.wait(sleep_for)
 
 def _generate_placeholder_thumbnail(label: str) -> Image.Image:
@@ -4401,10 +4478,6 @@ def _thumbnail_image_to_bytes(image: Image.Image) -> io.BytesIO:
     image.convert('RGB').save(buffer, format='JPEG', quality=THUMBNAIL_JPEG_QUALITY, optimize=True)
     buffer.seek(0)
     return buffer
-    buffer = io.BytesIO()
-    image.convert('RGB').save(buffer, format='JPEG', quality=THUMBNAIL_JPEG_QUALITY, optimize=True)
-    buffer.seek(0)
-    return buffer
 
 def _compute_thumbnail_snapshot(stream_id: str) -> Optional[Dict[str, Any]]:
     conf = settings.get(stream_id)
@@ -4469,6 +4542,10 @@ def _thumbnail_signature(snapshot: Dict[str, Any]) -> Tuple[Any, ...]:
         snapshot.get("stream_url"),
     )
 
+_THUMBNAIL_IN_FLIGHT: Set[str] = set()
+_THUMBNAIL_IN_FLIGHT_LOCK = threading.Lock()
+
+
 def _refresh_stream_thumbnail(stream_id: str, snapshot: Optional[Dict[str, Any]] = None, *, force: bool = False) -> Optional[Dict[str, Any]]:
     """Ensure a cached thumbnail exists for the stream and return client metadata."""
     info = snapshot if snapshot is not None else _compute_thumbnail_snapshot(stream_id)
@@ -4480,68 +4557,68 @@ def _refresh_stream_thumbnail(stream_id: str, snapshot: Optional[Dict[str, Any]]
         existing = entry.get("thumbnail")
         if not force and isinstance(existing, dict) and existing.get("_signature") == signature:
             return _public_thumbnail_payload(existing)
-    image_obj, placeholder = _render_thumbnail_image(info)
-    if image_obj is None:
-        return None
-    buffer = _thumbnail_image_to_bytes(image_obj)
-    binary = buffer.getvalue()
-    updated_ts = time.time()
-    record: Dict[str, Any] = {
-        "url": None,
-        "placeholder": placeholder,
+
+    # Placeholder while generating
+    placeholder_payload = {
+        "url": _thumbnail_public_url(stream_id) if existing else None,
+        "placeholder": info.get("placeholder", "Loading..."),
         "badge": info.get("badge"),
-        "updated_at": _runtime_timestamp_to_iso(updated_ts),
-        "_signature": signature,
-        "_updated_ts": updated_ts,
+        "updated_at": existing.get("updated_at") if isinstance(existing, dict) else None,
     }
-    saved_path: Optional[Path] = None
-    data_url: Optional[str] = None
 
-    cache_dir = _ensure_thumbnail_dir()
-    if cache_dir is not None:
-        target_path = _thumbnail_disk_path(stream_id)
-        temp_path = target_path.with_suffix(".tmp")
+    with _THUMBNAIL_IN_FLIGHT_LOCK:
+        if stream_id in _THUMBNAIL_IN_FLIGHT:
+            return placeholder_payload
+        _THUMBNAIL_IN_FLIGHT.add(stream_id)
+
+    def _async_generate_thumbnail():
         try:
-            with open(temp_path, "wb") as fh:
-                fh.write(binary)
-            os.replace(temp_path, target_path)
-            saved_path = target_path
-            record["url"] = _thumbnail_public_url(stream_id)
-        except OSError as exc:  # pragma: no cover - filesystem differences best effort
-            logger.debug("Failed to persist thumbnail for %s: %s", stream_id, exc)
-            try:
-                if temp_path.exists():
-                    temp_path.unlink()
-            except OSError:
-                pass
-
-    if saved_path is None:
-        encoded = base64.b64encode(binary).decode("ascii")
-        data_url = f"data:image/jpeg;base64,{encoded}"
-        record["url"] = data_url
-
-    if saved_path is not None:
-        record["_path"] = str(saved_path)
-    if data_url is not None:
-        record["_data_url"] = data_url
-
-    with STREAM_RUNTIME_LOCK:
-        entry = STREAM_RUNTIME_STATE.setdefault(stream_id, {})
-        entry["thumbnail"] = record
-
-    payload = _public_thumbnail_payload(record)
-    if payload:
-        safe_emit(
-            "thumbnail_update",
-            {
-                "stream": stream_id,
-                "url": record["url"],
+            image_obj, placeholder = _render_thumbnail_image(info)
+            if image_obj is None:
+                return
+            buffer = _thumbnail_image_to_bytes(image_obj)
+            binary = buffer.getvalue()
+            updated_ts = time.time()
+            record: Dict[str, Any] = {
+                "url": None,
                 "placeholder": placeholder,
                 "badge": info.get("badge"),
-                "updated_at": payload.get("updated_at"),
-            },
-        )
-    return payload
+                "updated_at": _runtime_timestamp_to_iso(updated_ts),
+                "_signature": signature,
+                "_updated_ts": updated_ts,
+            }
+            cache_dir = _ensure_thumbnail_dir()
+            if cache_dir is not None:
+                target_path = _thumbnail_disk_path(stream_id)
+                temp_path = target_path.with_suffix(".tmp")
+                try:
+                    with open(temp_path, "wb") as fh:
+                        fh.write(binary)
+                    os.replace(temp_path, target_path)
+                    record["url"] = _thumbnail_public_url(stream_id)
+                    with STREAM_RUNTIME_LOCK:
+                        STREAM_RUNTIME_STATE.setdefault(stream_id, {})["thumbnail"] = record
+                        # Update the cached payload on the playback state if it exists
+                        if playback_manager is not None:
+                            state = playback_manager._states.get(stream_id)
+                            if state is not None:
+                                state._thumbnail_cache = _public_thumbnail_payload(record)
+                    # Emit update to clients
+                    safe_emit("thumbnail_update", {
+                        "stream": stream_id,
+                        "url": record["url"],
+                        "placeholder": placeholder,
+                        "badge": info.get("badge"),
+                        "updated_at": record["updated_at"],
+                    })
+                except OSError as exc:
+                    logger.debug("Failed to persist thumbnail for %s: %s", stream_id, exc)
+        finally:
+            with _THUMBNAIL_IN_FLIGHT_LOCK:
+                _THUMBNAIL_IN_FLIGHT.discard(stream_id)
+
+    eventlet.spawn(_async_generate_thumbnail)
+    return placeholder_payload
 ensure_ai_presets_storage()
 # Backfill defaults for existing stream entries
 for k, v in list(settings.items()):
@@ -4662,10 +4739,35 @@ def get_subfolders(hide_nsfw: bool = False) -> List[str]:
 
 def get_folder_inventory(hide_nsfw: bool = False) -> List[Dict[str, Any]]:
     inventory: List[Dict[str, Any]] = []
-    for name in get_subfolders(hide_nsfw=hide_nsfw):
-        media_entries = list_media(name, hide_nsfw=hide_nsfw)
-        has_images = any(entry.get("kind") == "image" for entry in media_entries)
-        has_videos = any(entry.get("kind") == "video" for entry in media_entries)
+    # Ensure "all" is refreshed (scans every root once)
+    refresh_image_cache("all")
+
+    # Extract folder-level stats from the "all" media list
+    with IMAGE_CACHE_LOCK:
+        entry = IMAGE_CACHE.get("all")
+        if not entry:
+            return []
+        all_media = entry.get("media", [])
+
+    stats = {}
+    for item in all_media:
+        folder = item.get("folder", "all")
+        kind = item.get("kind")
+        if hide_nsfw and _path_contains_nsfw(folder):
+            continue
+        row = stats.setdefault(folder, {"has_images": False, "has_videos": False})
+        if kind == "image":
+            row["has_images"] = True
+        elif kind == "video":
+            row["has_videos"] = True
+
+    # Use sorted names for consistency, starting with "all"
+    names = sorted(stats.keys())
+    if "all" in stats:
+        names.remove("all")
+        names.insert(0, "all")
+
+    for name in names:
         if "/" in name:
             display_name = name.split("/", 1)[1]
         else:
@@ -4673,8 +4775,7 @@ def get_folder_inventory(hide_nsfw: bool = False) -> List[Dict[str, Any]]:
         inventory.append({
             "name": name,
             "display_name": display_name,
-            "has_images": has_images,
-            "has_videos": has_videos,
+            **stats[name]
         })
     return inventory
 
@@ -5290,7 +5391,7 @@ def add_stream():
             )
             if playback_manager is not None:
                 playback_manager.update_stream_config(new_id, settings[new_id])
-            save_settings(settings)
+            save_settings_debounced()
             if auto_scheduler is not None:
                 auto_scheduler.reschedule(new_id)
             safe_emit("streams_changed", {"action": "added", "stream_id": new_id})
@@ -5310,7 +5411,7 @@ def delete_stream(stream_id):
             STREAM_RUNTIME_STATE.pop(stream_id, None)
         if playback_manager is not None:
             playback_manager.remove_stream(stream_id)
-        save_settings(settings)
+        save_settings_debounced()
         if auto_scheduler is not None:
             auto_scheduler.remove(stream_id)
         if picsum_scheduler is not None:
@@ -5510,7 +5611,9 @@ def update_stream_settings(stream_id):
             elif conf["mode"] == "random" and conf.get("video_playback_mode") == "loop":
                 conf["video_playback_mode"] = "duration"
 
-    _refresh_embed_metadata(stream_id, conf, force=stream_url_changed or media_mode_changed)
+    needs_metadata_refresh = stream_url_changed or media_mode_changed or not conf.get("embed_metadata")
+    if needs_metadata_refresh:
+        _refresh_embed_metadata(stream_id, conf, force=stream_url_changed or media_mode_changed)
 
     mode_requested = data.get("mode")
     if (
@@ -5547,7 +5650,7 @@ def update_stream_settings(stream_id):
         )
         if sync_changed and sync_timer_id:
             playback_manager.sync_timer_group(sync_timer_id, force_refresh=True)
-    save_settings(settings)
+    save_settings_debounced()
     if auto_scheduler is not None:
         auto_scheduler.reschedule(stream_id)
     if picsum_scheduler is not None:
@@ -5611,7 +5714,7 @@ def update_stream_timer(stream_id: str):
             picsum_state["last_auto_trigger"] = last_label
         conf[PICSUM_SETTINGS_KEY] = picsum_state
 
-    save_settings(settings)
+    save_settings_debounced()
     return jsonify({
         "status": "success",
         "timer": refreshed_config,
@@ -5761,7 +5864,7 @@ def refresh_picsum_image():
     if picsum_scheduler is not None:
         picsum_scheduler.reschedule(stream_id, base_time=time.time())
 
-    save_settings(settings)
+    save_settings_debounced()
 
     conf = settings.get(stream_id, conf)
     sanitized = result["settings"]
@@ -5826,7 +5929,7 @@ def update_ai_defaults():
         refreshed_presets[name] = _sanitize_ai_settings(preset, defaults=AI_FALLBACK_DEFAULTS)
     settings[AI_PRESETS_KEY] = _sorted_presets(refreshed_presets)
 
-    save_settings(settings)
+    save_settings_debounced()
     return jsonify({"status": "success", "defaults": new_defaults})
 
 @app.route("/ai/presets", methods=["GET"])
@@ -5858,7 +5961,7 @@ def create_ai_preset():
     updated = dict(presets)
     updated[name] = sanitized
     settings[AI_PRESETS_KEY] = _sorted_presets(updated)
-    save_settings(settings)
+    save_settings_debounced()
     return jsonify({"status": "saved", "preset": {"name": name, "settings": deepcopy(sanitized)}})
 
 
@@ -5890,7 +5993,7 @@ def update_ai_preset(preset_name: str):
     updated.pop(name, None)
     updated[target_name] = sanitized
     settings[AI_PRESETS_KEY] = _sorted_presets(updated)
-    save_settings(settings)
+    save_settings_debounced()
     return jsonify({"status": "updated", "preset": {"name": target_name, "settings": deepcopy(sanitized)}})
 
 
@@ -5903,7 +6006,7 @@ def delete_ai_preset(preset_name: str):
     updated = dict(presets)
     updated.pop(name, None)
     settings[AI_PRESETS_KEY] = _sorted_presets(updated)
-    save_settings(settings)
+    save_settings_debounced()
     return jsonify({"status": "deleted"})
 
 @app.route('/ai/loras')
@@ -5979,7 +6082,7 @@ def create_tag():
     if existing is None:
         tags.append(normalized)
         tags.sort(key=str.lower)
-        save_settings(settings)
+        save_settings_debounced()
         canonical = normalized
     else:
         canonical = existing
@@ -5998,15 +6101,19 @@ def delete_tag(tag_name: str):
         return jsonify({"error": "Tag not found"}), 404
     idx, canonical = entry
     canon_key = canonical.casefold()
-    for sid, conf in settings.items():
+
+    # Create a snapshot to avoid concurrent modification issues
+    current_settings = list(settings.items())
+    for sid, conf in current_settings:
         if sid.startswith("_") or not isinstance(conf, dict):
             continue
         stream_tags = conf.get(TAG_KEY) or []
         for tag in stream_tags:
             if isinstance(tag, str) and tag.casefold() == canon_key:
                 return jsonify({"error": "Tag is in use"}), 409
+
     tags.pop(idx)
-    save_settings(settings)
+    save_settings_debounced()
     return jsonify({"status": "deleted", "tags": tags})
 
 
@@ -6081,7 +6188,7 @@ def _queue_ai_generation(stream_id: str, ai_settings: Dict[str, Any], *, trigger
         queued_state['last_auto_trigger'] = _format_timer_label(datetime.now())
     queued_state['last_auto_error'] = None
 
-    save_settings(settings)
+    save_settings_debounced()
     _emit_ai_update(stream_id, queued_state, job=ai_jobs[stream_id])
     job_manager.update_status(manager_id, status='queued')
     if job_manager.should_emit(stream_id):
@@ -6103,12 +6210,14 @@ def _queue_ai_generation(stream_id: str, ai_settings: Dict[str, Any], *, trigger
     return {'status': 'queued', 'state': conf[AI_STATE_KEY], 'job': ai_jobs[stream_id]}
 
 
-class AutoGenerateScheduler:
-    def __init__(self) -> None:
+class BaseScheduler:
+    """Generic interval-based scheduler for background tasks."""
+    def __init__(self, name: str):
+        self.name = name
         self._lock = threading.Lock()
         self._next_run: Dict[str, float] = {}
         self._stop = threading.Event()
-        self._thread = threading.Thread(target=self._loop, name='AutoGenerateScheduler', daemon=True)
+        self._thread = threading.Thread(target=self._loop, name=name, daemon=True)
         self._thread.start()
 
     def stop(self) -> None:
@@ -6118,13 +6227,42 @@ class AutoGenerateScheduler:
 
     def reschedule_all(self) -> None:
         for stream_id in list(settings.keys()):
-            if stream_id.startswith('_'):
+            if not isinstance(stream_id, str) or stream_id.startswith('_'):
                 continue
             self.reschedule(stream_id)
 
     def remove(self, stream_id: str) -> None:
         with self._lock:
             self._next_run.pop(stream_id, None)
+        self._on_remove(stream_id)
+
+    def _loop(self) -> None:
+        while not self._stop.is_set():
+            now = time.time()
+            due: List[str] = []
+            with self._lock:
+                for stream_id, next_ts in list(self._next_run.items()):
+                    if next_ts <= now:
+                        due.append(stream_id)
+            for stream_id in due:
+                self._trigger_stream(stream_id)
+            self._stop.wait(5.0)
+
+    def reschedule(self, stream_id: str, *, base_time: Optional[float] = None) -> None:
+        raise NotImplementedError
+
+    def _trigger_stream(self, stream_id: str) -> None:
+        raise NotImplementedError
+
+    def _on_remove(self, stream_id: str) -> None:
+        pass
+
+
+class AutoGenerateScheduler(BaseScheduler):
+    def __init__(self) -> None:
+        super().__init__('AutoGenerateScheduler')
+
+    def _on_remove(self, stream_id: str) -> None:
         conf = settings.get(stream_id)
         if isinstance(conf, dict):
             ensure_timer_defaults(conf)
@@ -6193,18 +6331,6 @@ class AutoGenerateScheduler:
         if changed:
             _emit_ai_update(stream_id, state)
 
-    def _loop(self) -> None:
-        while not self._stop.is_set():
-            now = time.time()
-            due: List[str] = []
-            with self._lock:
-                for stream_id, next_ts in list(self._next_run.items()):
-                    if next_ts <= now:
-                        due.append(stream_id)
-            for stream_id in due:
-                self._trigger_stream(stream_id)
-            self._stop.wait(5.0)
-
     def _trigger_stream(self, stream_id: str) -> None:
         conf = settings.get(stream_id)
         if not isinstance(conf, dict):
@@ -6257,32 +6383,11 @@ if auto_scheduler is None:
 # Picsum auto scheduler ------------------------------------------------------
 
 
-class PicsumAutoScheduler:
+class PicsumAutoScheduler(BaseScheduler):
     def __init__(self) -> None:
-        self._lock = threading.Lock()
-        self._next_run: Dict[str, float] = {}
-        self._stop = threading.Event()
-        self._thread = threading.Thread(
-            target=self._loop,
-            name="PicsumAutoScheduler",
-            daemon=True,
-        )
-        self._thread.start()
+        super().__init__('PicsumAutoScheduler')
 
-    def stop(self) -> None:
-        self._stop.set()
-        if self._thread.is_alive():
-            self._thread.join(timeout=2.0)
-
-    def reschedule_all(self) -> None:
-        for stream_id, conf in settings.items():
-            if stream_id.startswith("_") or not isinstance(conf, dict):
-                continue
-            self.reschedule(stream_id)
-
-    def remove(self, stream_id: str) -> None:
-        with self._lock:
-            self._next_run.pop(stream_id, None)
+    def _on_remove(self, stream_id: str) -> None:
         conf = settings.get(stream_id)
         if isinstance(conf, dict):
             ensure_timer_defaults(conf)
@@ -6333,18 +6438,6 @@ class PicsumAutoScheduler:
         picsum["next_auto_trigger"] = _format_timer_label(next_dt)
         _log_timer_schedule(stream_id, timer_mode, next_dt, timer.offset_minutes())
 
-    def _loop(self) -> None:
-        while not self._stop.is_set():
-            now = time.time()
-            due: List[str] = []
-            with self._lock:
-                for stream_id, next_ts in list(self._next_run.items()):
-                    if next_ts <= now:
-                        due.append(stream_id)
-            for stream_id in due:
-                self._trigger_stream(stream_id)
-            self._stop.wait(5.0)
-
     def _trigger_stream(self, stream_id: str) -> None:
         conf = settings.get(stream_id)
         if not isinstance(conf, dict):
@@ -6372,7 +6465,7 @@ class PicsumAutoScheduler:
         if timer_mode == MEDIA_MODE_PICSUM and timer.is_enabled():
             timer.mark_trigger(when=moment)
         self.reschedule(stream_id, base_time=time.time())
-        save_settings(settings)
+        save_settings_debounced()
         _broadcast_picsum_update(
             stream_id,
             conf,
@@ -6765,7 +6858,7 @@ def _apply_timer_snap_setting(enabled: bool) -> Dict[str, Dict[str, Optional[str
             "picsum_next": picsum_conf.get("next_auto_trigger") if isinstance(picsum_conf, dict) else None,
         }
 
-    save_settings(settings)
+    save_settings_debounced()
     return summary
 
 
@@ -6838,7 +6931,7 @@ def sync_timers_collection():
     entry = _sanitize_sync_timer_entry(timer_id, {"label": label, "interval": interval})
     timers[timer_id] = entry
     settings[SYNC_TIMERS_KEY] = timers
-    save_settings(settings)
+    save_settings_debounced()
     _emit_sync_timer_update()
     return jsonify({"timer": _sync_timer_payload(timer_id, entry), "timers": get_sync_timers_snapshot()}), 201
 
@@ -6870,7 +6963,7 @@ def sync_timer_item(timer_id: str):
                 if playback_manager is not None:
                     playback_manager.update_stream_config(stream_id, conf)
                 safe_emit("refresh", {"stream_id": stream_id, "config": conf, "tags": get_global_tags()})
-        save_settings(settings)
+        save_settings_debounced()
         _emit_sync_timer_update()
         return jsonify({"status": "deleted", "affected_streams": affected, "timers": get_sync_timers_snapshot()})
 
@@ -6884,7 +6977,7 @@ def sync_timer_item(timer_id: str):
     updated = _sanitize_sync_timer_entry(timer_id, merged)
     timers[timer_id] = updated
     settings[SYNC_TIMERS_KEY] = timers
-    save_settings(settings)
+    save_settings_debounced()
     if playback_manager is not None:
         for stream_id, conf in settings.items():
             if not isinstance(conf, dict) or stream_id.startswith("_"):
@@ -7280,7 +7373,7 @@ def groups_collection():
         settings["_groups"][name] = {"streams": cleaned, "layout": layout}
     else:
         settings["_groups"][name] = cleaned
-    save_settings(settings)
+    save_settings_debounced()
     safe_emit("mosaic_refresh", {"group": name})
     return jsonify({"status": "ok", "group": {name: settings["_groups"][name]}})
 
@@ -7289,7 +7382,7 @@ def groups_collection():
 def groups_delete(name):
     if "_groups" in settings and name in settings["_groups"]:
         del settings["_groups"][name]
-        save_settings(settings)
+        save_settings_debounced()
         return jsonify({"status": "deleted"})
     return jsonify({"error": "not found"}), 404
 
@@ -7652,7 +7745,7 @@ def notes():
         return jsonify({"notes": settings.get("_notes", "")})
     data = request.get_json(silent=True) or {}
     settings["_notes"] = data.get("notes", "")
-    save_settings(settings)
+    save_settings_debounced()
     return jsonify({"status": "saved"})
 
 

@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8"/>
@@ -1765,9 +1765,14 @@
       removeBtn.textContent = 'Remove';
       if (count > 0) {
         removeBtn.disabled = true;
-        removeBtn.title = 'Tag is in use';
+        removeBtn.title = 'Tag is in use by ' + count + ' stream' + (count === 1 ? '' : 's');
+        removeBtn.style.opacity = '0.5';
+        removeBtn.style.cursor = 'not-allowed';
       } else {
-        removeBtn.addEventListener('click', () => removeGlobalTag(tag));
+        removeBtn.addEventListener('click', () => {
+          console.log('[TagManager] Requesting removal of tag:', tag);
+          removeGlobalTag(tag);
+        });
       }
       row.appendChild(chip);
       row.appendChild(countEl);
@@ -1778,18 +1783,24 @@
 
   function removeGlobalTag(tag) {
     const encoded = encodeURIComponent(tag);
-    fetch(`/tags/${encoded}`, { method: 'DELETE' })
-      .then(res => res.json().then(data => ({ ok: res.ok, data })))
-      .then(result => {
-        if (result.ok) {
-          const tags = Array.isArray(result.data.tags) ? result.data.tags : [];
-          syncGlobalTags(tags);
-          showNotification('Tag removed');
-        } else {
-          showNotification(result.data.error || 'Unable to remove tag');
+    return fetch(`/tags/${encoded}`, { method: 'DELETE' })
+      .then(res => {
+        if (!res.ok) {
+          return res.json().catch(() => ({})).then(data => {
+            throw new Error(data.error || `Server returned ${res.status}`);
+          });
         }
+        return res.json();
       })
-      .catch(() => showNotification('Unable to remove tag'));
+      .then(result => {
+        const tags = Array.isArray(result.tags) ? result.tags : [];
+        syncGlobalTags(tags);
+        showNotification('Tag removed successfully');
+      })
+      .catch(err => {
+        console.error('[TagManager] Removal failed:', err);
+        showNotification('Unable to remove tag: ' + err.message);
+      });
   }
 
   function syncGlobalTags(tags) {
@@ -4418,7 +4429,14 @@
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
     })
-    .then(res => res.json())
+    .then(res => {
+      if (!res.ok) {
+        return res.json().catch(() => ({})).then(data => {
+          throw new Error(data.error || `Server returned ${res.status}`);
+        });
+      }
+      return res.json();
+    })
     .then(data => {
       if (data.status === 'success') {
         showNotification(`Updated settings for ${streamId}`);
@@ -4481,7 +4499,6 @@
               offsetInput.value = Number.isFinite(offsetVal) ? String(offsetVal) : '0';
               offsetInput.disabled = !(syncSelect && syncSelect.value);
             }
-            applyModeState(card, updatedMediaMode, effectiveMode, urlInputEl ? urlInputEl.value : '');
           }
           if (data.new_config && data.new_config.image_quality !== undefined) {
             const qualitySelect = card.querySelector('.image-quality-select');
@@ -4512,6 +4529,9 @@
             if (slider) slider.value = String(amount);
             if (valEl) valEl.textContent = `${amount}%`;
           }
+          if (Array.isArray(data.tags)) {
+            syncGlobalTags(data.tags);
+          }
           if (data.new_config && data.new_config.tags !== undefined) {
             const tagList = Array.isArray(data.new_config.tags) ? data.new_config.tags : [];
             const previousTags = cardTagsMap.has(card) ? (cardTagsMap.get(card) || []).slice() : [];
@@ -4519,12 +4539,9 @@
             const tagsChanged = !tagsEqual(previousTags, nextTags);
             if (tagsChanged) {
               applyFiltersAndSorting({ anchorCard: card });
-              renderTagManager();
             }
           }
-          if (Array.isArray(data.tags)) {
-            syncGlobalTags(data.tags);
-          }
+          renderTagManager();
 
           if (data.new_config && data.new_config.media_mode !== undefined) {
             updatedMediaMode = String(data.new_config.media_mode || 'image').toLowerCase();
@@ -4588,15 +4605,16 @@
         }
         if (opts.onSuccess) opts.onSuccess(data, card);
       } else {
-        console.error(data.error || 'Unknown error updating settings.');
-        showNotification(data.error || 'Error updating settings');
+        const errMsg = data.error || 'Unknown error updating settings.';
+        console.error('[Settings] Error response:', errMsg);
+        showNotification(errMsg);
         if (opts.onError) opts.onError(data);
       }
       return data;
     })
     .catch(err => {
-      console.error('Error saving settings:', err);
-      showNotification('Error updating settings');
+      console.error('[Settings] Fetch failure:', err);
+      showNotification('Communication error: ' + err.message);
       if (opts.onError) opts.onError(err);
       return null;
     })

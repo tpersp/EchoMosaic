@@ -11,6 +11,7 @@
     return Math.min(Math.max(value, 60), 1000);
   })();
   const previewStates = new WeakMap();
+  const loadingNodes = new Set();
 
   const state = {
     currentPath: "",
@@ -339,8 +340,12 @@
 
   async function ensureTreeChildren(detailsEl, path) {
     if (!detailsEl || !path) return;
+    if (detailsEl.dataset.loaded === "true" || loadingNodes.has(path)) return;
+
     const container = detailsEl.querySelector(".tree-children");
     if (!container) return;
+    
+    loadingNodes.add(path);
     detailsEl.dataset.path = path;
     clearElement(container);
     try {
@@ -354,6 +359,8 @@
     } catch (err) {
       container.textContent = "Unable to load folders";
       console.error(err);
+    } finally {
+      loadingNodes.delete(path);
     }
   }
 
@@ -648,7 +655,9 @@
     const rootNode = treeContainer.querySelector(`.tree-node[data-path="${rootPath}"]`);
     if (rootNode) {
       rootNode.open = true;
-      await ensureTreeChildren(rootNode, rootPath);
+      if (rootNode.dataset.loaded !== "true") {
+        await ensureTreeChildren(rootNode, rootPath);
+      }
     }
     const segments = [];
     for (const segment of info.segments) {
@@ -657,7 +666,9 @@
       const details = treeContainer.querySelector(`.tree-node[data-path="${segmentPath}"]`);
       if (details) {
         details.open = true;
-        await ensureTreeChildren(details, segmentPath);
+        if (details.dataset.loaded !== "true") {
+          await ensureTreeChildren(details, segmentPath);
+        }
       }
     }
     highlightTreeSelection();
