@@ -24,6 +24,28 @@ from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple, Union, Set
 from urllib.parse import quote, urlparse, parse_qs
+from collections import OrderedDict
+
+class LRUCache:
+    def __init__(self, maxsize: int) -> None:
+        self.cache: OrderedDict[Any, Any] = OrderedDict()
+        self.maxsize = maxsize
+        self.lock = threading.Lock()
+
+    def get(self, key: Any, default: Any = None) -> Any:
+        with self.lock:
+            if key in self.cache:
+                self.cache.move_to_end(key)
+                return self.cache[key]
+            return default
+
+    def __setitem__(self, key: Any, value: Any) -> None:
+        with self.lock:
+            if key in self.cache:
+                self.cache.move_to_end(key)
+            self.cache[key] = value
+            if len(self.cache) > self.maxsize:
+                self.cache.popitem(last=False)
 
 try:
     import engineio.payload  # type: ignore[import]
@@ -304,7 +326,7 @@ THUMBNAIL_JPEG_QUALITY = 60
 IMAGE_CACHE_TIMEOUT = 60 * 60 * 24 * 7  # One week default for conditional responses
 IMAGE_CACHE_CONTROL_MAX_AGE = 31536000  # One year for browser Cache-Control headers
 BAD_MEDIA_LOG_TTL = 60 * 10
-_BAD_MEDIA_LOG_CACHE: Dict[str, float] = {}
+_BAD_MEDIA_LOG_CACHE = LRUCache(maxsize=1024)
 
 IMAGE_QUALITY_CHOICES = {"auto", "thumb", "medium", "full"}
 
@@ -576,7 +598,7 @@ def _require_media_edit() -> None:
 
 
 # Cache image paths per folder so we can serve repeated requests without rescanning the disk.
-IMAGE_CACHE: Dict[str, Dict[str, Any]] = {}
+IMAGE_CACHE = LRUCache(maxsize=64)
 
 
 def _media_root_available(root: config_manager.MediaRoot) -> bool:
@@ -1140,10 +1162,10 @@ YOUTUBE_DOMAINS = {
 }
 YOUTUBE_OEMBED_ENDPOINT = "https://www.youtube.com/oembed"
 YOUTUBE_OEMBED_CACHE_TTL = 20 * 60  # 20 minutes
-YOUTUBE_OEMBED_CACHE: Dict[Tuple[str, ...], Dict[str, Any]] = {}
+YOUTUBE_OEMBED_CACHE = LRUCache(maxsize=256)
 YOUTUBE_OEMBED_CACHE_LOCK = threading.Lock()
 YOUTUBE_LIVE_PROBE_CACHE_TTL = 15 * 60  # 15 minutes
-YOUTUBE_LIVE_PROBE_CACHE: Dict[Tuple[str, ...], Dict[str, Any]] = {}
+YOUTUBE_LIVE_PROBE_CACHE = LRUCache(maxsize=256)
 YOUTUBE_LIVE_PROBE_CACHE_LOCK = threading.Lock()
 YOUTUBE_LIVE_PROBE_MAX_BYTES = 30_000
 YOUTUBE_LIVE_HTML_MARKERS = (
@@ -1357,20 +1379,8 @@ def _invalidate_media_cache(path: Optional[str]) -> None:
 
 
 def initialize_image_cache() -> None:
-    """Warm the cache for the root folder and any existing subfolders on startup."""
+    """Warm the cache for the root folder on startup."""
     refresh_image_cache("all", force=True)
-    for root in AVAILABLE_MEDIA_ROOTS:
-        try:
-            with os.scandir(root.path) as scan:
-                for entry in scan:
-                    if not entry.is_dir():
-                        continue
-                    if _should_ignore_media_name(entry.name):
-                        continue
-                    folder_key = _build_virtual_media_path(root.alias, entry.name)
-                    refresh_image_cache(folder_key, force=True)
-        except OSError:
-            continue
 
 
 initialize_image_cache()

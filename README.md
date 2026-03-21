@@ -30,14 +30,14 @@ Python dependencies live in `requirements.txt` and include Flask, Flask-SocketIO
 ## Installation
 
 ### Quick install script (Debian/Ubuntu)
-The `install.sh` script installs Python prerequisites, copies the project to a target directory, builds a virtual environment, and registers a systemd service.
+The `install.sh` script installs Python prerequisites, copies the project to a target directory, builds a virtual environment, and registers a local `systemd --user` service.
 
-```
+```bash
 chmod +x install.sh
-sudo ./install.sh
+./install.sh
 ```
 
-During the prompts you can choose the service account, install path (default `/opt/echomosaic`), listening port, and whether to mount a CIFS share for media. The script also updates `MEDIA_PATHS` inside `config.json` to point at the chosen location.
+During the prompts you can choose the install path (default `~/.local/share/echomosaic`), listening port, and whether to mount a CIFS share for media. The script also updates `MEDIA_PATHS` inside `config.json` to point at the chosen location. Since it installs purely into your local user space, you avoid all `root` permission errors when uploading media via the dashboard.
 
 ### Manual setup
 If you prefer to manage everything yourself:

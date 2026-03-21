@@ -115,6 +115,6 @@ echo -e "\nUpdating Python dependencies..."
 "$INSTALL_DIR/venv/bin/pip" install --upgrade -r requirements.txt
 
 echo -e "\nRestarting $SERVICE_NAME..."
-sudo systemctl restart "$SERVICE_NAME"
+systemctl --user restart "$SERVICE_NAME"
 
 echo -e "\nUpdate complete."

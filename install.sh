@@ -11,10 +11,12 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 default_user="$(whoami)"
 read -r -p "Enter the user account that should run the service [${default_user}]: " SERVICE_USER
 SERVICE_USER="${SERVICE_USER:-$default_user}"
-# Prompt for installation directory (default: /opt/echomosaic)
-default_install_dir="/opt/echomosaic"
+# Prompt for installation directory (default: ~/.local/share/echomosaic)
+default_install_dir="$HOME/.local/share/echomosaic"
 read -r -p "Enter installation directory [${default_install_dir}]: " INSTALL_DIR
 INSTALL_DIR="${INSTALL_DIR:-$default_install_dir}"
+# Expand tilde if present
+INSTALL_DIR="${INSTALL_DIR/#\~/$HOME}"
 # Prompt for HTTP port (default: 5000)
 default_port="5000"
 read -r -p "Enter the port the server should listen on [${default_port}]: " PORT
@@ -25,26 +27,25 @@ default_service="echomosaic.service"
 read -r -p "Enter the systemd service name [${default_service}]: " SERVICE_NAME
 SERVICE_NAME="${SERVICE_NAME:-$default_service}"
 
-echo "\nInstalling system packages…"
+echo -e "\nInstalling system packages…"
 sudo apt-get update
-sudo apt-get install -y python3 python3-venv python3-pip ffmpeg
-echo "\nCopying files to ${INSTALL_DIR}…"
-sudo mkdir -p "$INSTALL_DIR"
+sudo apt-get install < /dev/null -y python3 python3-venv python3-pip ffmpeg
+echo -e "\nCopying files to ${INSTALL_DIR}…"
+mkdir -p "$INSTALL_DIR"
 # Copy everything in this repository into the installation directory.  We avoid
 # copying any pre‑existing virtual environment directory.
-sudo cp -r "$SCRIPT_DIR/." "$INSTALL_DIR/"
-sudo chown -R "$SERVICE_USER":"$SERVICE_USER" "$INSTALL_DIR"
-echo "\nCreating virtual environment…"
-sudo -u "$SERVICE_USER" python3 -m venv "$INSTALL_DIR/venv"
-sudo -u "$SERVICE_USER" "$INSTALL_DIR/venv/bin/pip" install --upgrade pip
-sudo -u "$SERVICE_USER" "$INSTALL_DIR/venv/bin/pip" install -r "$INSTALL_DIR/requirements.txt"
+cp -r "$SCRIPT_DIR/." "$INSTALL_DIR/"
+echo -e "\nCreating virtual environment…"
+python3 -m venv "$INSTALL_DIR/venv"
+"$INSTALL_DIR/venv/bin/pip" install --upgrade pip
+"$INSTALL_DIR/venv/bin/pip" install -r "$INSTALL_DIR/requirements.txt"
 # == Step: (Optional) Configure MEDIA_PATHS (CIFS or local) ==
 # MEDIA_PATHS lives in config.json (or config.default.json as a fallback).
 # We either mount a CIFS share (default //192.168.1.0/images -> /mnt/viewers)
 # and point MEDIA_PATHS there, or set a local folder and point MEDIA_PATHS to that.
 update_config() {
   local target_path="$1"
-  sudo -u "$SERVICE_USER" python3 - "$INSTALL_DIR" "$target_path" "$SERVICE_NAME" <<'PY'
+  python3 - "$INSTALL_DIR" "$target_path" "$SERVICE_NAME" <<'PY'
 import json
 import sys
 from pathlib import Path
@@ -82,7 +83,7 @@ if [[ "$mount_answer" =~ ^[Yy]$ ]]; then
   # Ensure cifs-utils is available
   if ! dpkg -s cifs-utils >/dev/null 2>&1; then
     echo "Installing cifs-utils..."
-    sudo apt-get update && sudo apt-get install -y cifs-utils
+    sudo apt-get update && sudo apt-get install < /dev/null -y cifs-utils
   fi
   default_share="//192.168.1.0/images"
   default_mount="/mnt/viewers"
@@ -140,30 +141,34 @@ else
   echo
   echo "No CIFS share selected. Using a local folder for images."
   LOCAL_DIR="$INSTALL_DIR/media"
-  sudo mkdir -p "$LOCAL_DIR"
-  sudo chown "$SERVICE_USER:$SERVICE_USER" "$LOCAL_DIR"
+  mkdir -p "$LOCAL_DIR"
   echo "Setting MEDIA_PATHS in config.json -> $LOCAL_DIR"
   update_config "$LOCAL_DIR"
 fi
-echo "\nCreating systemd service…"
-SERVICE_PATH="/etc/systemd/system/${SERVICE_NAME}"
-sudo tee "$SERVICE_PATH" > /dev/null <<EOF
+echo -e "\nCreating systemd user service…"
+SERVICE_DIR="$HOME/.config/systemd/user"
+mkdir -p "$SERVICE_DIR"
+SERVICE_PATH="$SERVICE_DIR/${SERVICE_NAME}"
+cat > "$SERVICE_PATH" <<EOF
 [Unit]
 Description=EchoMosaic Web Application
 After=network.target
 [Service]
 Type=simple
-User=$SERVICE_USER
 WorkingDirectory=$INSTALL_DIR
-Environment="PATH=$INSTALL_DIR/venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+Environment="PATH=$INSTALL_DIR/venv/bin:$PATH"
 ExecStart=$INSTALL_DIR/venv/bin/gunicorn -w 1 -k eventlet --bind 0.0.0.0:$PORT --timeout 120 --graceful-timeout 30 --keep-alive 5 --no-sendfile app:app
 Restart=always
 [Install]
-WantedBy=multi-user.target
+WantedBy=default.target
 EOF
-echo "\nEnabling and starting systemd service…"
-sudo systemctl daemon-reload
-sudo systemctl enable "$SERVICE_NAME"
-sudo systemctl restart "$SERVICE_NAME"
+echo -e "\nEnabling and starting systemd user service…"
+systemctl --user daemon-reload
+systemctl --user enable "$SERVICE_NAME"
+systemctl --user restart "$SERVICE_NAME"
+if ! loginctl show-user "$USER" | grep -q "Linger=yes"; then
+  echo "Enabling linger for user $USER so the service runs on boot…"
+  sudo loginctl enable-linger "$USER" || true
+fi
 echo "\nInstallation complete!"
 echo "The EchoMosaic Dashboard should now be accessible at http://<your-host>:$PORT/"
