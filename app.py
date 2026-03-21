@@ -120,7 +120,6 @@ from picsum import (
     assign_new_picsum_to_stream,
     configure_socketio,
 )
-from update_helpers import backup_user_state, restore_user_state
 from system_monitor import get_system_stats
 import config_manager
 from media_manager import MediaManager, MediaManagerError, MEDIA_MANAGER_CACHE_SUBDIR
@@ -6639,7 +6638,42 @@ def app_settings():
 
 def _repo_path_from_config(cfg: Optional[Dict[str, Any]] = None) -> str:
     cfg = cfg or load_config()
-    return cfg.get("INSTALL_DIR") or os.getcwd()
+    configured = str(cfg.get("INSTALL_DIR") or "").strip()
+    candidates: List[Path] = []
+
+    if configured:
+        candidates.append(Path(configured).expanduser())
+
+    # Fall back to the active app checkout so dev installs without a local
+    # config.json can still update from the settings page.
+    candidates.append(Path(__file__).resolve().parent)
+    candidates.append(Path.cwd())
+
+    for candidate in candidates:
+        try:
+            resolved = candidate.resolve(strict=False)
+        except OSError:
+            continue
+        git_dir = resolved / ".git"
+        if resolved.is_dir() and git_dir.exists():
+            return resolved.as_posix()
+
+    if configured:
+        return str(Path(configured).expanduser())
+    return Path(__file__).resolve().parent.as_posix()
+
+
+def _restart_configured_service(service_name: str) -> None:
+    commands = [
+        ["systemctl", "--user", "restart", service_name],
+        ["sudo", "systemctl", "restart", service_name],
+    ]
+    for command in commands:
+        try:
+            subprocess.Popen(command)
+            return
+        except OSError:
+            continue
 
 
 def _restore_points_root(repo_path: str) -> str:
@@ -7056,10 +7090,7 @@ def restore_points_restore(point_id):
         _save_restore_point_metadata(point_path, metadata)
     except Exception:
         pass
-    try:
-        subprocess.Popen(["sudo", "systemctl", "restart", service_name])
-    except OSError:
-        pass
+    _restart_configured_service(service_name)
     return jsonify({"status": "ok", "restore_point": _serialize_restore_point(metadata["id"], metadata)})
 
 
@@ -7069,88 +7100,39 @@ def update_app():
     api_key = cfg.get("API_KEY")
     if api_key and request.headers.get("X-API-Key") != api_key:
         return "Unauthorized", 401
-    repo_path = cfg.get("INSTALL_DIR") or os.getcwd()
-    branch = cfg.get("UPDATE_BRANCH", "main")
-    service_name = cfg.get("SERVICE_NAME", "echomosaic.service")
+    repo_path = _repo_path_from_config(cfg)
     if not os.path.isdir(repo_path):
         return render_template(
             "update_status.html",
             message=f"Repository path '{repo_path}' not found. Check INSTALL_DIR in config.json",
         )
-    # capture current commit before update
-    def git_cmd(args, cwd=repo_path):
-        return subprocess.check_output(["git", *args], cwd=cwd, stderr=subprocess.STDOUT).decode().strip()
-    try:
-        current_commit = git_cmd(["rev-parse", "HEAD"])
-    except Exception:
-        current_commit = None
-    try:
-        backup_dir = backup_user_state(repo_path)
-    except Exception:
-        logger.exception("Failed to back up user data before update")
+    update_script = os.path.join(repo_path, "update.sh")
+    if not os.path.isfile(update_script):
         return render_template(
             "update_status.html",
-            message="Unable to back up user data; update aborted.",
+            message=f"Update script not found at '{update_script}'.",
         )
-    restore_error = None
     try:
-        subprocess.check_call(["git", "fetch"], cwd=repo_path)
-        subprocess.check_call(["git", "checkout", branch], cwd=repo_path)
-        subprocess.check_call(["git", "reset", "--hard", f"origin/{branch}"], cwd=repo_path)
+        subprocess.check_call(["bash", update_script], cwd=repo_path)
     except FileNotFoundError:
-        update_error = "Git executable not found. Please install Git to update the application."
-        return render_template("update_status.html", message=update_error)
-    except subprocess.CalledProcessError as e:
-        update_error = f"Git update failed: {e}"
-        return render_template("update_status.html", message=update_error)
-    finally:
-        try:
-            restore_user_state(repo_path, backup_dir, cleanup=True)
-        except Exception:
-            restore_error = "Failed to restore user data after update."
-            logger.exception("Failed to restore user data after update")
-    if restore_error:
-        return render_template("update_status.html", message=restore_error)
-    # record update history
-    try:
-        new_commit = git_cmd(["rev-parse", "HEAD"]) if 'git_cmd' in locals() else None
-        history_path = os.path.join(repo_path, "update_history.json")
-        history = []
-        if os.path.exists(history_path):
-            with open(history_path, "r") as hf:
-                history = json.load(hf)
-        history.append({
-            "timestamp": datetime.utcnow().isoformat() + "Z",
-            "from": current_commit,
-            "to": new_commit,
-            "branch": branch,
-        })
-        with open(history_path, "w") as hf:
-            json.dump(history[-50:], hf, indent=2)
-    except Exception:
-        pass
-    try:
-        subprocess.check_call([
-            os.path.join(repo_path, "venv", "bin", "pip"),
-            "install",
-            "--upgrade",
-            "-r",
-            "requirements.txt",
-        ], cwd=repo_path)
-    except (subprocess.CalledProcessError, OSError):
-        pass
-    try:
-        subprocess.Popen(["sudo", "systemctl", "restart", service_name])
-    except OSError:
-        pass
+        return render_template(
+            "update_status.html",
+            message="Bash is required to run the updater.",
+        )
+    except subprocess.CalledProcessError as exc:
+        logger.exception("In-app update failed")
+        return render_template(
+            "update_status.html",
+            message=f"Update failed: {exc}",
+        )
     return render_template(
-        "update_status.html", message="Soft update complete. Restarting service..."
+        "update_status.html", message="Update complete. Restarting service..."
     )
 
 
 def read_update_info():
     cfg = load_config()
-    repo_path = cfg.get("INSTALL_DIR") or os.getcwd()
+    repo_path = _repo_path_from_config(cfg)
     branch = cfg.get("UPDATE_BRANCH", "main")
     info = {"branch": branch}
     def safe(cmd):
@@ -7209,7 +7191,7 @@ def update_history():
     api_key = cfg.get("API_KEY")
     if api_key and request.headers.get("X-API-Key") != api_key:
         return jsonify({"error": "Unauthorized"}), 401
-    repo_path = cfg.get("INSTALL_DIR") or os.getcwd()
+    repo_path = _repo_path_from_config(cfg)
     history_path = os.path.join(repo_path, "update_history.json")
     history = []
     if os.path.exists(history_path):
@@ -7281,10 +7263,7 @@ def rollback_app():
             _save_restore_point_metadata(point_path, metadata)
         except Exception:
             pass
-        try:
-            subprocess.Popen(["sudo", "systemctl", "restart", service_name])
-        except OSError:
-            pass
+        _restart_configured_service(service_name)
         label = metadata.get("label") or restore_point_id
         short_commit = metadata.get("short_commit") or (
             commit[:7] if isinstance(commit, str) else commit
@@ -7308,10 +7287,7 @@ def rollback_app():
         subprocess.check_call(["git", "reset", "--hard", target], cwd=repo_path)
     except subprocess.CalledProcessError as exc:
         return render_template("update_status.html", message=f"Rollback failed: {exc}")
-    try:
-        subprocess.Popen(["sudo", "systemctl", "restart", service_name])
-    except OSError:
-        pass
+    _restart_configured_service(service_name)
     return render_template(
         "update_status.html",
         message=f"Rolled back to {target[:7]}. Restarting service...",
