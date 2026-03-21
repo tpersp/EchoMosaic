@@ -40,6 +40,8 @@ DEFAULT_WIDTH = 512
 DEFAULT_HEIGHT = 512
 DEFAULT_TIMEOUT_SECONDS = 900.0
 PAYLOAD_DONE_GRACE_SECONDS = 45.0
+QUEUE_WAIT_BUFFER_SECONDS = 30.0
+MAX_DYNAMIC_TIMEOUT_EXTENSION_SECONDS = 300.0
 MIN_DIMENSION = 64
 MAX_DIMENSION = 2048
 DIMENSION_STEP = 64
@@ -197,11 +199,13 @@ class StableHorde:
             if isinstance(default_poll_interval, (int, float)) and float(default_poll_interval) > 0
             else 3.0
         )
-        self.default_timeout = (
-            float(default_timeout)
-            if isinstance(default_timeout, (int, float)) and float(default_timeout) > 0
-            else DEFAULT_TIMEOUT_SECONDS
-        )
+        if default_timeout is None:
+            self.default_timeout = DEFAULT_TIMEOUT_SECONDS
+        elif isinstance(default_timeout, (int, float)):
+            parsed_timeout = float(default_timeout)
+            self.default_timeout = parsed_timeout if parsed_timeout > 0 else 0.0
+        else:
+            self.default_timeout = DEFAULT_TIMEOUT_SECONDS
         self._parsed_base = urlparse(self.base_url)
 
         if save_dir is None:
@@ -372,6 +376,11 @@ class StableHorde:
 
         return self._request("GET", f"/generate/status/{job_id}")
 
+    def get_job_check(self, job_id: str) -> Dict[str, Any]:
+        """Fetch the lightweight progress payload for an existing job."""
+
+        return self._request("GET", f"/generate/check/{job_id}")
+
     def cancel_job(self, job_id: str) -> None:
         """Request job cancellation."""
 
@@ -466,7 +475,13 @@ class StableHorde:
         destination, temp_dir = self._resolve_output_dir(persist_flag, output_dir)
 
         poll_value = float(poll_interval) if isinstance(poll_interval, (int, float)) and float(poll_interval) > 0 else self.default_poll_interval
-        timeout_value = self.default_timeout if timeout is None or (isinstance(timeout, (int, float)) and float(timeout) <= 0) else float(timeout)
+        if timeout is None:
+            timeout_value = self.default_timeout
+        elif isinstance(timeout, (int, float)):
+            parsed_timeout = float(timeout)
+            timeout_value = parsed_timeout if parsed_timeout > 0 else 0.0
+        else:
+            timeout_value = self.default_timeout
         status = self._poll_job(
             job_id,
             poll_value,
@@ -701,11 +716,13 @@ class StableHorde:
         stop_callback: Optional[Callable[[], bool]] = None,
     ) -> Dict[str, Any]:
         poll_value = float(poll_interval) if isinstance(poll_interval, (int, float)) and float(poll_interval) > 0 else self.default_poll_interval
-        effective_timeout = (
-            self.default_timeout
-            if timeout is None or (isinstance(timeout, (int, float)) and float(timeout) <= 0)
-            else float(timeout)
-        )
+        if timeout is None:
+            effective_timeout = self.default_timeout
+        elif isinstance(timeout, (int, float)):
+            parsed_timeout = float(timeout)
+            effective_timeout = parsed_timeout if parsed_timeout > 0 else 0.0
+        else:
+            effective_timeout = self.default_timeout
         start_time = time.time()
         deadline = start_time + effective_timeout if effective_timeout and effective_timeout > 0 else None
         timeout_label = f"{effective_timeout:.0f}s" if effective_timeout and effective_timeout > 0 else "disabled"
@@ -719,6 +736,7 @@ class StableHorde:
 
         cancel_notified = False
         done_seen_at: Optional[float] = None
+        last_progress_signature: Optional[Tuple[Optional[int], Optional[float], Optional[int], bool]] = None
 
         def _check_cancelled() -> None:
             nonlocal cancel_notified
@@ -744,32 +762,59 @@ class StableHorde:
         while True:
             _check_stopped()
             _check_cancelled()
-            status = self._request("GET", f"/generate/status/{job_id}")
-            _fire_callback(status_callback, "status", {"job_id": job_id, "status": status})
-            done_flag = bool(status.get("done"))
-            faulted_flag = bool(status.get("faulted"))
-            generations = status.get("generations") or []
-            wait_time = status.get("wait_time")
-            queue_position = status.get("queue_position")
+            check_status = self.get_job_check(job_id)
+            _fire_callback(status_callback, "status", {"job_id": job_id, "status": check_status})
+            done_flag = bool(check_status.get("done"))
+            faulted_flag = bool(check_status.get("faulted"))
+            wait_time = check_status.get("wait_time")
+            queue_position = check_status.get("queue_position")
+            finished_count_raw = check_status.get("finished")
+            try:
+                finished_count = int(finished_count_raw) if finished_count_raw is not None else None
+            except (TypeError, ValueError):
+                finished_count = None
             now = time.time()
             self._log(
                 logging.INFO,
-                "Job %s status: done=%s faulted=%s queue=%s wait=%s generations=%d",
+                "Job %s status: done=%s faulted=%s queue=%s wait=%s finished=%s",
                 job_id,
                 done_flag,
                 faulted_flag,
                 queue_position,
                 wait_time,
-                len(generations),
+                finished_count if finished_count is not None else "unknown",
             )
             if faulted_flag:
-                message = status.get("message") or status
+                message = check_status.get("message") or check_status
                 self._log(logging.ERROR, "Job %s faulted — %s", job_id, message)
-                _fire_callback(status_callback, "fault", {"job_id": job_id, "status": status, "message": message})
+                _fire_callback(status_callback, "fault", {"job_id": job_id, "status": check_status, "message": message})
                 raise StableHordeError(f"Stable Horde job {job_id} faulted: {message}")
-            if generations:
-                self._log(logging.INFO, "Job %s complete — %d generation(s) ready", job_id, len(generations))
-                return status
+
+            if deadline is not None and not done_flag and isinstance(wait_time, (int, float)) and wait_time > 0:
+                dynamic_grace = min(float(wait_time) + QUEUE_WAIT_BUFFER_SECONDS, MAX_DYNAMIC_TIMEOUT_EXTENSION_SECONDS)
+                proposed_deadline = now + max(QUEUE_WAIT_BUFFER_SECONDS, dynamic_grace)
+                if proposed_deadline > deadline:
+                    deadline = proposed_deadline
+
+            progress_signature = (
+                int(queue_position) if isinstance(queue_position, int) else None,
+                float(wait_time) if isinstance(wait_time, (int, float)) else None,
+                finished_count,
+                done_flag,
+            )
+            if deadline is not None and last_progress_signature is not None and progress_signature != last_progress_signature:
+                deadline = max(deadline, now + QUEUE_WAIT_BUFFER_SECONDS)
+            last_progress_signature = progress_signature
+
+            generations: List[Dict[str, Any]] = []
+            full_status: Optional[Dict[str, Any]] = None
+            if done_flag or (isinstance(finished_count, int) and finished_count > 0):
+                full_status = self.get_job_status(job_id)
+                generations = full_status.get("generations") or []
+                if generations:
+                    self._log(logging.INFO, "Job %s complete — %d generation(s) ready", job_id, len(generations))
+                    return full_status
+
             if done_flag and not generations:
                 if done_seen_at is None:
                     done_seen_at = now
@@ -782,7 +827,11 @@ class StableHorde:
                         job_id,
                         now - done_seen_at,
                     )
-                    _fire_callback(status_callback, "fault", {"job_id": job_id, "status": status, "message": message})
+                    _fire_callback(
+                        status_callback,
+                        "fault",
+                        {"job_id": job_id, "status": full_status or check_status, "message": message},
+                    )
                     raise StableHordeError(f"{message}: job {job_id}")
                 sleep_for = min(poll_value, 2.0)
             else:
@@ -793,13 +842,13 @@ class StableHorde:
                     sleep_for = poll_value
             if deadline is not None and now >= deadline:
                 self._log(logging.WARNING, "Job %s timed out after %.1fs", job_id, now - start_time)
-                _fire_callback(status_callback, "timeout", {"job_id": job_id, "status": status})
+                _fire_callback(status_callback, "timeout", {"job_id": job_id, "status": check_status})
                 raise StableHordeError(f"Timed out waiting for Stable Horde job {job_id}")
             if deadline is not None and sleep_for > 0 and now + sleep_for >= deadline:
                 sleep_for = max(0.0, deadline - now)
                 if sleep_for <= 0:
                     self._log(logging.WARNING, "Job %s timed out after %.1fs", job_id, now - start_time)
-                    _fire_callback(status_callback, "timeout", {"job_id": job_id, "status": status})
+                    _fire_callback(status_callback, "timeout", {"job_id": job_id, "status": check_status})
                     raise StableHordeError(f"Timed out waiting for Stable Horde job {job_id}")
             if sleep_for > 0:
                 time.sleep(sleep_for)
