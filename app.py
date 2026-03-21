@@ -1293,9 +1293,12 @@ def _scan_root_for_cache(
             except Exception:
                 continue
             virtual_path = _build_virtual_media_path(root.alias, relative_path.as_posix())
+            folder_relative = relative_path.parent.as_posix()
+            folder_key = _build_virtual_media_path(root.alias, folder_relative)
             kind = "video" if ext in VIDEO_EXTENSIONS else "image"
             media.append({
                 "path": virtual_path,
+                "folder": folder_key,
                 "kind": kind,
                 "extension": ext,
             })
@@ -4738,35 +4741,10 @@ def get_subfolders(hide_nsfw: bool = False) -> List[str]:
 
 def get_folder_inventory(hide_nsfw: bool = False) -> List[Dict[str, Any]]:
     inventory: List[Dict[str, Any]] = []
-    # Ensure "all" is refreshed (scans every root once)
-    refresh_image_cache("all")
-
-    # Extract folder-level stats from the "all" media list
-    with IMAGE_CACHE_LOCK:
-        entry = IMAGE_CACHE.get("all")
-        if not entry:
-            return []
-        all_media = entry.get("media", [])
-
-    stats = {}
-    for item in all_media:
-        folder = item.get("folder", "all")
-        kind = item.get("kind")
-        if hide_nsfw and _path_contains_nsfw(folder):
-            continue
-        row = stats.setdefault(folder, {"has_images": False, "has_videos": False})
-        if kind == "image":
-            row["has_images"] = True
-        elif kind == "video":
-            row["has_videos"] = True
-
-    # Use sorted names for consistency, starting with "all"
-    names = sorted(stats.keys())
-    if "all" in stats:
-        names.remove("all")
-        names.insert(0, "all")
-
-    for name in names:
+    for name in get_subfolders(hide_nsfw=hide_nsfw):
+        media_entries = list_media(name, hide_nsfw=hide_nsfw)
+        has_images = any(entry.get("kind") == "image" for entry in media_entries)
+        has_videos = any(entry.get("kind") == "video" for entry in media_entries)
         if "/" in name:
             display_name = name.split("/", 1)[1]
         else:
@@ -4774,7 +4752,8 @@ def get_folder_inventory(hide_nsfw: bool = False) -> List[Dict[str, Any]]:
         inventory.append({
             "name": name,
             "display_name": display_name,
-            **stats[name]
+            "has_images": has_images,
+            "has_videos": has_videos,
         })
     return inventory
 
