@@ -60,6 +60,11 @@ class StableHordeOrphaned(StableHordeError):
     """Raised when polling stops because the caller requested it."""
 
 
+def _is_request_not_found_error(exc: BaseException) -> bool:
+    message = str(exc or "").lower()
+    return "requestnotfound" in message or "not found" in message
+
+
 @dataclass
 class StableHordeGeneration:
     """Represents a single generated image saved to disk."""
@@ -762,7 +767,30 @@ class StableHorde:
         while True:
             _check_stopped()
             _check_cancelled()
-            check_status = self.get_job_check(job_id)
+            try:
+                check_status = self.get_job_check(job_id)
+            except StableHordeError as exc:
+                if not _is_request_not_found_error(exc):
+                    raise
+                self._log(
+                    logging.WARNING,
+                    "Job %s check endpoint missing; falling back to full status",
+                    job_id,
+                )
+                full_status = self.get_job_status(job_id)
+                generations = full_status.get("generations") or []
+                if generations:
+                    self._log(logging.INFO, "Job %s complete — %d generation(s) ready", job_id, len(generations))
+                    return full_status
+                if bool(full_status.get("faulted")):
+                    message = full_status.get("message") or full_status
+                    _fire_callback(status_callback, "fault", {"job_id": job_id, "status": full_status, "message": message})
+                    raise StableHordeError(f"Stable Horde job {job_id} faulted: {message}")
+                if bool(full_status.get("done")):
+                    message = "Stable Horde reported completion without returning images"
+                    _fire_callback(status_callback, "fault", {"job_id": job_id, "status": full_status, "message": message})
+                    raise StableHordeError(f"{message}: job {job_id}")
+                check_status = full_status
             _fire_callback(status_callback, "status", {"job_id": job_id, "status": check_status})
             done_flag = bool(check_status.get("done"))
             faulted_flag = bool(check_status.get("faulted"))
