@@ -57,21 +57,22 @@ echo -e "\nCreating virtual environment…"
 python3 -m venv "$INSTALL_DIR/venv"
 "$INSTALL_DIR/venv/bin/pip" install --upgrade pip
 "$INSTALL_DIR/venv/bin/pip" install -r "$INSTALL_DIR/requirements.txt"
-# == Step: (Optional) Configure MEDIA_PATHS (CIFS or local) ==
-# MEDIA_PATHS lives in config.json (or config.default.json as a fallback).
-# We either mount a CIFS share (default //192.168.1.0/images -> /mnt/viewers)
-# and point MEDIA_PATHS there, or set a local folder and point MEDIA_PATHS to that.
-update_config() {
-  local target_path="$1"
-  python3 - "$INSTALL_DIR" "$target_path" "$SERVICE_NAME" "$BRANCH" <<'PY'
+# == Step: Configure MEDIA_PATHS and AI_MEDIA_PATHS independently ==
+# Normal media and AI media are configured separately on purpose.
+# AI media defaults to a local path unless the user explicitly chooses otherwise.
+update_config_path() {
+  local config_key="$1"
+  local target_path="$2"
+  python3 - "$INSTALL_DIR" "$config_key" "$target_path" "$SERVICE_NAME" "$BRANCH" <<'PY'
 import json
 import sys
 from pathlib import Path
 
 install_dir = Path(sys.argv[1]).expanduser().resolve()
-target_path = sys.argv[2]
-service_name = sys.argv[3]
-branch = sys.argv[4]
+config_key = sys.argv[2]
+target_path = sys.argv[3]
+service_name = sys.argv[4]
+branch = sys.argv[5]
 config_path = install_dir / "config.json"
 default_path = install_dir / "config.default.json"
 
@@ -88,82 +89,93 @@ for candidate in (config_path, default_path):
 if not isinstance(data, dict):
     data = {}
 
-data["MEDIA_PATHS"] = [target_path]
+data[config_key] = [target_path]
 data["INSTALL_DIR"] = str(install_dir)
 data["SERVICE_NAME"] = service_name
 data["UPDATE_BRANCH"] = branch
 config_path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
 PY
 }
-echo
-echo "== Optional: Configure a network share for MEDIA_PATHS =="
-read -r -p "Mount a CIFS network share for images? (y/n): " mount_answer
-if [[ "$mount_answer" =~ ^[Yy]$ ]]; then
-  # Ensure cifs-utils is available
+
+ensure_cifs_utils() {
   if ! dpkg -s cifs-utils >/dev/null 2>&1; then
     echo "Installing cifs-utils..."
     sudo apt-get update && sudo apt-get install < /dev/null -y cifs-utils
   fi
-  default_share="//192.168.1.0/images"
-  default_mount="/mnt/viewers"
-  read -r -p "Enter server share path [${default_share}]: " SERVER_SHARE
-  SERVER_SHARE="${SERVER_SHARE:-$default_share}"
-  read -r -p "Enter local mount point [${default_mount}]: " MOUNT_POINT
-  MOUNT_POINT="${MOUNT_POINT:-$default_mount}"
+}
+
+configure_library_path() {
+  local config_key="$1"
+  local label="$2"
+  local local_default="$3"
+  local share_default="$4"
+  local mount_default="$5"
+
   echo
-  echo "Auth options:"
-  echo "  1) guest (no username/password)  [default]"
-  echo "  2) username/password (stored in /etc/samba/creds-echomosaic)"
-  read -r -p "Choose authentication [1/2]: " AUTH_CHOICE
-  AUTH_CHOICE="${AUTH_CHOICE:-1}"
-  USER_ID="$(id -u "$SERVICE_USER")"
-  GROUP_ID="$(id -g "$SERVICE_USER")"
-  BASE_OPTS="uid=$USER_ID,gid=$GROUP_ID,iocharset=utf8,file_mode=0644,dir_mode=0755,noperm,vers=3.0,x-systemd.automount,_netdev,noauto"
-  if [[ "$AUTH_CHOICE" == "2" ]]; then
-    CRED_FILE="/etc/samba/creds-echomosaic"
-    read -r -p "Username: " CIFS_USER
-    read -r -s -p "Password: " CIFS_PASS; echo
-    read -r -p "Domain (optional, ENTER to skip): " CIFS_DOMAIN
-    sudo mkdir -p "$(dirname "$CRED_FILE")"
-    if [[ -n "$CIFS_DOMAIN" ]]; then
-      printf "username=%s\npassword=%s\ndomain=%s\n" "$CIFS_USER" "$CIFS_PASS" "$CIFS_DOMAIN" | sudo tee "$CRED_FILE" >/dev/null
+  echo "== Configure ${label} =="
+  read -r -p "Mount a CIFS network share for ${label}? (y/n): " mount_answer
+  if [[ "$mount_answer" =~ ^[Yy]$ ]]; then
+    ensure_cifs_utils
+    read -r -p "Enter server share path [${share_default}]: " SERVER_SHARE
+    SERVER_SHARE="${SERVER_SHARE:-$share_default}"
+    read -r -p "Enter local mount point [${mount_default}]: " MOUNT_POINT
+    MOUNT_POINT="${MOUNT_POINT:-$mount_default}"
+    echo
+    echo "Auth options:"
+    echo "  1) guest (no username/password)  [default]"
+    echo "  2) username/password (stored in /etc/samba/creds-echomosaic)"
+    read -r -p "Choose authentication [1/2]: " AUTH_CHOICE
+    AUTH_CHOICE="${AUTH_CHOICE:-1}"
+    USER_ID="$(id -u "$SERVICE_USER")"
+    GROUP_ID="$(id -g "$SERVICE_USER")"
+    BASE_OPTS="uid=$USER_ID,gid=$GROUP_ID,iocharset=utf8,file_mode=0644,dir_mode=0755,noperm,vers=3.0,x-systemd.automount,_netdev,noauto"
+    if [[ "$AUTH_CHOICE" == "2" ]]; then
+      CRED_FILE="/etc/samba/creds-echomosaic"
+      read -r -p "Username: " CIFS_USER
+      read -r -s -p "Password: " CIFS_PASS; echo
+      read -r -p "Domain (optional, ENTER to skip): " CIFS_DOMAIN
+      sudo mkdir -p "$(dirname "$CRED_FILE")"
+      if [[ -n "$CIFS_DOMAIN" ]]; then
+        printf "username=%s\npassword=%s\ndomain=%s\n" "$CIFS_USER" "$CIFS_PASS" "$CIFS_DOMAIN" | sudo tee "$CRED_FILE" >/dev/null
+      else
+        printf "username=%s\npassword=%s\n" "$CIFS_USER" "$CIFS_PASS" | sudo tee "$CRED_FILE" >/dev/null
+      fi
+      sudo chmod 600 "$CRED_FILE"
+      MOUNT_OPTS="credentials=$CRED_FILE,$BASE_OPTS"
     else
-      printf "username=%s\npassword=%s\n" "$CIFS_USER" "$CIFS_PASS" | sudo tee "$CRED_FILE" >/dev/null
+      MOUNT_OPTS="guest,username=guest,password=,$BASE_OPTS"
     fi
-    sudo chmod 600 "$CRED_FILE"
-    MOUNT_OPTS="credentials=$CRED_FILE,$BASE_OPTS"
+    echo "Creating mount dir: $MOUNT_POINT"
+    sudo mkdir -p "$MOUNT_POINT"
+    sudo chown "$SERVICE_USER:$SERVICE_USER" "$MOUNT_POINT"
+    FSTAB_LINE="$SERVER_SHARE  $MOUNT_POINT  cifs  $MOUNT_OPTS  0  0"
+    if grep -qsF "$SERVER_SHARE  $MOUNT_POINT  cifs" /etc/fstab; then
+      echo "Entry already in /etc/fstab; skipping append."
+    else
+      echo "Adding to /etc/fstab:"
+      echo "  $FSTAB_LINE"
+      echo "$FSTAB_LINE" | sudo tee -a /etc/fstab >/dev/null
+    fi
+    echo "Mounting $MOUNT_POINT..."
+    if ! sudo mount "$MOUNT_POINT"; then
+      echo "WARNING: mount failed. Check network/credentials/options."
+    else
+      echo "Mounted $SERVER_SHARE at $MOUNT_POINT."
+    fi
+    echo "Setting ${config_key} in config.json -> $MOUNT_POINT"
+    update_config_path "$config_key" "$MOUNT_POINT"
   else
-    MOUNT_OPTS="guest,username=guest,password=,$BASE_OPTS"
+    echo
+    echo "No CIFS share selected. Using a local folder for ${label}."
+    mkdir -p "$local_default"
+    echo "Setting ${config_key} in config.json -> $local_default"
+    update_config_path "$config_key" "$local_default"
   fi
-  echo "Creating mount dir: $MOUNT_POINT"
-  sudo mkdir -p "$MOUNT_POINT"
-  sudo chown "$SERVICE_USER:$SERVICE_USER" "$MOUNT_POINT"
-  # Append to /etc/fstab if not already present
-  FSTAB_LINE="$SERVER_SHARE  $MOUNT_POINT  cifs  $MOUNT_OPTS  0  0"
-  if grep -qsF "$SERVER_SHARE  $MOUNT_POINT  cifs" /etc/fstab; then
-    echo "Entry already in /etc/fstab; skipping append."
-  else
-    echo "Adding to /etc/fstab:"
-    echo "  $FSTAB_LINE"
-    echo "$FSTAB_LINE" | sudo tee -a /etc/fstab >/dev/null
-  fi
-  echo "Mounting $MOUNT_POINT..."
-  if ! sudo mount "$MOUNT_POINT"; then
-    echo "WARNING: mount failed. Check network/credentials/options."
-  else
-    echo "Mounted $SERVER_SHARE at $MOUNT_POINT."
-  fi
-  # Update MEDIA_PATHS in config.json to the chosen mount point
-  echo "Setting MEDIA_PATHS in config.json -> $MOUNT_POINT"
-  update_config "$MOUNT_POINT"
-else
-  echo
-  echo "No CIFS share selected. Using a local folder for images."
-  LOCAL_DIR="$INSTALL_DIR/media"
-  mkdir -p "$LOCAL_DIR"
-  echo "Setting MEDIA_PATHS in config.json -> $LOCAL_DIR"
-  update_config "$LOCAL_DIR"
-fi
+}
+
+configure_library_path "MEDIA_PATHS" "main media" "$INSTALL_DIR/media" "//192.168.1.0/images" "/mnt/viewers"
+configure_library_path "AI_MEDIA_PATHS" "AI media" "$INSTALL_DIR/ai_media" "//192.168.1.0/ai-images" "/mnt/echomosaic-ai"
+
 echo -e "\nCreating systemd user service…"
 SERVICE_DIR="$HOME/.config/systemd/user"
 mkdir -p "$SERVICE_DIR"
