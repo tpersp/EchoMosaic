@@ -5067,10 +5067,12 @@ function applyPicsumSettings(card, settings, opts = {}) {
       if (showVariant) {
         const matching = options.find(opt => !opt.hidden && opt.value === normalizedMode);
         if (matching) {
-          modeSelect.value = matching.value;
+          options.forEach(opt => { opt.selected = (opt === matching); });
         } else {
           const fallback = options.find(opt => !opt.hidden);
-          if (fallback) modeSelect.value = fallback.value;
+          if (fallback) {
+            options.forEach(opt => { opt.selected = (opt === fallback); });
+          }
         }
         modeSelect.disabled = false;
       } else {
