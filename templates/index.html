@@ -394,7 +394,7 @@
           {% set auto_label = 'Off' %}
         {% endif %}
         {% set next_label = timer_info.next_run if timer_info.next_run else ai_state.next_auto_trigger %}
-        <div class="ai-summary" data-stream="{{ stream_id }}" {% if media_mode != 'ai' %} style="display:none;" {% endif %}>
+        <div class="ai-summary" data-stream="{{ stream_id }}" {% if media_mode != 'ai' or mode_value not in ['generate', 'ai'] %} style="display:none;" {% endif %}>
           <div class="ai-summary-grid">
             <div class="ai-summary-item"><span class="ai-summary-label">Model</span><span class="ai-summary-value ai-summary-model">{{ ai.model or 'Auto' }}</span></div>
             <div class="ai-summary-item"><span class="ai-summary-label">Sampler</span><span class="ai-summary-value ai-summary-sampler">{{ ai.sampler or 'k_euler' }}</span></div>
@@ -592,7 +592,7 @@
 
       {% set timer_conf_value = conf.timer if conf.timer else {} %}
       {% set timer_section_mode = (conf.media_mode if conf.media_mode else conf.mode if conf.mode else '')|lower %}
-      {% set timer_visible = timer_section_mode in ['ai', 'picsum', 'pexels'] %}
+      {% set timer_visible = ((media_mode == 'ai' and mode_value in ['generate', 'ai']) or timer_section_mode in ['picsum', 'pexels']) %}
       {% with stream_id=stream_id, timer_conf=timer_conf_value, timer_mode=timer_section_mode, timer_visible=timer_visible %}
         {% include '_timer_section.html' %}
       {% endwith %}
@@ -5129,7 +5129,7 @@ function applyPicsumSettings(card, settings, opts = {}) {
     if (videoModeRow) videoModeRow.style.display = (isVideo && isRandom) ? '' : 'none';
     if (playbackRow) playbackRow.style.display = isVideo ? '' : 'none';
 
-    if (isAi) {
+    if (isAiGenerate) {
       if (aiSummary) aiSummary.style.display = '';
       if (aiSection && !card.classList.contains('ai-settings-open')) {
         aiSection.setAttribute('aria-hidden', 'true');
@@ -5137,7 +5137,9 @@ function applyPicsumSettings(card, settings, opts = {}) {
     } else {
       if (aiSummary) aiSummary.style.display = 'none';
       if (aiSection) aiSection.setAttribute('aria-hidden', 'true');
-      closeAiSettings(card);
+      if (isAiRandom || isAiSpecific || !isAi) {
+        closeAiSettings(card);
+      }
     }
     const summaryUpdater = aiSummaryUpdaters.get(card);
     if (summaryUpdater) summaryUpdater();
