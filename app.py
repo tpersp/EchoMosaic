@@ -3088,6 +3088,31 @@ def _update_ai_state(stream_id: str, updates: Dict[str, Any], *, persist: bool =
     return state
 
 
+def _reconcile_stale_ai_state(stream_id: str, conf: Dict[str, Any]) -> bool:
+    ensure_ai_defaults(conf)
+    ai_state = conf.get(AI_STATE_KEY)
+    if not isinstance(ai_state, dict):
+        return False
+    status = str(ai_state.get("status") or "").strip().lower()
+    if status != "cancelling":
+        return False
+    with ai_jobs_lock:
+        job = ai_jobs.get(stream_id)
+    if job:
+        return False
+    ai_state.update({
+        "status": "cancelled",
+        "message": "Cancelled",
+        "error": None,
+        "job_id": None,
+        "queue_position": None,
+        "wait_time": None,
+        "last_updated": datetime.utcnow().isoformat() + "Z",
+    })
+    save_settings_debounced()
+    return True
+
+
 def _record_job_progress(stream_id: str, stage: str, payload: Dict[str, Any]) -> None:
     manager_id: Optional[str] = None
     with ai_jobs_lock:
@@ -5567,6 +5592,7 @@ def get_stream_settings(stream_id):
     if stream_id not in settings:
         return jsonify({"error": f"No stream '{stream_id}' found"}), 404
     conf = settings[stream_id]
+    _reconcile_stale_ai_state(stream_id, conf)
     ensure_ai_defaults(conf)
     ensure_picsum_defaults(conf)
     ensure_timer_defaults(conf)
@@ -6725,6 +6751,10 @@ def ai_cancel(stream_id: str):
         job = ai_jobs.get(stream_id)
         controls = ai_job_controls.get(stream_id)
         if not job:
+            if _reconcile_stale_ai_state(stream_id, conf):
+                state = conf.get(AI_STATE_KEY) if isinstance(conf.get(AI_STATE_KEY), dict) else default_ai_state()
+                _emit_ai_update(stream_id, state, job=None)
+                return jsonify({'status': 'cancelled', 'message': 'Cancelled stale AI state'})
             return jsonify({'error': 'No active AI generation to cancel'}), 404
         status = (job.get('status') or '').lower()
         if status in {'completed', 'error', 'timeout', 'cancelled'}:
