@@ -407,6 +407,15 @@ def _run_update_job(repo_path: str, update_script: str, service_name: str, socke
                 state="info",
                 complete=True,
             )
+        elif return_code == -15 and stage in {"restart", "wait_restart"}:
+            _emit_update_progress(
+                socket_id,
+                stage="wait_restart",
+                message=f"{service_name} restart interrupted the updater connection as expected. Waiting for service to come back.",
+                line=f"{service_name} restart interrupted the updater connection as expected.",
+                state="info",
+                complete=True,
+            )
         else:
             _emit_update_progress(
                 socket_id,

@@ -67,6 +67,7 @@
     let updateStarted = false;
     let waitingForRestart = false;
     let completed = false;
+    let startingUpdate = false;
 
     function setStatus(text) {
       statusEl.textContent = text;
@@ -132,6 +133,17 @@
     }
 
     socket.on('connect', async () => {
+      if (completed) {
+        return;
+      }
+      if (updateStarted || waitingForRestart || startingUpdate) {
+        appendLog('Socket connected.', 'dim');
+        if (waitingForRestart) {
+          setStatus('Reconnected while waiting for restart…');
+        }
+        return;
+      }
+      startingUpdate = true;
       setStatus('Connected. Starting update…');
       appendLog('Socket connected. Starting update job…', 'dim');
       try {
@@ -150,6 +162,8 @@
         const msg = err && err.message ? err.message : String(err);
         setStatus(`Update failed to start: ${msg}`);
         appendLog(`ERROR: ${msg}`, 'error');
+      } finally {
+        startingUpdate = false;
       }
     });
 
@@ -179,6 +193,7 @@
         return;
       }
       if (payload.complete || payload.stage === 'wait_restart') {
+        updateStarted = true;
         waitForRestart();
       }
     });
