@@ -5042,6 +5042,7 @@ function applyPicsumSettings(card, settings, opts = {}) {
   function applyModeState(card, mediaMode, mode, streamUrl) {
     const normalizedMedia = typeof mediaMode === 'string' ? mediaMode.toLowerCase() : 'image';
     const normalizedMode = normalizeModeForSave(normalizedMedia, mode);
+    const uiMode = normalizeModeForUi(normalizedMedia, mode);
     const isImage = normalizedMedia === 'image';
     const isVideo = normalizedMedia === 'video';
     const isLivestream = normalizedMedia === 'livestream';
@@ -5099,7 +5100,7 @@ function applyPicsumSettings(card, settings, opts = {}) {
         opt.hidden = !visible;
       });
       if (showVariant) {
-        const matching = options.find(opt => !opt.hidden && opt.value === normalizedMode);
+        const matching = options.find(opt => !opt.hidden && opt.value === uiMode);
         if (matching) {
           options.forEach(opt => { opt.selected = (opt === matching); });
         } else {
