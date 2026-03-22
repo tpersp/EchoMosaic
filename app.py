@@ -3170,12 +3170,13 @@ def _run_ai_generation(
             try:
                 result = stable_horde_client.generate_images(prompt, **generation_kwargs)
                 break
-            except StableHordeError as exc:
+            except Exception as exc:
                 lost_track = "lost track of job" in str(exc).lower()
                 if lost_track and attempt == 1 and not (cancel_event and cancel_event.is_set()):
                     logger.warning(
-                        "Stable Horde lost track of job for %s; retrying once with a fresh request",
+                        "Stable Horde lost track of job for %s on attempt %d; retrying once with a fresh request",
                         stream_id,
+                        attempt,
                     )
                     _update_ai_state(
                         stream_id,
