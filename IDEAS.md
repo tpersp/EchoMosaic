@@ -13,7 +13,6 @@ A running list of ideas and future improvements. Add new items anywhere below.
 - [ ] Enable minimizing of streams in dashboard, so only streamname and menu button is visible, for better overview.
 - [x] [2026-01-27] Sync timers for random image/GIF streams so multiple streams change at the exact same time. Includes a global Sync Timers manager (create/edit/delete timers with interval + base offset), per-stream timer selection, and per-stream stagger offset in seconds to create cascading transitions instead of fully random timing.
 - [ ] Reduce RAM usage without limiting useability or performance.
-- [ ] Make new "sub mode" for "AI Images"-mode, so under "AI Images" there should be "Generate" which is the current function of the mode, and then there should be a "View Random" and "View Specific", which is just like the random and specific mode under "images/gifs" mode.  Then the media folders should be sorted so the normal "Images/Gifs" mode can't see the AI_Generated folders, and the new AI sub modes should not be able to see the normal folders.
 
 ## Suggestions from a friend
 - [ ] [2025-09-08] Add optional authentication or simple login with a session cache so casual users are not blocked but the dashboard and update endpoints are protected from anyone on the network. - Note: I'm not sure this is necessary for a local only service that i built for myself.
@@ -40,6 +39,8 @@ A running list of ideas and future improvements. Add new items anywhere below.
 - Keep the library-root configuration flexible enough to support future folder structures or alternate layouts without rewriting mode logic.
 
 ## Implemented / Completed Ideas
+- [x] Split `AI Images` into `Generate`, `View Random`, and `View Specific`, with generated media stored in a separate `/ai_media` library that is isolated from normal `/media` browsing.
+
 - [x] Implement Stable Horde image generation. (Streams can switch to AI mode, queue jobs, and manage presets.)
 
 - [x] [2025-09-08] Cache directory listings so media browsing does not rescan the filesystem on every request. (Implemented via the in-process `IMAGE_CACHE`.)
