@@ -18,6 +18,10 @@ htmlcov/
 .tox/
 .DS_Store
 
+# Local agent guidance and readiness notes
+AGENTS.md
+main-readiness/
+
 # Editor/IDE
 .vscode/
 .idea/
