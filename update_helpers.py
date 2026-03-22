@@ -7,12 +7,15 @@ import logging
 import shutil
 import tempfile
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, Iterable, List, Optional
 
 logger = logging.getLogger(__name__)
 
 PERSISTENT_FILES = ("settings.json", "config.json", "update_history.json")
 PERSISTENT_DIRS = ("backups", "restorepoints")
+MEDIA_BACKUP_ROOT = "repo_media"
+MEDIA_MANIFEST_NAME = "repo_media_manifest.json"
+INTERNAL_MEDIA_DIRS = {"_thumbnails", "_ai_temp", "_thumbnails_cache"}
 
 
 def _resolve_repo_path(repo_path: str) -> Path:
@@ -20,6 +23,111 @@ def _resolve_repo_path(repo_path: str) -> Path:
     if not path.is_dir():
         raise FileNotFoundError(f"Repository path not found: {repo_path}")
     return path
+
+
+def _load_json_file(path: Path) -> Dict[str, Any]:
+    if not path.is_file():
+        return {}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        logger.warning("Unable to parse JSON from %s", path)
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _normalize_media_paths(paths: Any) -> List[str]:
+    if isinstance(paths, str):
+        items: Iterable[Any] = [paths]
+    elif isinstance(paths, (list, tuple)):
+        items = paths
+    else:
+        items = []
+
+    normalized: List[str] = []
+    seen: set[str] = set()
+    for raw in items:
+        text = str(raw).strip() if raw is not None else ""
+        if not text or text in seen:
+            continue
+        seen.add(text)
+        normalized.append(text)
+    return normalized
+
+
+def _load_library_paths(repo: Path, key: str, default: str) -> List[str]:
+    config_data = _load_json_file(repo / "config.json")
+    default_data = _load_json_file(repo / "config.default.json")
+    paths = _normalize_media_paths(config_data.get(key))
+    if paths:
+        return paths
+    return _normalize_media_paths(default_data.get(key)) or [default]
+
+
+def _load_media_paths(repo: Path) -> List[str]:
+    return _load_library_paths(repo, "MEDIA_PATHS", "./media")
+
+
+def _load_ai_media_paths(repo: Path) -> List[str]:
+    return _load_library_paths(repo, "AI_MEDIA_PATHS", "./ai_media")
+
+
+def _resolve_media_path(repo: Path, raw_path: str) -> Optional[Path]:
+    candidate = Path(raw_path).expanduser()
+    if not candidate.is_absolute():
+        candidate = repo / candidate
+    try:
+        return candidate.resolve(strict=False)
+    except OSError:
+        logger.warning("Unable to resolve media path %s", candidate)
+        return None
+
+
+def _is_within_repo(repo: Path, target: Path) -> bool:
+    try:
+        target.relative_to(repo)
+        return True
+    except ValueError:
+        return False
+
+
+def _ignore_internal_media_dirs(_dir: str, names: List[str]) -> List[str]:
+    return [name for name in names if name in INTERNAL_MEDIA_DIRS]
+
+
+def _backup_repo_media_dirs(repo: Path, temp_dir: Path) -> None:
+    manifest: List[Dict[str, str]] = []
+    media_root = temp_dir / MEDIA_BACKUP_ROOT
+
+    all_paths = _load_media_paths(repo) + _load_ai_media_paths(repo)
+    seen_paths: set[str] = set()
+    for raw_path in all_paths:
+        raw_key = str(raw_path).strip()
+        if not raw_key or raw_key in seen_paths:
+            continue
+        seen_paths.add(raw_key)
+        resolved = _resolve_media_path(repo, raw_path)
+        if resolved is None or not resolved.exists() or not resolved.is_dir():
+            continue
+        if not _is_within_repo(repo, resolved):
+            continue
+
+        rel_path = resolved.relative_to(repo)
+        dest = media_root / rel_path
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copytree(
+            resolved,
+            dest,
+            dirs_exist_ok=True,
+            ignore=_ignore_internal_media_dirs,
+        )
+        manifest.append({
+            "raw_path": raw_path,
+            "repo_relative_path": rel_path.as_posix(),
+        })
+
+    if manifest:
+        _write_json(temp_dir / MEDIA_MANIFEST_NAME, manifest)
 
 
 def backup_user_state(repo_path: str) -> str:
@@ -46,6 +154,8 @@ def backup_user_state(repo_path: str) -> str:
             # Should not happen, but be defensive.
             dest.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(source, dest)
+
+    _backup_repo_media_dirs(repo, temp_dir)
 
     return str(temp_dir)
 
@@ -131,6 +241,48 @@ def _restore_dirs(repo: Path, backup: Path) -> None:
             shutil.copy2(source, dest)
 
 
+def _restore_repo_media_dirs(repo: Path, backup: Path) -> None:
+    manifest_path = backup / MEDIA_MANIFEST_NAME
+    media_root = backup / MEDIA_BACKUP_ROOT
+    if not manifest_path.is_file() or not media_root.exists():
+        return
+
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        logger.warning("Media backup manifest %s is not valid JSON", manifest_path)
+        return
+    if not isinstance(manifest, list):
+        logger.warning("Media backup manifest %s is not a list", manifest_path)
+        return
+
+    for item in manifest:
+        if not isinstance(item, dict):
+            continue
+        relative_text = str(item.get("repo_relative_path") or "").strip()
+        if not relative_text:
+            continue
+        source = media_root / relative_text
+        dest = repo / relative_text
+        if not source.exists():
+            continue
+        if source.is_dir():
+            if dest.exists() and not dest.is_dir():
+                dest.unlink()
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copytree(
+                source,
+                dest,
+                dirs_exist_ok=True,
+                ignore=_ignore_internal_media_dirs,
+            )
+        else:
+            if dest.exists() and dest.is_dir():
+                shutil.rmtree(dest, ignore_errors=True)
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source, dest)
+
+
 def restore_user_state(repo_path: str, backup_dir: str, *, cleanup: bool = False) -> None:
     """Restore previously backed-up user data into the repository."""
     if not backup_dir:
@@ -141,6 +293,7 @@ def restore_user_state(repo_path: str, backup_dir: str, *, cleanup: bool = False
     repo = _resolve_repo_path(repo_path)
     try:
         _restore_dirs(repo, backup)
+        _restore_repo_media_dirs(repo, backup)
         _restore_settings(repo, backup)
         _restore_update_history(repo, backup)
         _restore_config(repo, backup)

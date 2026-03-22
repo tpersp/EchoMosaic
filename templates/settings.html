@@ -6,8 +6,19 @@
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
   <script>
   const SETTINGS_API_KEY = {{ config.get("API_KEY", "")|tojson }};
+  let latestUpdateInfo = null;
 
   function triggerUpdate() {
+    const info = latestUpdateInfo || {};
+    if (info.update_available === false) {
+      const remoteDesc = info.remote_desc || info.remote_commit || 'the current version';
+      const proceed = confirm(
+        `EchoMosaic is already up to date.\n\nCurrent/latest: ${remoteDesc}\n\nDo you want to run the update tool anyway?`
+      );
+      if (!proceed) {
+        return;
+      }
+    }
     window.location.href = '/update';
   }
   function triggerRollback() {
@@ -24,6 +35,7 @@
     fetch('/update_info', { headers: { 'X-API-Key': SETTINGS_API_KEY }})
       .then(r => r.json())
       .then(info => {
+        latestUpdateInfo = info || {};
         const el = (id, v) => document.getElementById(id).textContent = v || '-';
         el('branch', info.branch);
         el('current', info.current_desc || info.current_commit);
@@ -33,13 +45,27 @@
         const note = document.getElementById('update-note');
         if (info.update_available) {
           btn.disabled = false;
+          btn.textContent = 'Update Now';
           note.textContent = 'Update available';
         } else {
-          btn.disabled = true;
-          note.textContent = 'Up to date';
+          btn.disabled = false;
+          btn.textContent = 'Run Update Anyway';
+          note.textContent = 'Already on the newest version';
         }
         const rb = document.getElementById('rollback-btn');
         rb.disabled = !info.previous_commit;
+      })
+      .catch(() => {
+        latestUpdateInfo = null;
+        const note = document.getElementById('update-note');
+        const btn = document.getElementById('update-btn');
+        if (note) {
+          note.textContent = 'Unable to check update status';
+        }
+        if (btn) {
+          btn.disabled = false;
+          btn.textContent = 'Run Update';
+        }
       });
   }
   document.addEventListener('DOMContentLoaded', loadUpdateInfo);

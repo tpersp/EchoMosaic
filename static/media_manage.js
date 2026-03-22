@@ -11,6 +11,7 @@
     return Math.min(Math.max(value, 60), 1000);
   })();
   const previewStates = new WeakMap();
+  const loadingNodes = new Set();
 
   const state = {
     currentPath: "",
@@ -19,6 +20,13 @@
     sort: "name",
     order: "asc",
     hideNsfw: true,
+  };
+
+  const uploadState = {
+    queue: [],
+    processing: false,
+    nextId: 1,
+    summary: null,
   };
 
   const treeContainer = document.getElementById("media-tree-content");
@@ -339,8 +347,12 @@
 
   async function ensureTreeChildren(detailsEl, path) {
     if (!detailsEl || !path) return;
+    if (detailsEl.dataset.loaded === "true" || loadingNodes.has(path)) return;
+
     const container = detailsEl.querySelector(".tree-children");
     if (!container) return;
+    
+    loadingNodes.add(path);
     detailsEl.dataset.path = path;
     clearElement(container);
     try {
@@ -354,6 +366,8 @@
     } catch (err) {
       container.textContent = "Unable to load folders";
       console.error(err);
+    } finally {
+      loadingNodes.delete(path);
     }
   }
 
@@ -648,7 +662,9 @@
     const rootNode = treeContainer.querySelector(`.tree-node[data-path="${rootPath}"]`);
     if (rootNode) {
       rootNode.open = true;
-      await ensureTreeChildren(rootNode, rootPath);
+      if (rootNode.dataset.loaded !== "true") {
+        await ensureTreeChildren(rootNode, rootPath);
+      }
     }
     const segments = [];
     for (const segment of info.segments) {
@@ -657,7 +673,9 @@
       const details = treeContainer.querySelector(`.tree-node[data-path="${segmentPath}"]`);
       if (details) {
         details.open = true;
-        await ensureTreeChildren(details, segmentPath);
+        if (details.dataset.loaded !== "true") {
+          await ensureTreeChildren(details, segmentPath);
+        }
       }
     }
     highlightTreeSelection();
@@ -800,35 +818,167 @@
     return true;
   }
 
-  function prepareUploadRow(file) {
+  function ensureUploadSummary() {
     if (!uploadQueue) return null;
     uploadQueue.hidden = false;
+    if (uploadState.summary) return uploadState.summary;
+
+    const summary = document.createElement("div");
+    summary.className = "upload-summary";
+
+    const counts = document.createElement("div");
+    counts.className = "upload-summary-counts";
+
+    const title = document.createElement("strong");
+    title.textContent = "Upload Queue";
+
+    const meta = document.createElement("span");
+    meta.className = "upload-summary-meta";
+
+    counts.append(title, meta);
+
+    const clearButton = document.createElement("button");
+    clearButton.type = "button";
+    clearButton.className = "upload-clear";
+    clearButton.textContent = "Clear completed";
+    clearButton.addEventListener("click", clearCompletedUploads);
+
+    summary.append(counts, clearButton);
+    uploadQueue.appendChild(summary);
+    uploadState.summary = { wrapper: summary, meta, clearButton };
+    updateUploadSummary();
+    return uploadState.summary;
+  }
+
+  function updateUploadSummary() {
+    if (!uploadQueue) return;
+    const summary = ensureUploadSummary();
+    if (!summary) return;
+
+    const total = uploadState.queue.length;
+    const done = uploadState.queue.filter((item) => item.status === "done").length;
+    const failed = uploadState.queue.filter((item) => item.status === "failed").length;
+    const uploading = uploadState.queue.filter((item) => item.status === "uploading").length;
+    const pending = uploadState.queue.filter((item) => item.status === "pending").length;
+
+    if (!total) {
+      summary.meta.textContent = "No files in the queue.";
+      summary.clearButton.hidden = true;
+      return;
+    }
+
+    const parts = [`${done}/${total} done`];
+    if (uploading) parts.push(`${uploading} uploading`);
+    if (pending) parts.push(`${pending} waiting`);
+    if (failed) parts.push(`${failed} failed`);
+    summary.meta.textContent = parts.join(" • ");
+    summary.clearButton.hidden = done + failed === 0;
+  }
+
+  function setUploadRowStatus(entry, status, detail) {
+    if (!entry || !entry.row) return;
+    entry.status = status;
+    entry.row.dataset.status = status;
+    if (entry.statusLabel) {
+      const labels = {
+        pending: "Waiting",
+        uploading: "Uploading",
+        done: "Done",
+        failed: "Failed",
+      };
+      entry.statusLabel.textContent = detail || labels[status] || "";
+    }
+    if (entry.icon) {
+      const icons = {
+        pending: "○",
+        uploading: "↻",
+        done: "✓",
+        failed: "!",
+      };
+      entry.icon.textContent = icons[status] || "○";
+    }
+    updateUploadSummary();
+  }
+
+  function prepareUploadRow(file, destinationPath) {
+    if (!uploadQueue) return null;
+    ensureUploadSummary();
     const row = document.createElement("div");
     row.className = "upload-row";
+    row.dataset.status = "pending";
+
+    const header = document.createElement("div");
+    header.className = "upload-row-header";
+
+    const titleWrap = document.createElement("div");
+    titleWrap.className = "upload-row-title";
+
+    const icon = document.createElement("span");
+    icon.className = "upload-status-icon";
+    icon.textContent = "○";
+
     const title = document.createElement("div");
     title.className = "title";
     title.textContent = file.name;
+
+    titleWrap.append(icon, title);
+
+    const statusLabel = document.createElement("div");
+    statusLabel.className = "upload-status";
+    statusLabel.textContent = "Waiting";
+
+    header.append(titleWrap, statusLabel);
+
     const progress = document.createElement("div");
     progress.className = "progress-bar";
     const span = document.createElement("span");
     progress.appendChild(span);
-    row.append(title, progress);
+    row.append(header, progress);
     uploadQueue.appendChild(row);
-    return { row, bar: span };
+    const entry = {
+      id: uploadState.nextId++,
+      file,
+      destinationPath,
+      row,
+      bar: span,
+      icon,
+      statusLabel,
+      status: "pending",
+    };
+    uploadState.queue.push(entry);
+    updateUploadSummary();
+    return entry;
   }
 
-  function finalizeUploadRow(rowInfo, success) {
+  function finalizeUploadRow(rowInfo, success, detail) {
     if (!rowInfo) return;
-    rowInfo.row.style.opacity = success ? "0.75" : "1";
-    if (!success) {
-      rowInfo.row.style.border = "1px solid #f44336";
+    if (rowInfo.bar) {
+      rowInfo.bar.style.width = success ? "100%" : rowInfo.bar.style.width || "0%";
     }
-    setTimeout(() => {
-      rowInfo.row.remove();
-      if (uploadQueue && uploadQueue.children.length === 0) {
-        uploadQueue.hidden = true;
+    setUploadRowStatus(rowInfo, success ? "done" : "failed", detail);
+  }
+
+  function clearCompletedUploads() {
+    const retained = [];
+    uploadState.queue.forEach((entry) => {
+      if (entry.status === "pending" || entry.status === "uploading") {
+        retained.push(entry);
+        return;
       }
-    }, 1500);
+      if (entry.row && entry.row.parentNode) {
+        entry.row.remove();
+      }
+    });
+    uploadState.queue = retained;
+    if (!uploadState.queue.length && uploadQueue) {
+      uploadQueue.hidden = true;
+      if (uploadState.summary && uploadState.summary.wrapper.parentNode) {
+        uploadState.summary.wrapper.remove();
+      }
+      uploadState.summary = null;
+      return;
+    }
+    updateUploadSummary();
   }
 
   function uploadFiles(files) {
@@ -836,22 +986,39 @@
     if (!ensureUploadTarget()) return;
     const items = Array.from(files || []);
     if (!items.length) return;
-    (async () => {
-      for (const file of items) {
-        const row = prepareUploadRow(file);
+    const destinationPath = state.currentPath;
+    items.forEach((file) => prepareUploadRow(file, destinationPath));
+    processUploadQueue();
+  }
+
+  async function processUploadQueue() {
+    if (uploadState.processing) return;
+    uploadState.processing = true;
+    let shouldRefresh = false;
+    try {
+      while (true) {
+        const nextEntry = uploadState.queue.find((item) => item.status === "pending");
+        if (!nextEntry) break;
+        setUploadRowStatus(nextEntry, "uploading");
         try {
-          await uploadSingle(file, row);
-          finalizeUploadRow(row, true);
-          showToast(`Uploaded ${file.name}`, "success");
+          await uploadSingle(nextEntry.file, nextEntry);
+          finalizeUploadRow(nextEntry, true);
+          shouldRefresh = true;
+          showToast(`Uploaded ${nextEntry.file.name}`, "success");
         } catch (err) {
-          finalizeUploadRow(row, false);
-          showToast(err.message || `Failed to upload ${file.name}`, "error");
-          break;
+          const message = err.message || `Failed to upload ${nextEntry.file.name}`;
+          finalizeUploadRow(nextEntry, false, message);
+          showToast(message, "error");
         }
       }
-      refreshTree(state.currentPath);
-      loadContent();
-    })();
+    } finally {
+      uploadState.processing = false;
+      updateUploadSummary();
+      if (shouldRefresh) {
+        refreshTree(state.currentPath);
+        loadContent();
+      }
+    }
   }
 
   function uploadSingle(file, rowInfo) {
@@ -873,11 +1040,14 @@
           if (event.lengthComputable) {
             const pct = Math.round((event.loaded / event.total) * 100);
             rowInfo.bar.style.width = `${pct}%`;
+            if (rowInfo.statusLabel) {
+              rowInfo.statusLabel.textContent = `Uploading ${pct}%`;
+            }
           }
         };
       }
       const form = new FormData();
-      form.append("path", state.currentPath);
+      form.append("path", rowInfo && rowInfo.destinationPath ? rowInfo.destinationPath : state.currentPath);
       form.append("files", file);
       xhr.send(form);
     });

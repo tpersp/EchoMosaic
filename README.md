@@ -7,15 +7,15 @@ EchoMosaic is a self-hosted web dashboard for curating image, video, and AI-gene
 - Stable Horde integration that supports prompt editing, job queues, LoRA stacks, post-processing toggles, auto-generation timers, and preset management. Results are stored alongside other media so they can be reused by any stream.
 - Stream organization features including tags, groups, and a mosaic viewer with configurable layouts (grid, horizontal, vertical, focus, and picture-in-picture). Groups can be exported to dedicated `/stream/<group>` URLs for display screens.
 - Media handling helpers such as cached thumbnails, adjustable image quality, optional NSFW folder hiding, background blur for filler space, and basic video playback controls (loop, play to end, duration).
-- Operations tooling on the Settings page: installer/update helpers, Stable Horde default overrides, import/export of stream definitions, and a rollback button that reverts to the previous recorded update.
+- Operations tooling on the Settings page: installer/update helpers, restore points, Stable Horde default overrides, import/export of stream definitions, and rollback controls for restore points or legacy update history when available.
 
 ## Limitations and Open Work
 EchoMosaic is still evolving. The most notable gaps are:
 - No authentication or user accounts; anyone who can reach the server can control it.
-- `MEDIA_PATHS` lives in `config.json`, so changing media roots requires editing that file or re-running the installer prompt.
+- Media roots are configured through `MEDIA_PATHS` and `AI_MEDIA_PATHS` in `config.json`, so moving those libraries still requires editing that file or re-running the installer.
 - Livestream HLS lookups use a blocking `yt-dlp` call and are not cached yet.
 - Low-bandwidth and slideshow-sync modes are not implemented.
-- Real-time update logs, server-side rendered playback, and system health dashboards are tracked in `IDEAS.md`.
+- Server-side rendered playback and deeper low-bandwidth playback options are still tracked in `IDEAS.md`.
 
 See `IDEAS.md` for the fuller backlog and status.
 
@@ -30,14 +30,14 @@ Python dependencies live in `requirements.txt` and include Flask, Flask-SocketIO
 ## Installation
 
 ### Quick install script (Debian/Ubuntu)
-The `install.sh` script installs Python prerequisites, copies the project to a target directory, builds a virtual environment, and registers a systemd service.
+The `install.sh` script installs Python prerequisites, copies the project to a target directory, builds a virtual environment, and registers a local `systemd --user` service.
 
-```
+```bash
 chmod +x install.sh
-sudo ./install.sh
+./install.sh
 ```
 
-During the prompts you can choose the service account, install path (default `/opt/echomosaic`), listening port, and whether to mount a CIFS share for media. The script also updates `MEDIA_PATHS` inside `config.json` to point at the chosen location.
+During the prompts you can choose the install path (default `~/.local/share/echomosaic`), listening port, and whether to mount CIFS shares for main media and AI media separately. The installer creates a local `systemd --user` service for the current user and updates the relevant media paths inside `config.json`. Since the app installs into your local user space, you avoid the usual permission problems when uploading media via the dashboard.
 
 ### Manual setup
 If you prefer to manage everything yourself:
@@ -54,7 +54,7 @@ If you prefer to manage everything yourself:
    pip install --upgrade pip
    pip install -r requirements.txt
    ```
-3. Adjust `MEDIA_PATHS` inside `config.json` so it matches where your media lives.
+3. Adjust `MEDIA_PATHS` and `AI_MEDIA_PATHS` inside `config.json` so they match where your libraries live.
 4. Start the development server.
    ```
    python app.py
@@ -64,7 +64,7 @@ If you prefer to manage everything yourself:
 For systemd or reverse proxy setups, you can use `install.sh` and `update.sh` as references.
 
 ## Configuration Notes
-- `MEDIA_PATHS` controls the root media location. Update it manually or re-run the installer script if you move your library.
+- `MEDIA_PATHS` and `AI_MEDIA_PATHS` control the main and AI media roots. Update them manually or re-run the installer script if you move either library.
 - Gunicorn should run with a single worker unless you add shared state and a Socket.IO message queue; multiple workers will cause stream data to appear/disappear.
 - `config.json` stores settings for the update helper (install path, service name, branch) and Stable Horde defaults (model, output folders, etc.).
 - Stream definitions, groups, tags, and AI presets live in `settings.json`. Use the Settings page to export/import backups.
@@ -77,14 +77,15 @@ chmod +x update.sh
 ./update.sh
 ```
 
-`update.sh` records the previous and current commit in `update_history.json`. The Settings page offers:
+The Settings page offers:
 - **Update now**: wraps `update.sh` so you can kick off updates from the browser.
-- **Rollback**: resets to the last recorded commit and restarts the service.
-- **History**: lists recent updates with commit information.
+- **Restore points**: create named restore points and roll back to them later.
+- **Rollback**: can also use legacy `update_history.json` entries if that file exists from an older install flow.
+- **History**: lists legacy update-history entries when available.
 
 ## Development Tips
 - Use `python main.py` if you prefer Flask-SocketIO's development server with reloads; it wraps the same app as `python app.py`.
-- The front-end assets live under `static/` and `templates/`. `temp_script.js` currently holds the dashboard logic.
+- The front-end assets live under `static/` and `templates/`, with most dashboard behavior rendered directly from the current templates.
 - Enable debug logging by setting `FLASK_ENV=development` or adjusting the logger configuration inside `app.py`.
 
 ## Contributing

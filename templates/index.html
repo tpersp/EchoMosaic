@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8"/>
@@ -127,7 +127,7 @@
     {% set embed_title = embed_meta.title if embed_meta and embed_meta.title else '' %}
     {% set embed_type = embed_meta.content_type if embed_meta and embed_meta.content_type else '' %}
     {% set embed_provider = embed_meta.provider if embed_meta and embed_meta.provider else '' %}
-    <div class="stream-card" data-stream="{{ stream_id }}" data-hide-nsfw="{{ "true" if conf.hide_nsfw|default(False) else "false" }}" data-tags='{{ (conf.tags|default([]))|tojson }}' data-selected-path="{{ conf.selected_image or '' }}" data-selected-kind="{{ conf.selected_media_kind or '' }}" data-video-mode="{{ conf.video_playback_mode|default('duration') }}" data-video-volume="{{ conf.video_volume|default(1.0) }}" data-media-mode="{{ conf.media_mode|default('image') }}" data-picsum-seed="{{ conf.picsum_settings.seed if conf.picsum_settings and conf.picsum_settings.seed is not none else '' }}" data-sync-timer="{{ conf.sync.timer_id if conf.sync and conf.sync.timer_id else '' }}" data-sync-offset="{{ conf.sync.offset if conf.sync and conf.sync.offset is not none else 0 }}" data-embed-title="{{ embed_title }}" data-embed-type="{{ embed_type }}" data-embed-provider="{{ embed_provider }}">
+    <div class="stream-card" data-stream="{{ stream_id }}" data-hide-nsfw="{{ "true" if conf.hide_nsfw|default(False) else "false" }}" data-tags='{{ (conf.tags|default([]))|tojson }}' data-selected-path="{{ conf.selected_image or '' }}" data-selected-kind="{{ conf.selected_media_kind or '' }}" data-video-mode="{{ conf.video_playback_mode|default('duration') }}" data-video-volume="{{ conf.video_volume|default(1.0) }}" data-media-mode="{{ conf.media_mode|default('image') }}" data-mode="{{ conf.mode|default('random') }}" data-picsum-seed="{{ conf.picsum_settings.seed if conf.picsum_settings and conf.picsum_settings.seed is not none else '' }}" data-sync-timer="{{ conf.sync.timer_id if conf.sync and conf.sync.timer_id else '' }}" data-sync-offset="{{ conf.sync.offset if conf.sync and conf.sync.offset is not none else 0 }}" data-embed-title="{{ embed_title }}" data-embed-type="{{ embed_type }}" data-embed-provider="{{ embed_provider }}">
       <div class="card-header">
         <div class="card-header-info">
           <div class="title-row">
@@ -163,6 +163,7 @@
         {% set media_mode = conf.media_mode|default('image') %}
         {% set mode_value = conf.mode|default('random') %}
         {% set picsum = conf.picsum_settings or {} %}
+        {% set folder_options = ai_folder_inventory if media_mode == 'ai' else folder_inventory %}
         <div class="form-row mode-row">
           <label for="mode-category-{{ stream_id }}">Mode</label>
           <div class="mode-selectors">
@@ -174,18 +175,25 @@
               <option value="ai" {% if media_mode == 'ai' %}selected{% endif %}>AI Images</option>
             </select>
             <div class="mode-variant-wrapper">
-              <select id="mode-option-{{ stream_id }}" class="mode-select" data-stream="{{ stream_id }}">
+              <select id="mode-option-image-{{ stream_id }}" class="mode-select" data-stream="{{ stream_id }}" data-category="image" {% if media_mode != 'image' %}style="display:none;" disabled{% endif %}>
                 <option value="random" data-category="image" {% if media_mode == 'image' and mode_value == 'random' %}selected{% endif %}>Random</option>
                 <option value="specific" data-category="image" {% if media_mode == 'image' and mode_value == 'specific' %}selected{% endif %}>Specific</option>
-                <option value="random" data-category="video" {% if media_mode == 'video' and mode_value == 'random' %}selected{% endif %}>Random (Video)</option>
-                <option value="specific" data-category="video" {% if media_mode == 'video' and mode_value == 'specific' %}selected{% endif %}>Specific (Video)</option>
+              </select>
+              <select id="mode-option-video-{{ stream_id }}" class="mode-select" data-stream="{{ stream_id }}" data-category="video" {% if media_mode != 'video' %}style="display:none;" disabled{% endif %}>
+                <option value="random" {% if media_mode == 'video' and mode_value == 'random' %}selected{% endif %}>Random (Video)</option>
+                <option value="specific" {% if media_mode == 'video' and mode_value == 'specific' %}selected{% endif %}>Specific (Video)</option>
+              </select>
+              <select id="mode-option-ai-{{ stream_id }}" class="mode-select" data-stream="{{ stream_id }}" data-category="ai" {% if media_mode != 'ai' %}style="display:none;" disabled{% endif %}>
+                <option value="generate" {% if media_mode == 'ai' and mode_value in ['generate', 'ai'] %}selected{% endif %}>Generate</option>
+                <option value="random" {% if media_mode == 'ai' and mode_value == 'random' %}selected{% endif %}>View Random</option>
+                <option value="specific" {% if media_mode == 'ai' and mode_value == 'specific' %}selected{% endif %}>View Specific</option>
               </select>
             </div>
           </div>
         </div>
 
         <!-- Folder Selection -->
-        <div class="form-row folder-row" {% if media_mode in ['livestream', 'ai'] %} style="display:none;" {% endif %}>
+        <div class="form-row folder-row" {% if media_mode == 'livestream' or (media_mode == 'ai' and mode_value in ['generate', 'ai']) %} style="display:none;" {% endif %}>
           <label for="folder-{{ stream_id }}">Folder</label>
           {% set current_folder = conf.folder if conf.folder else 'all' %}
           {% set hide_nsfw = conf.hide_nsfw|default(False) %}
@@ -193,7 +201,7 @@
             {% if hide_nsfw and current_folder and 'nsfw' in current_folder|lower %}
               <option value="__filtered__" data-filtered="true" title="{{ current_folder }}" selected>Filtered ({{ current_folder }})</option>
             {% endif %}
-            {% for entry in folder_inventory %}
+            {% for entry in folder_options %}
               {% set name = entry.name %}
               {% set display_name = entry.display_name if entry.display_name is defined and entry.display_name else name %}
               {% if not (hide_nsfw and 'nsfw' in name|lower) %}
@@ -390,7 +398,7 @@
           {% set auto_label = 'Off' %}
         {% endif %}
         {% set next_label = timer_info.next_run if timer_info.next_run else ai_state.next_auto_trigger %}
-        <div class="ai-summary" data-stream="{{ stream_id }}" {% if conf.mode != 'ai' %} style="display:none;" {% endif %}>
+        <div class="ai-summary" data-stream="{{ stream_id }}" {% if media_mode != 'ai' or mode_value not in ['generate', 'ai'] %} style="display:none;" {% endif %}>
           <div class="ai-summary-grid">
             <div class="ai-summary-item"><span class="ai-summary-label">Model</span><span class="ai-summary-value ai-summary-model">{{ ai.model or 'Auto' }}</span></div>
             <div class="ai-summary-item"><span class="ai-summary-label">Sampler</span><span class="ai-summary-value ai-summary-sampler">{{ ai.sampler or 'k_euler' }}</span></div>
@@ -578,7 +586,7 @@
         </div>
       </div>
       <!-- Specific Image Picker -->
-      <div class="image-picker" data-stream="{{ stream_id }}" {% if mode_value != 'specific' %} style="display:none;" {% endif %}>
+      <div class="image-picker" data-stream="{{ stream_id }}" {% if not ((media_mode in ['image', 'video', 'ai']) and mode_value == 'specific') %} style="display:none;" {% endif %}>
         <div class="image-picker-header">
           <label>Pick Media (Folder: {{ conf.folder }})</label>
           <button type="button" class="reload-images-btn" data-stream="{{ stream_id }}">Reload</button>
@@ -588,12 +596,12 @@
 
       {% set timer_conf_value = conf.timer if conf.timer else {} %}
       {% set timer_section_mode = (conf.media_mode if conf.media_mode else conf.mode if conf.mode else '')|lower %}
-      {% set timer_visible = timer_section_mode in ['ai', 'picsum', 'pexels'] %}
+      {% set timer_visible = ((media_mode == 'ai' and mode_value in ['generate', 'ai']) or timer_section_mode in ['picsum', 'pexels']) %}
       {% with stream_id=stream_id, timer_conf=timer_conf_value, timer_mode=timer_section_mode, timer_visible=timer_visible %}
         {% include '_timer_section.html' %}
       {% endwith %}
 
-      <p class="selected-image-row" {% if mode_value not in ['specific', 'ai'] %} style="display:none;" {% endif %}>
+      <p class="selected-image-row" {% if not ((media_mode in ['image', 'video', 'ai'] and mode_value == 'specific') or (media_mode == 'ai' and mode_value in ['generate', 'ai']) or media_mode == 'picsum') %} style="display:none;" {% endif %}>
         <strong>Selected Media:</strong>
         <span class="selected-image-display">{{ conf.selected_image if conf.selected_image else "None" }}{% if conf.selected_media_kind == 'video' and conf.selected_image %} (video){% endif %}</span>
       </p>
@@ -702,7 +710,20 @@
 
   const timerControls = (() => {
     const registry = new Map();
-    const supportedModes = new Set(['ai', 'picsum', 'pexels']);
+    const supportedModes = new Set(['picsum', 'pexels']);
+
+    function supportsTimerMode(card, modeOverride = null) {
+      if (!card) return false;
+      const mediaMode = String(card.dataset.mediaMode || '').toLowerCase();
+      const rawMode = modeOverride !== null && modeOverride !== undefined
+        ? modeOverride
+        : (card.dataset.mode || getModeValue(card) || '');
+      const normalizedMode = normalizeModeForSave(mediaMode, String(rawMode || '').toLowerCase());
+      if (supportedModes.has(mediaMode)) {
+        return true;
+      }
+      return mediaMode === 'ai' && normalizedMode === 'generate';
+    }
 
     function formatNumber(value, precision = 2) {
       if (!Number.isFinite(value)) return '';
@@ -921,12 +942,13 @@
       if (!section) return;
       const streamId = card.dataset.stream;
       const mode = (card.dataset.mediaMode || '').toLowerCase();
-      const supported = supportedModes.has(mode);
+      const timerMode = card.dataset.mode || getModeValue(card) || '';
+      const supported = supportsTimerMode(card, timerMode);
       section.hidden = !supported;
       section.dataset.timerSupported = supported ? 'true' : 'false';
       if (streamId && registry.has(streamId)) {
         const state = registry.get(streamId);
-        state.mode = mode;
+        state.mode = normalizeModeForSave(mode, timerMode);
         if (state.toggle) state.toggle.disabled = !supported;
       }
     }
@@ -1765,9 +1787,14 @@
       removeBtn.textContent = 'Remove';
       if (count > 0) {
         removeBtn.disabled = true;
-        removeBtn.title = 'Tag is in use';
+        removeBtn.title = 'Tag is in use by ' + count + ' stream' + (count === 1 ? '' : 's');
+        removeBtn.style.opacity = '0.5';
+        removeBtn.style.cursor = 'not-allowed';
       } else {
-        removeBtn.addEventListener('click', () => removeGlobalTag(tag));
+        removeBtn.addEventListener('click', () => {
+          console.log('[TagManager] Requesting removal of tag:', tag);
+          removeGlobalTag(tag);
+        });
       }
       row.appendChild(chip);
       row.appendChild(countEl);
@@ -1778,18 +1805,24 @@
 
   function removeGlobalTag(tag) {
     const encoded = encodeURIComponent(tag);
-    fetch(`/tags/${encoded}`, { method: 'DELETE' })
-      .then(res => res.json().then(data => ({ ok: res.ok, data })))
-      .then(result => {
-        if (result.ok) {
-          const tags = Array.isArray(result.data.tags) ? result.data.tags : [];
-          syncGlobalTags(tags);
-          showNotification('Tag removed');
-        } else {
-          showNotification(result.data.error || 'Unable to remove tag');
+    return fetch(`/tags/${encoded}`, { method: 'DELETE' })
+      .then(res => {
+        if (!res.ok) {
+          return res.json().catch(() => ({})).then(data => {
+            throw new Error(data.error || `Server returned ${res.status}`);
+          });
         }
+        return res.json();
       })
-      .catch(() => showNotification('Unable to remove tag'));
+      .then(result => {
+        const tags = Array.isArray(result.tags) ? result.tags : [];
+        syncGlobalTags(tags);
+        showNotification('Tag removed successfully');
+      })
+      .catch(err => {
+        console.error('[TagManager] Removal failed:', err);
+        showNotification('Unable to remove tag: ' + err.message);
+      });
   }
 
   function syncGlobalTags(tags) {
@@ -1860,9 +1893,8 @@
       }
       if (card) {
         const mediaMode = card.dataset.mediaMode || 'image';
-        const modeSelect = card.querySelector('.mode-select');
         const streamUrlInput = card.querySelector('.stream-url-input');
-        const modeValue = modeSelect ? modeSelect.value : '';
+        const modeValue = getModeValue(card, mediaMode);
         applyModeState(card, mediaMode, modeValue, streamUrlInput ? streamUrlInput.value : '');
       }
     });
@@ -2854,6 +2886,10 @@
         renderAiResults(card, data.state.images);
       }
       renderAiStatus(card, data.state, data.job || aiActiveJobs.get(streamId) || null);
+      const status = String((data.job && data.job.status) || data.state.status || '').toLowerCase();
+      if (status === 'completed') {
+        refreshAllAiViewLibraries();
+      }
     } else if (data.job) {
       renderAiStatus(card, {}, data.job);
     }
@@ -2871,6 +2907,15 @@
     if (!streamId || !conf) return;
     const card = findStreamCard(streamId);
     if (!card) return;
+    const nextMediaMode = String(conf.media_mode || card.dataset.mediaMode || 'image').toLowerCase();
+    const nextMode = String(conf.mode || card.dataset.mode || '').toLowerCase();
+    card.dataset.mediaMode = nextMediaMode;
+    card.dataset.mode = nextMode;
+    const modeCategorySelect = card.querySelector('.mode-category-select');
+    if (modeCategorySelect) {
+      modeCategorySelect.value = nextMediaMode;
+    }
+    selectModeVariant(card, nextMediaMode, nextMode);
     refreshThumbnail(card, streamId);
     if (conf.timer !== undefined) {
       let nextAuto = null;
@@ -2883,7 +2928,7 @@
         lastAuto = conf.picsum_settings.last_auto_trigger || null;
       }
       timerControls.applyServerState(card, conf.timer, {
-        mode: conf.media_mode || conf.mode,
+        mode: conf.mode || conf.media_mode,
         next_auto_trigger: nextAuto,
         last_auto_trigger: lastAuto,
       });
@@ -2951,8 +2996,8 @@
         offsetInput.value = Number.isFinite(offsetVal) ? String(offsetVal) : '0';
         offsetInput.disabled = !(select && select.value);
       }
-      applyModeState(card, conf.media_mode || conf.mode || card.dataset.mediaMode, conf.mode || '', card.querySelector('.stream-url-input')?.value || '');
     }
+    applyModeState(card, nextMediaMode, nextMode, card.querySelector('.stream-url-input')?.value || '');
     if (conf.picsum_settings !== undefined) {
       applyPicsumSettings(card, conf.picsum_settings);
       const mediaMode = (conf.media_mode || card.dataset.mediaMode || '').toLowerCase();
@@ -2965,6 +3010,11 @@
         renderAiResults(card, conf.ai_state.images);
       }
       renderAiStatus(card, conf.ai_state, aiActiveJobs.get(streamId) || null);
+      const effectiveMode = normalizeModeForSave(nextMediaMode, nextMode);
+      const aiStatus = String(conf.ai_state.status || '').toLowerCase();
+      if (nextMediaMode === 'ai' && (effectiveMode === 'random' || effectiveMode === 'specific') && aiStatus === 'completed') {
+        refreshAiViewLibrary(card);
+      }
     }
   });
 
@@ -3424,15 +3474,25 @@
       etaEl.classList.add('error');
     } else {
       const waitSeconds = typeof waitRaw === 'number' ? waitRaw : parseFloat(waitRaw);
-      if (!Number.isNaN(waitSeconds) && waitSeconds > 0) {
+      const numericQueue = typeof queuePos === 'number' ? queuePos : parseFloat(queuePos);
+      const unreliableEta =
+        !Number.isNaN(waitSeconds)
+        && waitSeconds > 0
+        && !Number.isNaN(numericQueue)
+        && numericQueue >= 10
+        && waitSeconds < numericQueue;
+      if (!Number.isNaN(waitSeconds) && waitSeconds > 0 && !unreliableEta) {
         const rounded = Math.max(0, Math.round(waitSeconds));
         const minutes = Math.floor(rounded / 60);
         const seconds = rounded % 60;
         const parts = [];
         if (minutes > 0) parts.push(`${minutes}m`);
         parts.push(`${seconds}s`);
-        etaEl.textContent = `ETA ~ ${parts.join(' ')}`;
+        etaEl.textContent = `Horde ETA ~ ${parts.join(' ')}`;
         etaEl.classList.add('waiting');
+      } else if (!Number.isNaN(numericQueue) && numericQueue > 0 && ['running', 'accepted', 'queued', 'cancelling'].includes(status)) {
+        etaEl.textContent = 'Waiting on Horde...';
+        etaEl.classList.add('processing');
       } else if (['running', 'accepted', 'queued', 'cancelling'].includes(status)) {
         etaEl.textContent = 'Processing...';
         etaEl.classList.add('processing');
@@ -3468,6 +3528,35 @@
       }
     });
     updateAutoIndicators(card, info);
+  }
+
+  function refreshAiViewLibrary(card) {
+    if (!card) return;
+    const mediaMode = String(card.dataset.mediaMode || '').toLowerCase();
+    const mode = normalizeModeForSave(mediaMode, String(card.dataset.mode || getModeValue(card, mediaMode) || '').toLowerCase());
+    if (mediaMode !== 'ai' || (mode !== 'random' && mode !== 'specific')) {
+      return;
+    }
+    const streamId = card.dataset.stream;
+    if (!streamId) return;
+    const folderSelect = card.querySelector('.folder-select');
+    const currentFolder = folderSelect
+      ? (folderSelect.value === '__filtered__' ? (folderSelect.dataset.currentFolder || 'all') : (folderSelect.value || folderSelect.dataset.currentFolder || 'all'))
+      : 'all';
+    const refreshResult = refreshFoldersForCard(card, card.dataset.hideNsfw === 'true');
+    if (refreshResult && typeof refreshResult.then === 'function') {
+      refreshResult.then(folder => {
+        loadMediaFor(streamId, folder || currentFolder || 'all');
+      });
+      return;
+    }
+    loadMediaFor(streamId, currentFolder || 'all');
+  }
+
+  function refreshAllAiViewLibraries() {
+    document.querySelectorAll('.stream-card[data-stream]').forEach(card => {
+      refreshAiViewLibrary(card);
+    });
   }
 
   function gatherPostProcessing(card) {
@@ -3811,7 +3900,6 @@
       modalBackdrop.addEventListener('click', () => closeAiSettings(card));
     }
 
-    const modeSelect = card.querySelector('.mode-select');
     const promptInput = card.querySelector('.ai-prompt-input');
     if (promptInput) {
       promptInput.addEventListener('blur', e => {
@@ -4395,16 +4483,16 @@
         if (display) display.textContent = path || 'None';
       });
     }
-    if (modeSelect) {
-      if (modeSelect.value === 'ai' && modelSelect) {
+    card.querySelectorAll('.mode-select').forEach(modeSelect => {
+      if ((card.dataset.mediaMode || '').toLowerCase() === 'ai' && modelSelect) {
         modelSelect.dispatchEvent(new Event('focus'));
       }
-      modeSelect.addEventListener('change', e => {
-        if (e.target.value === 'ai' && modelSelect) {
+      modeSelect.addEventListener('change', () => {
+        if ((card.dataset.mediaMode || '').toLowerCase() === 'ai' && modelSelect) {
           modelSelect.dispatchEvent(new Event('focus'));
         }
       });
-    }
+    });
     renderAiStatus(card, { status: card.querySelector('.ai-status')?.dataset.status || 'idle' }, aiActiveJobs.get(streamId) || null);
     highlightAiSelection(resultsEl, resultsEl ? resultsEl.dataset.selected || '' : '');
     if (streamId) {
@@ -4418,18 +4506,24 @@
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
     })
-    .then(res => res.json())
+    .then(res => {
+      if (!res.ok) {
+        return res.json().catch(() => ({})).then(data => {
+          throw new Error(data.error || `Server returned ${res.status}`);
+        });
+      }
+      return res.json();
+    })
     .then(data => {
       if (data.status === 'success') {
         showNotification(`Updated settings for ${streamId}`);
         const card = document.querySelector(`.stream-card[data-stream="${streamId}"]`);
         if (card) {
           const modeCategorySelect = card.querySelector('.mode-category-select');
-          const modeVariantSelect = card.querySelector('.mode-select');
           const urlInputEl = card.querySelector('.stream-url-input');
           let updatedMediaMode = (modeCategorySelect ? modeCategorySelect.value : (card.dataset.mediaMode || 'image')).toLowerCase();
-          const variantlessModes = new Set(['livestream', 'ai', 'picsum']);
-          let updatedMode = modeVariantSelect ? (modeVariantSelect.value || '').toLowerCase() : (variantlessModes.has(updatedMediaMode) ? updatedMediaMode : 'random');
+          const variantlessModes = new Set(['livestream', 'picsum']);
+          let updatedMode = getModeValue(card, updatedMediaMode) || (updatedMediaMode === 'ai' ? 'generate' : (variantlessModes.has(updatedMediaMode) ? updatedMediaMode : 'random'));
 
           if (data.new_config && (data.new_config.selected_image !== undefined || data.new_config.selected_media_kind !== undefined)) {
             const selectedPath = data.new_config.selected_image || "";
@@ -4481,7 +4575,6 @@
               offsetInput.value = Number.isFinite(offsetVal) ? String(offsetVal) : '0';
               offsetInput.disabled = !(syncSelect && syncSelect.value);
             }
-            applyModeState(card, updatedMediaMode, effectiveMode, urlInputEl ? urlInputEl.value : '');
           }
           if (data.new_config && data.new_config.image_quality !== undefined) {
             const qualitySelect = card.querySelector('.image-quality-select');
@@ -4512,6 +4605,9 @@
             if (slider) slider.value = String(amount);
             if (valEl) valEl.textContent = `${amount}%`;
           }
+          if (Array.isArray(data.tags)) {
+            syncGlobalTags(data.tags);
+          }
           if (data.new_config && data.new_config.tags !== undefined) {
             const tagList = Array.isArray(data.new_config.tags) ? data.new_config.tags : [];
             const previousTags = cardTagsMap.has(card) ? (cardTagsMap.get(card) || []).slice() : [];
@@ -4519,12 +4615,9 @@
             const tagsChanged = !tagsEqual(previousTags, nextTags);
             if (tagsChanged) {
               applyFiltersAndSorting({ anchorCard: card });
-              renderTagManager();
             }
           }
-          if (Array.isArray(data.tags)) {
-            syncGlobalTags(data.tags);
-          }
+          renderTagManager();
 
           if (data.new_config && data.new_config.media_mode !== undefined) {
             updatedMediaMode = String(data.new_config.media_mode || 'image').toLowerCase();
@@ -4538,12 +4631,9 @@
               updatedMode = normalizedMode;
             }
           }
-          if (modeVariantSelect) {
-            if (updatedMode === 'random' || updatedMode === 'specific') {
-              modeVariantSelect.value = updatedMode;
-            }
-          }
-          const effectiveMode = updatedMode || (variantlessModes.has(updatedMediaMode) ? updatedMediaMode : 'random');
+          card.dataset.mode = updatedMode;
+          selectModeVariant(card, updatedMediaMode, updatedMode);
+          const effectiveMode = updatedMode || (updatedMediaMode === 'ai' ? 'generate' : (variantlessModes.has(updatedMediaMode) ? updatedMediaMode : 'random'));
           applyModeState(card, updatedMediaMode, effectiveMode, urlInputEl ? urlInputEl.value : '');
           if (data.new_config && data.new_config.picsum_settings !== undefined) {
             applyPicsumSettings(card, data.new_config.picsum_settings);
@@ -4578,7 +4668,7 @@
               ? data.new_config.ai_state.last_auto_trigger
               : (data.new_config.picsum_settings && data.new_config.picsum_settings.last_auto_trigger ? data.new_config.picsum_settings.last_auto_trigger : null);
             timerControls.applyServerState(card, data.new_config.timer, {
-              mode: data.new_config.media_mode || data.new_config.mode || card.dataset.mediaMode,
+              mode: data.new_config.mode || data.new_config.media_mode || card.dataset.mode || card.dataset.mediaMode,
               next_auto_trigger: nextTrigger,
               last_auto_trigger: lastTrigger,
             });
@@ -4588,15 +4678,16 @@
         }
         if (opts.onSuccess) opts.onSuccess(data, card);
       } else {
-        console.error(data.error || 'Unknown error updating settings.');
-        showNotification(data.error || 'Error updating settings');
+        const errMsg = data.error || 'Unknown error updating settings.';
+        console.error('[Settings] Error response:', errMsg);
+        showNotification(errMsg);
         if (opts.onError) opts.onError(data);
       }
       return data;
     })
     .catch(err => {
-      console.error('Error saving settings:', err);
-      showNotification('Error updating settings');
+      console.error('[Settings] Fetch failure:', err);
+      showNotification('Communication error: ' + err.message);
       if (opts.onError) opts.onError(err);
       return null;
     })
@@ -4611,7 +4702,8 @@
       return;
     }
     const normalized = typeof mediaMode === 'string' ? mediaMode.toLowerCase() : 'image';
-    const wantsImages = normalized === 'image';
+    const currentMode = normalizeModeForSave(normalized, (getModeValue(card, normalized) || card.dataset.mode || '').toLowerCase());
+    const wantsImages = normalized === 'image' || (normalized === 'ai' && (currentMode === 'random' || currentMode === 'specific'));
     const wantsVideos = normalized === 'video';
     const shouldFilter = wantsImages || wantsVideos;
     const options = Array.from(select.options);
@@ -4647,6 +4739,55 @@
         }
       }
     }
+  }
+
+  function currentLibraryForMode(mediaMode) {
+    const normalized = typeof mediaMode === 'string' ? mediaMode.toLowerCase() : 'image';
+    return normalized === 'ai' ? 'ai' : 'media';
+  }
+
+  function getModeSelect(card, mediaMode = null) {
+    if (!card) return null;
+    const normalizedMedia = typeof mediaMode === 'string' && mediaMode
+      ? mediaMode.toLowerCase()
+      : String(card.dataset.mediaMode || '').toLowerCase();
+    if (!normalizedMedia) return null;
+    return card.querySelector(`.mode-select[data-category="${normalizedMedia}"]`);
+  }
+
+  function getModeValue(card, mediaMode = null) {
+    const select = getModeSelect(card, mediaMode);
+    return select ? String(select.value || '').toLowerCase() : '';
+  }
+
+  function normalizeModeForUi(mediaMode, mode) {
+    const normalizedMedia = typeof mediaMode === 'string' ? mediaMode.toLowerCase() : 'image';
+    const normalizedMode = typeof mode === 'string' ? mode.toLowerCase() : '';
+    if (normalizedMedia === 'ai') {
+      if (normalizedMode === 'ai_random') return 'random';
+      if (normalizedMode === 'ai_specific') return 'specific';
+      if (normalizedMode === 'ai_generate' || normalizedMode === 'ai') return 'generate';
+    }
+    return normalizedMode;
+  }
+
+  function normalizeModeForSave(mediaMode, mode) {
+    return normalizeModeForUi(mediaMode, mode);
+  }
+
+  function selectModeVariant(card, mediaMode, nextMode) {
+    if (!card) return;
+    const normalizedMedia = typeof mediaMode === 'string' ? mediaMode.toLowerCase() : 'image';
+    const normalizedMode = normalizeModeForUi(normalizedMedia, nextMode);
+    card.querySelectorAll('.mode-select').forEach(select => {
+      const category = String(select.dataset.category || '').toLowerCase();
+      const active = category === normalizedMedia;
+      select.style.display = active ? '' : 'none';
+      select.disabled = !active;
+      if (active && normalizedMode) {
+        select.value = normalizedMode;
+      }
+    });
   }
 
   const PICSUM_LIMITS = Object.freeze({
@@ -4876,7 +5017,12 @@ function applyPicsumSettings(card, settings, opts = {}) {
       }
       return text.split('/').slice(1).join('/');
     };
-    const url = hideNsfw ? '/folders?hide_nsfw=1' : '/folders';
+    const library = currentLibraryForMode(card.dataset.mediaMode || 'image');
+    const params = new URLSearchParams({ library });
+    if (hideNsfw) {
+      params.set('hide_nsfw', '1');
+    }
+    const url = `/folders?${params.toString()}`;
     try {
       const response = await fetch(url);
       if (!response.ok) {
@@ -4964,12 +5110,18 @@ function applyPicsumSettings(card, settings, opts = {}) {
 
   function applyModeState(card, mediaMode, mode, streamUrl) {
     const normalizedMedia = typeof mediaMode === 'string' ? mediaMode.toLowerCase() : 'image';
-    const normalizedMode = typeof mode === 'string' ? mode.toLowerCase() : '';
+    const normalizedMode = normalizeModeForSave(normalizedMedia, mode);
+    const uiMode = normalizeModeForUi(normalizedMedia, mode);
+    card.dataset.mediaMode = normalizedMedia;
+    card.dataset.mode = normalizedMode;
     const isImage = normalizedMedia === 'image';
     const isVideo = normalizedMedia === 'video';
     const isLivestream = normalizedMedia === 'livestream';
     const isAi = normalizedMedia === 'ai';
     const isPicsum = normalizedMedia === 'picsum';
+    const isAiGenerate = isAi && (normalizedMode === 'generate' || normalizedMode === 'ai');
+    const isAiRandom = isAi && normalizedMode === 'random';
+    const isAiSpecific = isAi && normalizedMode === 'specific';
     const isRandom = normalizedMode === 'random';
     const isSpecific = normalizedMode === 'specific';
 
@@ -4993,7 +5145,6 @@ function applyPicsumSettings(card, settings, opts = {}) {
     const playingRow = card.querySelector('.playing-row');
     const imagePicker = card.querySelector('.image-picker');
     const variantWrapper = card.querySelector('.mode-variant-wrapper');
-    const modeSelect = card.querySelector('.mode-select');
     const videoModeRow = card.querySelector('.video-mode-row');
     const videoModeSelect = card.querySelector('.video-mode-select');
     const playbackRow = card.querySelector('.playback-controls-row');
@@ -5007,34 +5158,15 @@ function applyPicsumSettings(card, settings, opts = {}) {
     const aiSummary = card.querySelector('.ai-summary');
     const picsumRow = card.querySelector('.picsum-row');
 
-    const showVariant = isImage || isVideo;
+    const showVariant = isImage || isVideo || isAi;
     if (variantWrapper) {
       variantWrapper.style.display = showVariant ? '' : 'none';
     }
-    if (modeSelect) {
-      const options = Array.from(modeSelect.options);
-      options.forEach(opt => {
-        const category = (opt.dataset.category || 'image').toLowerCase();
-        const visible = showVariant && category === normalizedMedia;
-        opt.hidden = !visible;
-      });
-      if (showVariant) {
-        const matching = options.find(opt => !opt.hidden && opt.value === normalizedMode);
-        if (matching) {
-          modeSelect.value = matching.value;
-        } else {
-          const fallback = options.find(opt => !opt.hidden);
-          if (fallback) modeSelect.value = fallback.value;
-        }
-        modeSelect.disabled = false;
-      } else {
-        modeSelect.disabled = true;
-      }
-    }
+    selectModeVariant(card, normalizedMedia, normalizedMode);
 
     const syncActive = isImage && syncSelect && (syncSelect.value || card.dataset.syncTimer);
-    if (durationDiv) durationDiv.style.display = (isRandom && (isImage || isVideo) && !syncActive) ? '' : 'none';
-    if (shuffleLabel) shuffleLabel.style.display = (isRandom && (isImage || isVideo)) ? '' : 'none';
+    if (durationDiv) durationDiv.style.display = ((isRandom && (isImage || isVideo) && !syncActive) || isAiRandom) ? '' : 'none';
+    if (shuffleLabel) shuffleLabel.style.display = (isRandom && (isImage || isVideo)) || isAiRandom ? '' : 'none';
     if (syncRow) syncRow.style.display = (isRandom && isImage) ? '' : 'none';
     if (syncSelect && syncOffsetInput) {
       const disabled = !(syncSelect.value || '').trim();
@@ -5042,11 +5174,11 @@ function applyPicsumSettings(card, settings, opts = {}) {
     }
     if (urlDiv) urlDiv.style.display = isLivestream ? '' : 'none';
     if (playingRow) playingRow.style.display = isLivestream ? '' : 'none';
-    if (imagePicker) imagePicker.style.display = (isSpecific && (isImage || isVideo)) ? '' : 'none';
+    if (imagePicker) imagePicker.style.display = ((isSpecific && (isImage || isVideo)) || isAiSpecific) ? '' : 'none';
     if (videoModeRow) videoModeRow.style.display = (isVideo && isRandom) ? '' : 'none';
     if (playbackRow) playbackRow.style.display = isVideo ? '' : 'none';
 
-    if (isAi) {
+    if (isAiGenerate) {
       if (aiSummary) aiSummary.style.display = '';
       if (aiSection && !card.classList.contains('ai-settings-open')) {
         aiSection.setAttribute('aria-hidden', 'true');
@@ -5054,22 +5186,25 @@ function applyPicsumSettings(card, settings, opts = {}) {
     } else {
       if (aiSummary) aiSummary.style.display = 'none';
       if (aiSection) aiSection.setAttribute('aria-hidden', 'true');
-      closeAiSettings(card);
+      if (isAiRandom || isAiSpecific || !isAi) {
+        closeAiSettings(card);
+      }
     }
     const summaryUpdater = aiSummaryUpdaters.get(card);
     if (summaryUpdater) summaryUpdater();
 
     if (selectedRow) {
-      const showSelected = (isSpecific && (isImage || isVideo)) || isAi || isPicsum;
+      const showSelected = (isSpecific && (isImage || isVideo)) || isAiSpecific || isAiGenerate || isPicsum;
       selectedRow.style.display = showSelected ? '' : 'none';
     }
-    if (folderRow) folderRow.style.display = (isImage || isVideo) ? '' : 'none';
+    if (folderRow) folderRow.style.display = (isImage || isVideo || isAiRandom || isAiSpecific) ? '' : 'none';
     if (nsfwRow) nsfwRow.style.display = (isLivestream || isPicsum) ? 'none' : '';
     if (qualityRow) qualityRow.style.display = (isLivestream || isVideo || isPicsum) ? 'none' : '';
     if (backgroundRow) backgroundRow.style.display = (isLivestream || isVideo) ? 'none' : '';
     if (picsumRow) {
       picsumRow.style.display = isPicsum ? '' : 'none';
     }
+    timerControls.updateVisibility(card);
 
     if (videoModeSelect) {
       if (isVideo && isRandom) {
@@ -5089,7 +5224,6 @@ function applyPicsumSettings(card, settings, opts = {}) {
     const urlType = detectUrlType(streamUrl);
     if (ytSettingsDiv) ytSettingsDiv.style.display = (isLivestream && urlType === 'YouTube') ? '' : 'none';
 
-    timerControls.updateVisibility(card);
     filterFolderOptions(card, normalizedMedia);
   }
 
@@ -5101,10 +5235,11 @@ function applyPicsumSettings(card, settings, opts = {}) {
     const mediaMode = (card.dataset.mediaMode || 'image').toLowerCase();
     const hideNsfw = card.dataset.hideNsfw === 'true';
     const params = new URLSearchParams({ folder });
+    params.set('library', currentLibraryForMode(mediaMode));
     if (hideNsfw) {
       params.set('hide_nsfw', '1');
     }
-    if (mediaMode === 'image') {
+    if (mediaMode === 'image' || mediaMode === 'ai') {
       params.set('kind', 'image');
     } else if (mediaMode === 'video') {
       params.set('kind', 'video');
@@ -5127,7 +5262,7 @@ function applyPicsumSettings(card, settings, opts = {}) {
             return;
           }
           const kind = (item.kind || '').toLowerCase() === 'video' ? 'video' : 'image';
-          if (mediaMode === 'image' && kind !== 'image') {
+          if ((mediaMode === 'image' || mediaMode === 'ai') && kind !== 'image') {
             return;
           }
           if (mediaMode === 'video' && kind !== 'video') {
@@ -5465,7 +5600,6 @@ function applyPicsumSettings(card, settings, opts = {}) {
       }
       // Mode change
       const modeCategorySelect = card.querySelector('.mode-category-select');
-      const modeSelect = card.querySelector('.mode-select');
       const urlInput = card.querySelector('.stream-url-input');
 
       const getCurrentMediaMode = () => {
@@ -5478,19 +5612,24 @@ function applyPicsumSettings(card, settings, opts = {}) {
         modeCategorySelect.addEventListener('change', e => {
           const mediaMode = (e.target.value || 'image').toLowerCase();
           card.dataset.mediaMode = mediaMode;
+          const modeSelect = getModeSelect(card, mediaMode);
           let nextMode;
           if (mediaMode === 'image' || mediaMode === 'video') {
             nextMode = (modeSelect && !modeSelect.disabled) ? (modeSelect.value || 'random').toLowerCase() : 'random';
             if (nextMode !== 'random' && nextMode !== 'specific') {
               nextMode = 'random';
-              if (modeSelect) modeSelect.value = nextMode;
+              selectModeVariant(card, mediaMode, nextMode);
             }
+          } else if (mediaMode === 'ai') {
+            const uiMode = (modeSelect && !modeSelect.disabled) ? (modeSelect.value || 'generate').toLowerCase() : 'generate';
+            nextMode = normalizeModeForSave(mediaMode, uiMode);
+            selectModeVariant(card, mediaMode, nextMode);
           } else if (mediaMode === 'livestream') {
             nextMode = 'livestream';
           } else if (mediaMode === 'picsum') {
             nextMode = 'picsum';
           } else {
-            nextMode = 'ai';
+            nextMode = 'generate';
           }
           const payload = { media_mode: mediaMode, mode: nextMode };
           if ((mediaMode === 'image' || mediaMode === 'video') && nextMode === 'random') {
@@ -5516,21 +5655,26 @@ function applyPicsumSettings(card, settings, opts = {}) {
           }
           saveSettings(streamId, payload);
           applyModeState(card, mediaMode, nextMode, getStreamUrl());
-          if (nextMode === 'specific' && (mediaMode === 'image' || mediaMode === 'video')) {
+          refreshFoldersForCard(card, card.dataset.hideNsfw === 'true');
+          if ((nextMode === 'specific' && (mediaMode === 'image' || mediaMode === 'video')) || (mediaMode === 'ai' && nextMode === 'specific')) {
             const effectiveFolder = folderSelect ? (folderSelect.value === '__filtered__' ? (folderSelect.dataset.currentFolder || 'all') : folderSelect.value) : 'all';
             loadMediaFor(streamId, effectiveFolder);
           }
         });
       }
 
-      if (modeSelect) {
+      card.querySelectorAll('.mode-select').forEach(modeSelect => {
         modeSelect.addEventListener('change', e => {
           const mediaMode = getCurrentMediaMode();
+          const selectCategory = String(modeSelect.dataset.category || '').toLowerCase();
+          if (selectCategory !== mediaMode) {
+            return;
+          }
           if (mediaMode === 'picsum') {
             applyModeState(card, mediaMode, 'picsum', getStreamUrl());
             return;
           }
-          const mode = (e.target.value || 'random').toLowerCase();
+          const mode = normalizeModeForSave(mediaMode, (e.target.value || 'random').toLowerCase());
           const payload = { media_mode: mediaMode, mode };
           if ((mediaMode === 'image' || mediaMode === 'video') && mode === 'random') {
             const durInput = card.querySelector('.duration-input');
@@ -5538,12 +5682,12 @@ function applyPicsumSettings(card, settings, opts = {}) {
           }
           saveSettings(streamId, payload);
           applyModeState(card, mediaMode, mode, getStreamUrl());
-          if (mode === 'specific' && (mediaMode === 'image' || mediaMode === 'video')) {
+          if ((mode === 'specific' && (mediaMode === 'image' || mediaMode === 'video')) || (mediaMode === 'ai' && mode === 'specific')) {
             const effectiveFolder = folderSelect ? (folderSelect.value === '__filtered__' ? (folderSelect.dataset.currentFolder || 'all') : folderSelect.value) : 'all';
             loadMediaFor(streamId, effectiveFolder);
           }
         });
-      }
+      });
 
       // Duration change
       const durInput = card.querySelector('.duration-input');
@@ -5586,7 +5730,7 @@ function applyPicsumSettings(card, settings, opts = {}) {
           card.dataset.syncTimer = syncSelect.value || '';
           updateSyncDisabled();
           saveSettings(streamId, buildSyncPayload());
-          applyModeState(card, getCurrentMediaMode(), modeSelect ? modeSelect.value : '', getStreamUrl());
+          applyModeState(card, getCurrentMediaMode(), getModeValue(card, getCurrentMediaMode()), getStreamUrl());
         });
       }
       if (syncOffsetInput) {
@@ -5657,12 +5801,12 @@ function applyPicsumSettings(card, settings, opts = {}) {
         runEmbedTest(urlInput.value || '');
         urlInput.addEventListener('input', e => {
           setUrlBadge(e.target.value);
-          applyModeState(card, getCurrentMediaMode(), modeSelect ? modeSelect.value : '', e.target.value);
+          applyModeState(card, getCurrentMediaMode(), getModeValue(card, getCurrentMediaMode()), e.target.value);
           runEmbedTest(e.target.value);
         });
         urlInput.addEventListener('change', e => {
           saveSettings(streamId, { stream_url: e.target.value });
-          applyModeState(card, getCurrentMediaMode(), modeSelect ? modeSelect.value : '', e.target.value);
+          applyModeState(card, getCurrentMediaMode(), getModeValue(card, getCurrentMediaMode()), e.target.value);
           // If not YouTube, force quality AUTO
           const qualitySelect = card.querySelector('.yt-quality-select');
           const t = detectUrlType(e.target.value);
@@ -5733,8 +5877,16 @@ function applyPicsumSettings(card, settings, opts = {}) {
       }
 
       const initialMediaMode = (modeCategorySelect ? modeCategorySelect.value : (card.dataset.mediaMode || 'image')).toLowerCase();
-      const initialModeValue = modeSelect ? (modeSelect.value || '').toLowerCase() : ((initialMediaMode === 'livestream' || initialMediaMode === 'ai') ? initialMediaMode : 'random');
+      const initialModeValue = normalizeModeForSave(
+        initialMediaMode,
+        String(card.dataset.mode || getModeValue(card, initialMediaMode) || (initialMediaMode === 'livestream' ? 'livestream' : (initialMediaMode === 'ai' ? 'generate' : 'random'))).toLowerCase()
+      );
       applyModeState(card, initialMediaMode, initialModeValue, urlInput ? urlInput.value : '');
+      refreshFoldersForCard(card, card.dataset.hideNsfw === 'true');
+      if (((initialMediaMode === 'image' || initialMediaMode === 'video') && initialModeValue === 'specific') || (initialMediaMode === 'ai' && initialModeValue === 'specific')) {
+        const effectiveFolder = folderSelect ? (folderSelect.value === '__filtered__' ? (folderSelect.dataset.currentFolder || 'all') : (folderSelect.value || folderSelect.dataset.currentFolder || 'all')) : 'all';
+        loadMediaFor(streamId, effectiveFolder);
+      }
     });
     syncMinimizedGridState();
     originalCardOrder = Array.from(cardTagsMap.keys());

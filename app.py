@@ -1,3 +1,6 @@
+import eventlet
+eventlet.monkey_patch()
+
 import base64
 import errno
 import json
@@ -24,6 +27,40 @@ from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple, Union, Set
 from urllib.parse import quote, urlparse, parse_qs
+from collections import OrderedDict
+
+class LRUCache:
+    def __init__(self, maxsize: int) -> None:
+        self.cache: OrderedDict[Any, Any] = OrderedDict()
+        self.maxsize = maxsize
+        self.lock = threading.Lock()
+
+    def get(self, key: Any, default: Any = None) -> Any:
+        with self.lock:
+            if key in self.cache:
+                self.cache.move_to_end(key)
+                return self.cache[key]
+            return default
+
+    def __setitem__(self, key: Any, value: Any) -> None:
+        with self.lock:
+            if key in self.cache:
+                self.cache.move_to_end(key)
+            self.cache[key] = value
+            if len(self.cache) > self.maxsize:
+                self.cache.popitem(last=False)
+
+    def pop(self, key: Any, *args: Any) -> Any:
+        with self.lock:
+            return self.cache.pop(key, *args)
+
+    def keys(self):
+        with self.lock:
+            return list(self.cache.keys())
+
+    def __len__(self) -> int:
+        with self.lock:
+            return len(self.cache)
 
 try:
     import engineio.payload  # type: ignore[import]
@@ -83,7 +120,6 @@ from picsum import (
     assign_new_picsum_to_stream,
     configure_socketio,
 )
-from update_helpers import backup_user_state, restore_user_state
 from system_monitor import get_system_stats
 import config_manager
 from media_manager import MediaManager, MediaManagerError, MEDIA_MANAGER_CACHE_SUBDIR
@@ -242,6 +278,10 @@ logger = logging.getLogger(__name__)
 _emit_throttle_lock = threading.Lock()
 _emit_min_interval = 0.05  # seconds
 _last_emit_timestamp = 0.0
+UPDATE_PROGRESS_EVENT = "update_progress"
+UPDATE_STAGE_SEQUENCE = ("fetch", "checkout", "apply", "dependencies", "restart", "wait_restart")
+_update_job_lock = threading.Lock()
+_update_job_active = False
 
 
 def safe_emit(
@@ -255,14 +295,6 @@ def safe_emit(
     **kwargs: Any,
 ) -> None:
     """Emit a Socket.IO event defensively, ignoring disconnected clients."""
-
-    global _last_emit_timestamp
-    with _emit_throttle_lock:
-        now = time.monotonic()
-        wait_for = _emit_min_interval - (now - _last_emit_timestamp)
-        if wait_for > 0:
-            time.sleep(wait_for)
-        _last_emit_timestamp = time.monotonic()
     try:
         socketio.emit(
             event_name,
@@ -273,12 +305,142 @@ def safe_emit(
             skip_sid=skip_sid,
             **kwargs,
         )
-    except (OSError, BrokenPipeError) as exc:  # pragma: no cover - expected on disconnects
+    except (OSError, BrokenPipeError) as exc:  # pragma: no cover
         app.logger.warning(
             "[SocketIO] Tried to emit to disconnected client for event '%s': %s",
             event_name,
             exc,
         )
+    except Exception as exc:
+        app.logger.error(
+            "[SocketIO] Failed to emit event '%s': %s",
+            event_name,
+            exc,
+        )
+
+
+def _set_update_job_active(active: bool) -> bool:
+    global _update_job_active
+    with _update_job_lock:
+        if active and _update_job_active:
+            return False
+        _update_job_active = active
+        return True
+
+
+def _emit_update_progress(
+    socket_id: Optional[str],
+    *,
+    stage: Optional[str] = None,
+    message: Optional[str] = None,
+    line: Optional[str] = None,
+    state: str = "info",
+    complete: bool = False,
+    failed: bool = False,
+) -> None:
+    if not socket_id:
+        return
+    payload: Dict[str, Any] = {
+        "state": state,
+        "complete": bool(complete),
+        "failed": bool(failed),
+    }
+    if stage:
+        payload["stage"] = stage
+    if message:
+        payload["message"] = message
+    if line is not None:
+        payload["line"] = line
+    safe_emit(UPDATE_PROGRESS_EVENT, payload, to=socket_id)
+
+
+def _update_stage_from_line(line: str, current_stage: str) -> str:
+    lowered = line.strip().lower()
+    if "fetching latest changes" in lowered:
+        return "fetch"
+    if "already on '" in lowered or "head is now at" in lowered or "checking out" in lowered:
+        return "checkout"
+    if "restoring" in lowered or "applying" in lowered:
+        return "apply"
+    if "updating python dependencies" in lowered:
+        return "dependencies"
+    if lowered.startswith("restarting ") or "restarting echomosaic" in lowered:
+        return "restart"
+    if "update complete" in lowered:
+        return "wait_restart"
+    return current_stage
+
+
+def _run_update_job(repo_path: str, update_script: str, service_name: str, socket_id: Optional[str]) -> None:
+    stage = "fetch"
+    _emit_update_progress(socket_id, stage=stage, message="Starting update…", state="info")
+    process: Optional[subprocess.Popen[str]] = None
+    try:
+        process = subprocess.Popen(
+            ["bash", update_script],
+            cwd=repo_path,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1,
+        )
+        assert process.stdout is not None
+        for raw_line in process.stdout:
+            clean_line = raw_line.rstrip("\n")
+            if not clean_line:
+                continue
+            next_stage = _update_stage_from_line(clean_line, stage)
+            stage = next_stage
+            _emit_update_progress(
+                socket_id,
+                stage=stage,
+                message=clean_line,
+                line=clean_line,
+                state="info",
+            )
+        return_code = process.wait()
+        if return_code == 0:
+            _emit_update_progress(
+                socket_id,
+                stage="wait_restart",
+                message=f"{service_name} restarting… waiting for service to come back.",
+                state="info",
+                complete=True,
+            )
+        elif return_code == -15 and stage in {"restart", "wait_restart"}:
+            _emit_update_progress(
+                socket_id,
+                stage="wait_restart",
+                message=f"{service_name} restart interrupted the updater connection as expected. Waiting for service to come back.",
+                line=f"{service_name} restart interrupted the updater connection as expected.",
+                state="info",
+                complete=True,
+            )
+        else:
+            _emit_update_progress(
+                socket_id,
+                stage=stage,
+                message=f"Update failed with exit code {return_code}.",
+                state="error",
+                failed=True,
+            )
+    except Exception as exc:
+        logger.exception("In-app update failed")
+        _emit_update_progress(
+            socket_id,
+            stage=stage,
+            message=f"Update failed: {exc}",
+            line=f"ERROR: {exc}",
+            state="error",
+            failed=True,
+        )
+    finally:
+        _set_update_job_active(False)
+        if process is not None and process.poll() is None:
+            try:
+                process.kill()
+            except Exception:
+                pass
 
 
 SETTINGS_FILE = "settings.json"
@@ -304,11 +466,14 @@ THUMBNAIL_JPEG_QUALITY = 60
 IMAGE_CACHE_TIMEOUT = 60 * 60 * 24 * 7  # One week default for conditional responses
 IMAGE_CACHE_CONTROL_MAX_AGE = 31536000  # One year for browser Cache-Control headers
 BAD_MEDIA_LOG_TTL = 60 * 10
-_BAD_MEDIA_LOG_CACHE: Dict[str, float] = {}
+_BAD_MEDIA_LOG_CACHE = LRUCache(maxsize=1024)
 
 IMAGE_QUALITY_CHOICES = {"auto", "thumb", "medium", "full"}
 
 AI_MODE = "ai"
+AI_GENERATE_MODE = "generate"
+AI_RANDOM_MODE = "random"
+AI_SPECIFIC_MODE = "specific"
 AI_SETTINGS_KEY = "ai_settings"
 AI_STATE_KEY = "ai_state"
 AI_PRESETS_KEY = "_ai_presets"
@@ -330,6 +495,8 @@ AI_TEMP_SUBDIR = "_ai_temp"
 AI_DEFAULT_PERSIST = True
 AI_POLL_INTERVAL = 5.0
 AI_TIMEOUT = 0.0
+MEDIA_LIBRARY_DEFAULT = "media"
+AI_MEDIA_LIBRARY = "ai"
 INTERNAL_MEDIA_DIRS = {THUMBNAIL_SUBDIR, AI_TEMP_SUBDIR, MEDIA_MANAGER_CACHE_SUBDIR}
 IGNORED_MEDIA_PREFIX = "_"
 STABLE_HORDE_LOG_PREFIX = "[StableHorde]"
@@ -467,11 +634,12 @@ MEDIA_MODE_VARIANTS = {
     MEDIA_MODE_IMAGE: {"random", "specific"},
     MEDIA_MODE_VIDEO: {"random", "specific"},
     MEDIA_MODE_LIVESTREAM: {"livestream"},
-    MEDIA_MODE_AI: {AI_MODE},
+    MEDIA_MODE_AI: {AI_GENERATE_MODE, AI_RANDOM_MODE, AI_SPECIFIC_MODE, AI_MODE},
     MEDIA_MODE_PICSUM: {MEDIA_MODE_PICSUM},
 }
-TIMER_SUPPORTED_MODES = {AI_MODE, MEDIA_MODE_PICSUM}
+TIMER_SUPPORTED_MODES = {AI_GENERATE_MODE, MEDIA_MODE_PICSUM, AI_MODE}
 TIMER_MODE_LABELS = {
+    AI_GENERATE_MODE: "AI Images",
     AI_MODE: "AI Images",
     MEDIA_MODE_PICSUM: "Picsum",
 }
@@ -486,20 +654,74 @@ SYNC_TIMER_MIN_OFFSET = 0.0
 SYNC_SWITCH_LEAD_SECONDS = 0.25
 SYNC_SUPPORTED_MEDIA_MODES = {MEDIA_MODE_IMAGE}
 
+
+def _dedupe_media_root_aliases(roots: List[config_manager.MediaRoot]) -> List[config_manager.MediaRoot]:
+    seen: Set[str] = set()
+    deduped: List[config_manager.MediaRoot] = []
+    for root in roots:
+        alias = root.alias
+        suffix = 2
+        while alias in seen or alias == "all":
+            alias = f"{root.alias}-{suffix}"
+            suffix += 1
+        seen.add(alias)
+        if alias == root.alias:
+            deduped.append(root)
+        else:
+            deduped.append(
+                config_manager.MediaRoot(
+                    alias=alias,
+                    path=root.path,
+                    display_name=root.display_name,
+                    library=root.library,
+                )
+            )
+    return deduped
+
+
 DEFAULT_MEDIA_ROOT_PATH = Path(os.path.abspath("./media")).resolve()
+DEFAULT_AI_MEDIA_ROOT_PATH = Path(os.path.abspath("./ai_media")).resolve()
 
 CONFIG: Dict[str, Any] = config_manager.load_config()
-MEDIA_ROOTS = config_manager.build_media_roots(CONFIG.get("MEDIA_PATHS", []))
-if not MEDIA_ROOTS:
+STANDARD_MEDIA_ROOTS = config_manager.build_media_roots(
+    CONFIG.get("MEDIA_PATHS", []),
+    library=MEDIA_LIBRARY_DEFAULT,
+)
+if not STANDARD_MEDIA_ROOTS:
     default_path = DEFAULT_MEDIA_ROOT_PATH
     default_alias = default_path.name or "media"
-    MEDIA_ROOTS = [
-        config_manager.MediaRoot(alias=default_alias, path=default_path, display_name=default_alias)
+    STANDARD_MEDIA_ROOTS = [
+        config_manager.MediaRoot(
+            alias=default_alias,
+            path=default_path,
+            display_name=default_alias,
+            library=MEDIA_LIBRARY_DEFAULT,
+        )
     ]
 
-for root in MEDIA_ROOTS:
+AI_MEDIA_ROOTS = config_manager.build_media_roots(
+    CONFIG.get("AI_MEDIA_PATHS", []),
+    library=AI_MEDIA_LIBRARY,
+)
+if not AI_MEDIA_ROOTS:
+    default_ai_path = DEFAULT_AI_MEDIA_ROOT_PATH
+    default_ai_alias = default_ai_path.name or "ai-media"
+    AI_MEDIA_ROOTS = [
+        config_manager.MediaRoot(
+            alias=default_ai_alias,
+            path=default_ai_path,
+            display_name=default_ai_alias,
+            library=AI_MEDIA_LIBRARY,
+        )
+    ]
+
+MEDIA_ROOTS = _dedupe_media_root_aliases(STANDARD_MEDIA_ROOTS + AI_MEDIA_ROOTS)
+STANDARD_MEDIA_ROOTS = [root for root in MEDIA_ROOTS if root.library == MEDIA_LIBRARY_DEFAULT]
+AI_MEDIA_ROOTS = [root for root in MEDIA_ROOTS if root.library == AI_MEDIA_LIBRARY]
+
+for root in STANDARD_MEDIA_ROOTS + AI_MEDIA_ROOTS:
     try:
-        if root.path.resolve(strict=False) == DEFAULT_MEDIA_ROOT_PATH:
+        if root.path.resolve(strict=False) in {DEFAULT_MEDIA_ROOT_PATH, DEFAULT_AI_MEDIA_ROOT_PATH}:
             root.path.mkdir(parents=True, exist_ok=True)
     except OSError as exc:
         logger.warning("Unable to ensure media directory %s: %s", root.path, exc)
@@ -515,15 +737,30 @@ for candidate_root in MEDIA_ROOTS:
         continue
 
 if not AVAILABLE_MEDIA_ROOTS:
-    fallback_root = MEDIA_ROOTS[0]
+    fallback_root = STANDARD_MEDIA_ROOTS[0]
     try:
         fallback_root.path.mkdir(parents=True, exist_ok=True)
     except OSError as exc:
         logger.warning("Unable to prepare fallback media directory %s: %s", fallback_root.path, exc)
     AVAILABLE_MEDIA_ROOTS = [fallback_root]
 
+AVAILABLE_MEDIA_ROOTS_BY_LIBRARY: Dict[str, List[config_manager.MediaRoot]] = {
+    MEDIA_LIBRARY_DEFAULT: [root for root in AVAILABLE_MEDIA_ROOTS if root.library == MEDIA_LIBRARY_DEFAULT],
+    AI_MEDIA_LIBRARY: [root for root in AVAILABLE_MEDIA_ROOTS if root.library == AI_MEDIA_LIBRARY],
+}
+if not AVAILABLE_MEDIA_ROOTS_BY_LIBRARY[MEDIA_LIBRARY_DEFAULT]:
+    AVAILABLE_MEDIA_ROOTS_BY_LIBRARY[MEDIA_LIBRARY_DEFAULT] = [STANDARD_MEDIA_ROOTS[0]]
+if not AVAILABLE_MEDIA_ROOTS_BY_LIBRARY[AI_MEDIA_LIBRARY]:
+    fallback_ai_root = AI_MEDIA_ROOTS[0]
+    try:
+        fallback_ai_root.path.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        logger.warning("Unable to prepare fallback AI media directory %s: %s", fallback_ai_root.path, exc)
+    AVAILABLE_MEDIA_ROOTS_BY_LIBRARY[AI_MEDIA_LIBRARY] = [fallback_ai_root]
+
 MEDIA_ROOT_LOOKUP = {root.alias: root for root in MEDIA_ROOTS}
-PRIMARY_MEDIA_ROOT = AVAILABLE_MEDIA_ROOTS[0]
+PRIMARY_MEDIA_ROOT = AVAILABLE_MEDIA_ROOTS_BY_LIBRARY[MEDIA_LIBRARY_DEFAULT][0]
+PRIMARY_AI_MEDIA_ROOT = AVAILABLE_MEDIA_ROOTS_BY_LIBRARY[AI_MEDIA_LIBRARY][0]
 THUMBNAIL_CACHE_DIR = PRIMARY_MEDIA_ROOT.path / THUMBNAIL_SUBDIR
 
 NSFW_KEYWORD = "nsfw"
@@ -576,7 +813,7 @@ def _require_media_edit() -> None:
 
 
 # Cache image paths per folder so we can serve repeated requests without rescanning the disk.
-IMAGE_CACHE: Dict[str, Dict[str, Any]] = {}
+IMAGE_CACHE = LRUCache(maxsize=64)
 
 
 def _media_root_available(root: config_manager.MediaRoot) -> bool:
@@ -584,6 +821,23 @@ def _media_root_available(root: config_manager.MediaRoot) -> bool:
         return root.path.exists() and root.path.is_dir() and os.access(root.path, os.R_OK)
     except OSError:
         return False
+
+
+def _normalize_library_key(value: Any, default: str = MEDIA_LIBRARY_DEFAULT) -> str:
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {MEDIA_LIBRARY_DEFAULT, AI_MEDIA_LIBRARY}:
+            return normalized
+    return default
+
+
+def _library_roots(library: str) -> List[config_manager.MediaRoot]:
+    return list(AVAILABLE_MEDIA_ROOTS_BY_LIBRARY.get(_normalize_library_key(library), []))
+
+
+def _library_for_media_mode(media_mode: Optional[str]) -> str:
+    normalized = media_mode.strip().lower() if isinstance(media_mode, str) else ""
+    return AI_MEDIA_LIBRARY if normalized == MEDIA_MODE_AI else MEDIA_LIBRARY_DEFAULT
 
 
 def _build_virtual_media_path(alias: str, relative: Union[str, Path]) -> str:
@@ -1041,6 +1295,10 @@ def _build_youtube_metadata(
     return metadata
 
 
+_YOUTUBE_IN_FLIGHT: Set[str] = set()
+_YOUTUBE_IN_FLIGHT_LOCK = threading.Lock()
+
+
 def _youtube_oembed_lookup(
     url: str,
     details: Dict[str, Any],
@@ -1057,30 +1315,36 @@ def _youtube_oembed_lookup(
             and now - cached.get("timestamp", 0) < YOUTUBE_OEMBED_CACHE_TTL
         ):
             return dict(cached.get("data", {}))
-    if requests is None:
-        return _build_youtube_metadata(details, None)
-    try:
-        response = requests.get(
-            YOUTUBE_OEMBED_ENDPOINT,
-            params={"url": url, "format": "json"},
-            timeout=6,
-        )
-        response.raise_for_status()
-        payload = response.json()
-    except Exception as exc:
-        logger.debug("YouTube oEmbed lookup failed for %s: %s", url, exc)
-        with YOUTUBE_OEMBED_CACHE_LOCK:
-            cached = YOUTUBE_OEMBED_CACHE.get(cache_key)
-            if cached:
-                return dict(cached.get("data", {}))
-        return _build_youtube_metadata(details, None)
 
-    metadata = _build_youtube_metadata(details, payload)
-    timestamp = datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
-    metadata["fetched_at"] = timestamp
-    with YOUTUBE_OEMBED_CACHE_LOCK:
-        YOUTUBE_OEMBED_CACHE[cache_key] = {"data": dict(metadata), "timestamp": now}
-    return metadata
+    # Check for in-flight requests to avoid redundant work and blocking
+    with _YOUTUBE_IN_FLIGHT_LOCK:
+        if url in _YOUTUBE_IN_FLIGHT:
+            return _build_youtube_metadata(details, None)
+        _YOUTUBE_IN_FLIGHT.add(url)
+
+    def _async_fetch_oembed():
+        try:
+            response = requests.get(
+                YOUTUBE_OEMBED_ENDPOINT,
+                params={"url": url, "format": "json"},
+                timeout=6,
+            )
+            response.raise_for_status()
+            payload = response.json()
+            metadata = _build_youtube_metadata(details, payload)
+            timestamp = datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
+            metadata["fetched_at"] = timestamp
+            with YOUTUBE_OEMBED_CACHE_LOCK:
+                YOUTUBE_OEMBED_CACHE[cache_key] = {"data": dict(metadata), "timestamp": time.time()}
+        except Exception as exc:
+            logger.debug("Async YouTube oEmbed lookup failed for %s: %s", url, exc)
+            # We don't need to do anything else; the next attempt will try again
+        finally:
+            with _YOUTUBE_IN_FLIGHT_LOCK:
+                _YOUTUBE_IN_FLIGHT.discard(url)
+
+    eventlet.spawn(_async_fetch_oembed)
+    return _build_youtube_metadata(details, None)
 
 
 def _set_runtime_embed_metadata(stream_id: str, metadata: Optional[Dict[str, Any]]) -> None:
@@ -1122,11 +1386,12 @@ def _refresh_embed_metadata(
     conf["embed_metadata"] = sanitized
     _set_runtime_embed_metadata(stream_id, sanitized)
     return sanitized
-IMAGE_CACHE_LOCK = threading.Lock()
-RESIZED_IMAGE_LOCKS: Dict[Path, threading.Lock] = {}
+IMAGE_CACHE_LOCK = threading.Lock()  # Kept for external callers; LRUCache also has internal lock
+RESIZED_IMAGE_LOCKS: LRUCache = LRUCache(maxsize=512)
 RESIZED_IMAGE_LOCKS_GUARD = threading.Lock()
 STREAM_RUNTIME_STATE: Dict[str, Dict[str, Any]] = {}
 STREAM_RUNTIME_LOCK = threading.Lock()
+_VIDEO_DURATION_CACHE: LRUCache = LRUCache(maxsize=128)  # Cache video durations to avoid cv2 re-probes
 
 YOUTUBE_DOMAINS = {
     "youtube.com",
@@ -1140,10 +1405,10 @@ YOUTUBE_DOMAINS = {
 }
 YOUTUBE_OEMBED_ENDPOINT = "https://www.youtube.com/oembed"
 YOUTUBE_OEMBED_CACHE_TTL = 20 * 60  # 20 minutes
-YOUTUBE_OEMBED_CACHE: Dict[Tuple[str, ...], Dict[str, Any]] = {}
+YOUTUBE_OEMBED_CACHE = LRUCache(maxsize=256)
 YOUTUBE_OEMBED_CACHE_LOCK = threading.Lock()
 YOUTUBE_LIVE_PROBE_CACHE_TTL = 15 * 60  # 15 minutes
-YOUTUBE_LIVE_PROBE_CACHE: Dict[Tuple[str, ...], Dict[str, Any]] = {}
+YOUTUBE_LIVE_PROBE_CACHE = LRUCache(maxsize=256)
 YOUTUBE_LIVE_PROBE_CACHE_LOCK = threading.Lock()
 YOUTUBE_LIVE_PROBE_MAX_BYTES = 30_000
 YOUTUBE_LIVE_HTML_MARKERS = (
@@ -1167,6 +1432,9 @@ STREAM_UPDATE_EVENT = "stream_update"
 STREAM_INIT_EVENT = "stream_init"
 SYNC_TIME_EVENT = "sync_time"
 STREAM_SYNC_INTERVAL_SECONDS = 3.0
+YOUTUBE_SYNC_EVENT = "youtube_sync"
+YOUTUBE_SYNC_ROLE_EVENT = "youtube_sync_role"
+YOUTUBE_SYNC_MAX_AGE_SECONDS = 20.0
 
 LIVE_HLS_ASYNC = True
 HLS_TTL_SECS = 3600
@@ -1174,6 +1442,142 @@ MAX_HLS_WORKERS = 3
 HLS_ERROR_RETRY_SECS = 30
 
 playback_manager: Optional["StreamPlaybackManager"] = None
+YOUTUBE_SYNC_STATE_LOCK = threading.Lock()
+YOUTUBE_SYNC_STATE: Dict[str, Dict[str, Any]] = {}
+YOUTUBE_SYNC_SUBSCRIBERS: Dict[str, Set[str]] = {}
+YOUTUBE_SYNC_LEADERS: Dict[str, str] = {}
+
+
+def _youtube_sync_source_signature(details: Optional[Dict[str, Any]]) -> Tuple[str, str, str]:
+    if not isinstance(details, dict):
+        return ("", "", "")
+    return (
+        str(details.get("playlist_id") or "").strip(),
+        str(details.get("video_id") or "").strip(),
+        str(details.get("content_type") or "").strip().lower(),
+    )
+
+
+def _get_youtube_sync_state(
+    stream_id: str,
+    details: Optional[Dict[str, Any]],
+    *,
+    max_age: float = YOUTUBE_SYNC_MAX_AGE_SECONDS,
+) -> Optional[Dict[str, Any]]:
+    expected = _youtube_sync_source_signature(details)
+    now = time.time()
+    with YOUTUBE_SYNC_STATE_LOCK:
+        entry = YOUTUBE_SYNC_STATE.get(stream_id)
+        if not entry:
+            return None
+        if entry.get("source_signature") != expected:
+            return None
+        server_time = entry.get("server_time")
+        if not isinstance(server_time, (int, float)):
+            return None
+        age = now - float(server_time)
+        if age < 0:
+            age = 0.0
+        if age > max_age:
+            return None
+        synced = dict(entry)
+    base_seconds = synced.get("start_seconds")
+    if isinstance(base_seconds, (int, float)):
+        synced["start_seconds"] = max(0.0, float(base_seconds) + age)
+    synced["server_time"] = now
+    return synced
+
+
+def _store_youtube_sync_state(
+    stream_id: str,
+    details: Dict[str, Any],
+    *,
+    position: float,
+    playlist_index: Optional[int] = None,
+    video_id: Optional[str] = None,
+    reporter_sid: Optional[str] = None,
+) -> Dict[str, Any]:
+    now = time.time()
+    content_type = str(details.get("content_type") or "").strip().lower()
+    normalized_video_id = str(video_id or details.get("video_id") or "").strip() or None
+    normalized_index = playlist_index if isinstance(playlist_index, int) and playlist_index >= 0 else None
+    payload: Dict[str, Any] = {
+        "stream_id": stream_id,
+        "content_type": content_type,
+        "video_id": normalized_video_id,
+        "playlist_id": str(details.get("playlist_id") or "").strip() or None,
+        "playlist_index": normalized_index,
+        "start_seconds": max(0.0, float(position)),
+        "server_time": now,
+        "source_signature": _youtube_sync_source_signature(details),
+    }
+    if reporter_sid:
+        payload["origin_sid"] = reporter_sid
+    with YOUTUBE_SYNC_STATE_LOCK:
+        YOUTUBE_SYNC_STATE[stream_id] = dict(payload)
+    return payload
+
+
+def _youtube_subscriber_ids(stream_id: str) -> List[str]:
+    with YOUTUBE_SYNC_STATE_LOCK:
+        return sorted(YOUTUBE_SYNC_SUBSCRIBERS.get(stream_id, set()))
+
+
+def _assign_youtube_sync_leader(stream_id: str, sid: str) -> None:
+    with YOUTUBE_SYNC_STATE_LOCK:
+        subscribers = YOUTUBE_SYNC_SUBSCRIBERS.setdefault(stream_id, set())
+        subscribers.add(sid)
+        leader_sid = YOUTUBE_SYNC_LEADERS.get(stream_id)
+        if not leader_sid or leader_sid not in subscribers:
+            YOUTUBE_SYNC_LEADERS[stream_id] = sid
+            leader_sid = sid
+    safe_emit(
+        YOUTUBE_SYNC_ROLE_EVENT,
+        {"stream_id": stream_id, "is_leader": leader_sid == sid},
+        to=sid,
+    )
+
+
+def _promote_youtube_sync_leader(stream_id: str) -> None:
+    new_leader: Optional[str] = None
+    with YOUTUBE_SYNC_STATE_LOCK:
+        subscribers = YOUTUBE_SYNC_SUBSCRIBERS.get(stream_id, set())
+        if subscribers:
+            new_leader = sorted(subscribers)[0]
+            YOUTUBE_SYNC_LEADERS[stream_id] = new_leader
+        else:
+            YOUTUBE_SYNC_LEADERS.pop(stream_id, None)
+    if new_leader:
+        safe_emit(
+            YOUTUBE_SYNC_ROLE_EVENT,
+            {"stream_id": stream_id, "is_leader": True},
+            to=new_leader,
+        )
+
+
+def _remove_youtube_sync_subscriber(sid: str, stream_id: Optional[str] = None) -> None:
+    promotions: List[str] = []
+    with YOUTUBE_SYNC_STATE_LOCK:
+        stream_ids = [stream_id] if stream_id else list(YOUTUBE_SYNC_SUBSCRIBERS.keys())
+        for current_stream_id in stream_ids:
+            subscribers = YOUTUBE_SYNC_SUBSCRIBERS.get(current_stream_id)
+            if not subscribers or sid not in subscribers:
+                continue
+            subscribers.discard(sid)
+            if not subscribers:
+                YOUTUBE_SYNC_SUBSCRIBERS.pop(current_stream_id, None)
+                YOUTUBE_SYNC_LEADERS.pop(current_stream_id, None)
+                continue
+            if YOUTUBE_SYNC_LEADERS.get(current_stream_id) == sid:
+                YOUTUBE_SYNC_LEADERS.pop(current_stream_id, None)
+                promotions.append(current_stream_id)
+    for current_stream_id in promotions:
+        _promote_youtube_sync_leader(current_stream_id)
+
+
+def _youtube_sync_role_for_sid(stream_id: str, sid: str) -> bool:
+    with YOUTUBE_SYNC_STATE_LOCK:
+        return YOUTUBE_SYNC_LEADERS.get(stream_id) == sid
 
 
 def _normalize_folder_key(folder: Optional[str]) -> str:
@@ -1192,13 +1596,18 @@ def _normalize_folder_key(folder: Optional[str]) -> str:
     return normalized
 
 
-def _resolve_folder_path(folder_key: str) -> Optional[Tuple[config_manager.MediaRoot, Path]]:
+def _cache_scope_key(folder_key: str, library: str) -> str:
+    return f"{_normalize_library_key(library)}::{folder_key}"
+
+
+def _resolve_folder_path(folder_key: str, *, library: str = MEDIA_LIBRARY_DEFAULT) -> Optional[Tuple[config_manager.MediaRoot, Path]]:
     """Return the media root and absolute filesystem path for a cache key."""
     if folder_key == "all":
         return None
     alias, relative = _split_virtual_media_path(folder_key)
     root = MEDIA_ROOT_LOOKUP.get(alias)
-    if root is None:
+    normalized_library = _normalize_library_key(library)
+    if root is None or root.library != normalized_library:
         return None
     target_dir = (root.path / relative).resolve()
     try:
@@ -1248,9 +1657,12 @@ def _scan_root_for_cache(
             except Exception:
                 continue
             virtual_path = _build_virtual_media_path(root.alias, relative_path.as_posix())
+            folder_relative = relative_path.parent.as_posix()
+            folder_key = _build_virtual_media_path(root.alias, folder_relative)
             kind = "video" if ext in VIDEO_EXTENSIONS else "image"
             media.append({
                 "path": virtual_path,
+                "folder": folder_key,
                 "kind": kind,
                 "extension": ext,
             })
@@ -1258,19 +1670,20 @@ def _scan_root_for_cache(
     return media, dir_markers
 
 
-def _scan_folder_for_cache(folder_key: str) -> Tuple[List[Dict[str, str]], Dict[str, Tuple[int, int]]]:
+def _scan_folder_for_cache(folder_key: str, *, library: str = MEDIA_LIBRARY_DEFAULT) -> Tuple[List[Dict[str, str]], Dict[str, Tuple[int, int]]]:
     """Scan configured media directories and build the cached payload for a folder key."""
+    normalized_library = _normalize_library_key(library)
     if folder_key == "all":
         combined_media: List[Dict[str, str]] = []
         combined_markers: Dict[str, Tuple[int, int]] = {}
-        for root in AVAILABLE_MEDIA_ROOTS:
+        for root in _library_roots(normalized_library):
             media_entries, dir_markers = _scan_root_for_cache(root, root.path)
             combined_media.extend(media_entries)
             combined_markers.update(dir_markers)
         combined_media.sort(key=lambda item: item["path"].lower())
         return combined_media, combined_markers
 
-    resolved = _resolve_folder_path(folder_key)
+    resolved = _resolve_folder_path(folder_key, library=normalized_library)
     if resolved is None:
         return [], {}
     root, target_dir = resolved
@@ -1294,12 +1707,14 @@ def _directory_markers_changed(markers: Dict[str, Tuple[int, int]]) -> bool:
     return False
 
 
-def refresh_image_cache(folder: str = "all", force: bool = False) -> List[str]:
+def refresh_image_cache(folder: str = "all", hide_nsfw: bool = False, *, force: bool = False, library: str = MEDIA_LIBRARY_DEFAULT) -> List[str]:
     """Return the cached image list for a folder, refreshing if anything changed."""
     folder_key = _normalize_folder_key(folder)
+    normalized_library = _normalize_library_key(library)
+    cache_key = _cache_scope_key(folder_key, normalized_library)
 
     with IMAGE_CACHE_LOCK:
-        cached_entry = IMAGE_CACHE.get(folder_key)
+        cached_entry = IMAGE_CACHE.get(cache_key)
         if cached_entry:
             cached_images = list(cached_entry.get("images", []))
             markers_snapshot = dict(cached_entry.get("dir_markers", {}))
@@ -1315,7 +1730,9 @@ def refresh_image_cache(folder: str = "all", force: bool = False) -> List[str]:
     if not needs_refresh:
         return cached_images
 
-    media, dir_markers = _scan_folder_for_cache(folder_key)
+    media, dir_markers = _scan_folder_for_cache(folder_key, library=normalized_library)
+    if hide_nsfw:
+        media = [item for item in media if not _path_contains_nsfw(item.get("path"))]
     images = [item["path"] for item in media if item.get("kind") == "image"]
     entry = {
         "images": images,
@@ -1324,7 +1741,7 @@ def refresh_image_cache(folder: str = "all", force: bool = False) -> List[str]:
         "last_updated": time.time(),
     }
     with IMAGE_CACHE_LOCK:
-        IMAGE_CACHE[folder_key] = entry
+        IMAGE_CACHE[cache_key] = entry
     return list(images)
 
 
@@ -1347,30 +1764,22 @@ def _cache_folder_for_path(path: Optional[str]) -> Optional[str]:
     return _build_virtual_media_path(alias, rel_text)
 
 
-def _invalidate_media_cache(path: Optional[str]) -> None:
+def _invalidate_media_cache(path: Optional[str], *, library: Optional[str] = None) -> None:
     keys = ["all"]
     folder_key = _cache_folder_for_path(path)
     if folder_key and folder_key not in keys:
         keys.append(folder_key)
+    library_key = _normalize_library_key(library) if library else None
+    libraries = [library_key] if library_key else [MEDIA_LIBRARY_DEFAULT, AI_MEDIA_LIBRARY]
     for key in keys:
-        refresh_image_cache(key, force=True)
+        for current_library in libraries:
+            refresh_image_cache(key, force=True, library=current_library)
 
 
 def initialize_image_cache() -> None:
-    """Warm the cache for the root folder and any existing subfolders on startup."""
-    refresh_image_cache("all", force=True)
-    for root in AVAILABLE_MEDIA_ROOTS:
-        try:
-            with os.scandir(root.path) as scan:
-                for entry in scan:
-                    if not entry.is_dir():
-                        continue
-                    if _should_ignore_media_name(entry.name):
-                        continue
-                    folder_key = _build_virtual_media_path(root.alias, entry.name)
-                    refresh_image_cache(folder_key, force=True)
-        except OSError:
-            continue
+    """Warm the cache for the root folder on startup."""
+    refresh_image_cache("all", force=True, library=MEDIA_LIBRARY_DEFAULT)
+    refresh_image_cache("all", force=True, library=AI_MEDIA_LIBRARY)
 
 
 initialize_image_cache()
@@ -1891,7 +2300,7 @@ def migrate_legacy_timer_config(stream_id: str, conf: Dict[str, Any]) -> bool:
             return None
         return minutes
 
-    if timer_mode == AI_MODE:
+    if timer_mode in {AI_MODE, AI_GENERATE_MODE}:
         mode_value = str(legacy_ai_mode).strip().lower() if isinstance(legacy_ai_mode, str) else ""
         if mode_value == "timer":
             minutes = _convert_interval(legacy_ai_interval, legacy_ai_unit)
@@ -2291,7 +2700,7 @@ def _sanitize_imported_stream_config(stream_id: str, raw_conf: Any) -> Dict[str,
         conf[key] = deepcopy(value) if isinstance(value, (dict, list)) else value
     mode_raw = conf.get('mode')
     mode = mode_raw.strip().lower() if isinstance(mode_raw, str) else conf['mode']
-    if mode not in {'random', 'specific', 'livestream', AI_MODE, MEDIA_MODE_PICSUM}:
+    if mode not in {'random', 'specific', 'livestream', AI_MODE, AI_GENERATE_MODE, AI_RANDOM_MODE, AI_SPECIFIC_MODE, MEDIA_MODE_PICSUM}:
         mode = conf['mode']
     conf['mode'] = mode
     folder_raw = conf.get('folder')
@@ -2350,7 +2759,8 @@ def _sanitize_imported_stream_config(stream_id: str, raw_conf: Any) -> Dict[str,
         media_mode = _infer_media_mode(conf)
     conf['media_mode'] = media_mode
     if media_mode == MEDIA_MODE_AI:
-        conf['mode'] = AI_MODE
+        if conf['mode'] not in {AI_GENERATE_MODE, AI_RANDOM_MODE, AI_SPECIFIC_MODE}:
+            conf['mode'] = AI_GENERATE_MODE
     elif media_mode == MEDIA_MODE_LIVESTREAM:
         conf['mode'] = 'livestream'
     else:
@@ -2469,10 +2879,49 @@ def load_settings():
     # Start with no streams; dashboard can add them dynamically.
     return {}
 
-def save_settings(data):
-    with open(SETTINGS_FILE, "w") as f:
-        json.dump(data, f, indent=4)
+SETTINGS_WRITE_LOCK = threading.Lock()
 
+def save_settings(data):
+    with SETTINGS_WRITE_LOCK:
+        try:
+            temp_file = SETTINGS_FILE + ".tmp"
+            with open(temp_file, "w") as f:
+                json.dump(data, f, indent=4)
+                f.flush()
+                # Ensure it's on disk
+                os.fsync(f.fileno())
+            os.replace(temp_file, SETTINGS_FILE)
+        except Exception as exc:
+            app.logger.error("Failed to save settings: %s", exc)
+            raise
+
+_pending_settings_save = None
+
+
+def save_settings_debounced():
+    """Queue a settings save with a debounce delay to reduce disk I/O."""
+    global _pending_settings_save
+    if _pending_settings_save is not None:
+        _pending_settings_save.cancel()
+    _pending_settings_save = eventlet.spawn_after(2.0, _do_debounced_save)
+
+
+def _do_debounced_save():
+    global _pending_settings_save
+    _pending_settings_save = None
+    save_settings(settings)
+
+
+def flush_settings_save():
+    """Immediately perform any pending settings save before shutdown."""
+    global _pending_settings_save
+    if _pending_settings_save is not None:
+        _pending_settings_save.cancel()
+        _pending_settings_save = None
+        save_settings(settings)
+
+
+atexit.register(flush_settings_save)
 
 @app.route("/settings/export", methods=["GET"])
 def export_settings_download():
@@ -2552,7 +3001,7 @@ def import_settings():
         ensure_picsum_defaults(conf)
 
     ensure_settings_integrity(settings)
-    save_settings(settings)
+    save_settings_debounced()
 
     with ai_jobs_lock:
         for stream_id in removed:
@@ -2773,8 +3222,8 @@ HLS_ERROR_RETRY_SECS = max(5, _coerce_int(CONFIG.get("LIVE_HLS_ERROR_RETRY_SECS"
 HLS_ERROR_RETRY_SECS = min(HLS_ERROR_RETRY_SECS, HLS_TTL_SECS)
 
 
-AI_OUTPUT_ROOT = _ensure_dir(PRIMARY_MEDIA_ROOT.path / AI_OUTPUT_SUBDIR)
-AI_TEMP_ROOT = _ensure_dir(PRIMARY_MEDIA_ROOT.path / AI_TEMP_SUBDIR)
+AI_OUTPUT_ROOT = _ensure_dir(PRIMARY_AI_MEDIA_ROOT.path)
+AI_TEMP_ROOT = _ensure_dir(PRIMARY_AI_MEDIA_ROOT.path / AI_TEMP_SUBDIR)
 
 try:
     stable_horde_client = StableHorde(
@@ -2788,7 +3237,7 @@ except Exception as exc:  # pragma: no cover - defensive during optional setup
     logger.warning("Stable Horde client unavailable: %s", exc)
     stable_horde_client = None
 
-ai_jobs_lock = threading.Lock()
+ai_jobs_lock = threading.RLock()
 ai_jobs: Dict[str, Dict[str, Any]] = {}
 ai_job_controls: Dict[str, Dict[str, Any]] = {}
 ai_model_cache: Dict[str, Any] = {"timestamp": 0.0, "data": []}
@@ -2803,8 +3252,8 @@ class HLSCacheEntry:
     error: Optional[str] = None
 
 
-HLS_CACHE: Dict[str, HLSCacheEntry] = {}
-HLS_JOBS: Dict[str, Future] = {}
+HLS_CACHE: LRUCache = LRUCache(maxsize=256)
+HLS_JOBS: LRUCache = LRUCache(maxsize=128)
 HLS_METRICS: Dict[str, int] = {
     "hits": 0,
     "misses": 0,
@@ -2869,9 +3318,34 @@ def _update_ai_state(stream_id: str, updates: Dict[str, Any], *, persist: bool =
     state = conf[AI_STATE_KEY]
     state.update(updates)
     if persist:
-        save_settings(settings)
+        save_settings_debounced()
     _emit_ai_update(stream_id, state)
     return state
+
+
+def _reconcile_stale_ai_state(stream_id: str, conf: Dict[str, Any]) -> bool:
+    ensure_ai_defaults(conf)
+    ai_state = conf.get(AI_STATE_KEY)
+    if not isinstance(ai_state, dict):
+        return False
+    status = str(ai_state.get("status") or "").strip().lower()
+    if status != "cancelling":
+        return False
+    with ai_jobs_lock:
+        job = ai_jobs.get(stream_id)
+    if job:
+        return False
+    ai_state.update({
+        "status": "cancelled",
+        "message": "Cancelled",
+        "error": None,
+        "job_id": None,
+        "queue_position": None,
+        "wait_time": None,
+        "last_updated": datetime.utcnow().isoformat() + "Z",
+    })
+    save_settings_debounced()
+    return True
 
 
 def _record_job_progress(stream_id: str, stage: str, payload: Dict[str, Any]) -> None:
@@ -3066,30 +3540,55 @@ def _run_ai_generation(
     if style_value:
         extras_payload['style'] = style_value
 
+    generation_kwargs = {
+        'negative_prompt': negative_prompt,
+        'models': models,
+        'width': int(options.get('width', AI_DEFAULT_WIDTH)),
+        'height': int(options.get('height', AI_DEFAULT_HEIGHT)),
+        'steps': int(options.get('steps', AI_DEFAULT_STEPS)),
+        'cfg_scale': float(options.get('cfg_scale', AI_DEFAULT_CFG)),
+        'sampler_name': sampler,
+        'seed': seed_payload,
+        'samples': int(options.get('samples', AI_DEFAULT_SAMPLES)),
+        'nsfw': bool(options.get('nsfw')),
+        'censor_nsfw': bool(options.get('censor_nsfw')),
+        'post_processing': post_processing or None,
+        'params': advanced_params or None,
+        'extras': extras_payload or None,
+        'poll_interval': float(options.get('poll_interval', AI_POLL_INTERVAL)),
+        'timeout': timeout_value,
+        'persist': persist,
+        'output_dir': target_root if persist else None,
+        'status_callback': _status_callback,
+        'cancel_callback': (lambda: bool(cancel_event and cancel_event.is_set())),
+    }
+
     try:
-        result = stable_horde_client.generate_images(
-            prompt,
-            negative_prompt=negative_prompt,
-            models=models,
-            width=int(options.get('width', AI_DEFAULT_WIDTH)),
-            height=int(options.get('height', AI_DEFAULT_HEIGHT)),
-            steps=int(options.get('steps', AI_DEFAULT_STEPS)),
-            cfg_scale=float(options.get('cfg_scale', AI_DEFAULT_CFG)),
-            sampler_name=sampler,
-            seed=seed_payload,
-            samples=int(options.get('samples', AI_DEFAULT_SAMPLES)),
-            nsfw=bool(options.get('nsfw')),
-            censor_nsfw=bool(options.get('censor_nsfw')),
-            post_processing=post_processing or None,
-            params=advanced_params or None,
-            extras=extras_payload or None,
-            poll_interval=float(options.get('poll_interval', AI_POLL_INTERVAL)),
-            timeout=timeout_value,
-            persist=persist,
-            output_dir=target_root if persist else None,
-            status_callback=_status_callback,
-            cancel_callback=(lambda: bool(cancel_event and cancel_event.is_set())),
-        )
+        result = None
+        for attempt in range(1, 3):
+            try:
+                result = stable_horde_client.generate_images(prompt, **generation_kwargs)
+                break
+            except Exception as exc:
+                lost_track = "lost track of job" in str(exc).lower()
+                if lost_track and attempt == 1 and not (cancel_event and cancel_event.is_set()):
+                    logger.warning(
+                        "Stable Horde lost track of job for %s on attempt %d; retrying once with a fresh request",
+                        stream_id,
+                        attempt,
+                    )
+                    _update_ai_state(
+                        stream_id,
+                        {
+                            'status': 'queued',
+                            'message': 'Stable Horde lost the first job; retrying once',
+                            'error': None,
+                            'persisted': persist,
+                        },
+                        persist=True,
+                    )
+                    continue
+                raise
     except StableHordeCancelled as exc:
         logger.info('Stable Horde job for %s cancelled: %s', stream_id, exc)
         message = 'Cancelled by user'
@@ -3199,22 +3698,32 @@ def _run_ai_generation(
     if conf:
         ensure_ai_defaults(conf)
         ensure_picsum_defaults(conf)
+        previous_media_mode = str(conf.get('media_mode') or '').strip().lower()
+        previous_mode = str(conf.get('mode') or '').strip().lower()
         conf[AI_SETTINGS_KEY] = _sanitize_ai_settings(options, conf[AI_SETTINGS_KEY])
         conf[AI_SETTINGS_KEY]['save_output'] = persist
         conf['_ai_customized'] = not _ai_settings_match_defaults(conf[AI_SETTINGS_KEY])
         conf[AI_STATE_KEY].update(updates)
         if images:
             conf['selected_image'] = images[0]['path']
-        conf['mode'] = AI_MODE
-        conf['media_mode'] = MEDIA_MODE_AI
+            conf['selected_media_kind'] = 'image'
+            _invalidate_media_cache(images[0]['path'], library=AI_MEDIA_LIBRARY)
+        if previous_media_mode == MEDIA_MODE_AI and previous_mode in {AI_GENERATE_MODE, AI_RANDOM_MODE, AI_SPECIFIC_MODE}:
+            conf['media_mode'] = MEDIA_MODE_AI
+            conf['mode'] = previous_mode
+        else:
+            conf['mode'] = AI_GENERATE_MODE
+            conf['media_mode'] = MEDIA_MODE_AI
         _update_stream_runtime_state(
             stream_id,
             path=conf.get('selected_image'),
             kind='image',
-            media_mode=MEDIA_MODE_AI,
+            media_mode=conf.get('media_mode'),
             source='ai_generation',
         )
-        save_settings(settings)
+        if playback_manager is not None:
+            playback_manager.update_stream_config(stream_id, conf)
+        save_settings_debounced()
         _emit_ai_update(stream_id, conf[AI_STATE_KEY])
         if job_manager.should_emit(stream_id):
             safe_emit('refresh', {'stream_id': stream_id, 'config': conf})
@@ -3234,7 +3743,7 @@ def _run_ai_generation(
 
 settings = load_settings()
 if ensure_settings_integrity(settings):
-    save_settings(settings)
+    save_settings_debounced()
 # Normalize embed metadata placeholders for existing streams
 for stream_id, conf in list(settings.items()):
     if not isinstance(stream_id, str) or stream_id.startswith("_"):
@@ -3263,7 +3772,7 @@ def _detect_media_kind(value: Optional[str]) -> str:
 def _infer_media_mode(conf: Dict[str, Any]) -> str:
     mode_raw = conf.get("mode")
     mode = mode_raw.strip().lower() if isinstance(mode_raw, str) else ""
-    if mode == AI_MODE:
+    if mode in {AI_MODE, AI_GENERATE_MODE, AI_RANDOM_MODE, AI_SPECIFIC_MODE}:
         return MEDIA_MODE_AI
     if mode == "livestream":
         return MEDIA_MODE_LIVESTREAM
@@ -3424,6 +3933,7 @@ class StreamPlaybackState:
         self.last_sync_emit: float = 0.0
         self.sync_timer_id: Optional[str] = None
         self.sync_offset: float = 0.0
+        self._thumbnail_cache: Optional[Dict[str, Any]] = None
 
     def apply_config(self, conf: Dict[str, Any]) -> Dict[str, bool]:
         previous_should_run = self.should_run()
@@ -3516,6 +4026,8 @@ class StreamPlaybackState:
         }
 
     def should_run(self) -> bool:
+        if self.media_mode == MEDIA_MODE_AI:
+            return self.mode == AI_RANDOM_MODE
         return self.mode == "random" and self.media_mode in (MEDIA_MODE_IMAGE, MEDIA_MODE_VIDEO)
 
     def sync_active(self) -> bool:
@@ -3630,6 +4142,7 @@ class StreamPlaybackState:
             if self.history_index < len(self.history) - 1:
                 self.history = self.history[: self.history_index + 1]
             self._append_history_entry(media, playback_mode)
+            self._thumbnail_cache = None  # Invalidate thumbnail cache on media change
         elif history_index is not None:
             self.history_index = history_index
 
@@ -3670,8 +4183,10 @@ class StreamPlaybackState:
             "error": self.error,
             "source": self.last_reason,
             "server_time": now,
-            "thumbnail": _get_runtime_thumbnail_payload(self.stream_id),
+            "thumbnail": self._thumbnail_cache or _get_runtime_thumbnail_payload(self.stream_id),
         }
+        if self._thumbnail_cache is None:
+            self._thumbnail_cache = payload.get("thumbnail")
         return payload
 
     def to_sync_payload(self, now: Optional[float] = None) -> Dict[str, Any]:
@@ -3699,9 +4214,19 @@ def _compute_video_duration_seconds(rel_path: Optional[str]) -> Optional[float]:
         return None
     if cv2 is None:
         return None
+    # Check the duration cache first (keyed on path + mtime)
+    try:
+        mtime_ns = absolute.stat().st_mtime_ns
+    except OSError:
+        mtime_ns = 0
+    cache_key = f"{rel_path}:{mtime_ns}"
+    cached = _VIDEO_DURATION_CACHE.get(cache_key)
+    if cached is not None:
+        return cached if cached > 0 else None
     capture = cv2.VideoCapture(str(absolute))
     if not capture.isOpened():
         capture.release()
+        _VIDEO_DURATION_CACHE[cache_key] = -1.0  # Cache negative result
         return None
     duration = None
     try:
@@ -3718,7 +4243,9 @@ def _compute_video_duration_seconds(rel_path: Optional[str]) -> Optional[float]:
     finally:
         capture.release()
     if duration is None or duration <= 0:
+        _VIDEO_DURATION_CACHE[cache_key] = -1.0  # Cache negative result
         return None
+    _VIDEO_DURATION_CACHE[cache_key] = float(duration)
     return float(duration)
 
 
@@ -3991,8 +4518,12 @@ class StreamPlaybackManager:
             safe_emit(event, payload)
 
     def _next_media(self, state: StreamPlaybackState) -> Optional[Dict[str, Any]]:
-        entries = list_media(state.folder, hide_nsfw=state.hide_nsfw)
-        if state.media_mode == MEDIA_MODE_IMAGE:
+        entries = list_media(
+            state.folder,
+            hide_nsfw=state.hide_nsfw,
+            library=_library_for_media_mode(state.media_mode),
+        )
+        if state.media_mode in (MEDIA_MODE_IMAGE, MEDIA_MODE_AI):
             entries = [item for item in entries if item.get("kind") == "image"]
         elif state.media_mode == MEDIA_MODE_VIDEO:
             entries = [item for item in entries if item.get("kind") == "video"]
@@ -4176,6 +4707,7 @@ class StreamPlaybackManager:
             for stream_id in due_streams:
                 payload = self._advance_stream(stream_id, reason="auto")
                 if payload:
+                    payload["switch_at"] = time.time() + SYNC_SWITCH_LEAD_SECONDS
                     self._emit_state(payload, room=stream_id)
             if sync_groups:
                 base_switch_at = time.time() + SYNC_SWITCH_LEAD_SECONDS
@@ -4188,9 +4720,9 @@ class StreamPlaybackManager:
             for payload in sync_payloads:
                 self._emit_state(payload, event=SYNC_TIME_EVENT)
             if next_deadline is None:
-                sleep_for = 1.0
+                sleep_for = STREAM_SYNC_INTERVAL_SECONDS
             else:
-                sleep_for = max(0.1, min(1.0, next_deadline - time.time()))
+                sleep_for = max(0.1, min(STREAM_SYNC_INTERVAL_SECONDS, next_deadline - time.time()))
             self._stop.wait(sleep_for)
 
 def _generate_placeholder_thumbnail(label: str) -> Image.Image:
@@ -4388,10 +4920,6 @@ def _thumbnail_image_to_bytes(image: Image.Image) -> io.BytesIO:
     image.convert('RGB').save(buffer, format='JPEG', quality=THUMBNAIL_JPEG_QUALITY, optimize=True)
     buffer.seek(0)
     return buffer
-    buffer = io.BytesIO()
-    image.convert('RGB').save(buffer, format='JPEG', quality=THUMBNAIL_JPEG_QUALITY, optimize=True)
-    buffer.seek(0)
-    return buffer
 
 def _compute_thumbnail_snapshot(stream_id: str) -> Optional[Dict[str, Any]]:
     conf = settings.get(stream_id)
@@ -4456,6 +4984,10 @@ def _thumbnail_signature(snapshot: Dict[str, Any]) -> Tuple[Any, ...]:
         snapshot.get("stream_url"),
     )
 
+_THUMBNAIL_IN_FLIGHT: Set[str] = set()
+_THUMBNAIL_IN_FLIGHT_LOCK = threading.Lock()
+
+
 def _refresh_stream_thumbnail(stream_id: str, snapshot: Optional[Dict[str, Any]] = None, *, force: bool = False) -> Optional[Dict[str, Any]]:
     """Ensure a cached thumbnail exists for the stream and return client metadata."""
     info = snapshot if snapshot is not None else _compute_thumbnail_snapshot(stream_id)
@@ -4467,68 +4999,68 @@ def _refresh_stream_thumbnail(stream_id: str, snapshot: Optional[Dict[str, Any]]
         existing = entry.get("thumbnail")
         if not force and isinstance(existing, dict) and existing.get("_signature") == signature:
             return _public_thumbnail_payload(existing)
-    image_obj, placeholder = _render_thumbnail_image(info)
-    if image_obj is None:
-        return None
-    buffer = _thumbnail_image_to_bytes(image_obj)
-    binary = buffer.getvalue()
-    updated_ts = time.time()
-    record: Dict[str, Any] = {
-        "url": None,
-        "placeholder": placeholder,
+
+    # Placeholder while generating
+    placeholder_payload = {
+        "url": _thumbnail_public_url(stream_id) if existing else None,
+        "placeholder": info.get("placeholder", "Loading..."),
         "badge": info.get("badge"),
-        "updated_at": _runtime_timestamp_to_iso(updated_ts),
-        "_signature": signature,
-        "_updated_ts": updated_ts,
+        "updated_at": existing.get("updated_at") if isinstance(existing, dict) else None,
     }
-    saved_path: Optional[Path] = None
-    data_url: Optional[str] = None
 
-    cache_dir = _ensure_thumbnail_dir()
-    if cache_dir is not None:
-        target_path = _thumbnail_disk_path(stream_id)
-        temp_path = target_path.with_suffix(".tmp")
+    with _THUMBNAIL_IN_FLIGHT_LOCK:
+        if stream_id in _THUMBNAIL_IN_FLIGHT:
+            return placeholder_payload
+        _THUMBNAIL_IN_FLIGHT.add(stream_id)
+
+    def _async_generate_thumbnail():
         try:
-            with open(temp_path, "wb") as fh:
-                fh.write(binary)
-            os.replace(temp_path, target_path)
-            saved_path = target_path
-            record["url"] = _thumbnail_public_url(stream_id)
-        except OSError as exc:  # pragma: no cover - filesystem differences best effort
-            logger.debug("Failed to persist thumbnail for %s: %s", stream_id, exc)
-            try:
-                if temp_path.exists():
-                    temp_path.unlink()
-            except OSError:
-                pass
-
-    if saved_path is None:
-        encoded = base64.b64encode(binary).decode("ascii")
-        data_url = f"data:image/jpeg;base64,{encoded}"
-        record["url"] = data_url
-
-    if saved_path is not None:
-        record["_path"] = str(saved_path)
-    if data_url is not None:
-        record["_data_url"] = data_url
-
-    with STREAM_RUNTIME_LOCK:
-        entry = STREAM_RUNTIME_STATE.setdefault(stream_id, {})
-        entry["thumbnail"] = record
-
-    payload = _public_thumbnail_payload(record)
-    if payload:
-        safe_emit(
-            "thumbnail_update",
-            {
-                "stream": stream_id,
-                "url": record["url"],
+            image_obj, placeholder = _render_thumbnail_image(info)
+            if image_obj is None:
+                return
+            buffer = _thumbnail_image_to_bytes(image_obj)
+            binary = buffer.getvalue()
+            updated_ts = time.time()
+            record: Dict[str, Any] = {
+                "url": None,
                 "placeholder": placeholder,
                 "badge": info.get("badge"),
-                "updated_at": payload.get("updated_at"),
-            },
-        )
-    return payload
+                "updated_at": _runtime_timestamp_to_iso(updated_ts),
+                "_signature": signature,
+                "_updated_ts": updated_ts,
+            }
+            cache_dir = _ensure_thumbnail_dir()
+            if cache_dir is not None:
+                target_path = _thumbnail_disk_path(stream_id)
+                temp_path = target_path.with_suffix(".tmp")
+                try:
+                    with open(temp_path, "wb") as fh:
+                        fh.write(binary)
+                    os.replace(temp_path, target_path)
+                    record["url"] = _thumbnail_public_url(stream_id)
+                    with STREAM_RUNTIME_LOCK:
+                        STREAM_RUNTIME_STATE.setdefault(stream_id, {})["thumbnail"] = record
+                        # Update the cached payload on the playback state if it exists
+                        if playback_manager is not None:
+                            state = playback_manager._states.get(stream_id)
+                            if state is not None:
+                                state._thumbnail_cache = _public_thumbnail_payload(record)
+                    # Emit update to clients
+                    safe_emit("thumbnail_update", {
+                        "stream": stream_id,
+                        "url": record["url"],
+                        "placeholder": placeholder,
+                        "badge": info.get("badge"),
+                        "updated_at": record["updated_at"],
+                    })
+                except OSError as exc:
+                    logger.debug("Failed to persist thumbnail for %s: %s", stream_id, exc)
+        finally:
+            with _THUMBNAIL_IN_FLIGHT_LOCK:
+                _THUMBNAIL_IN_FLIGHT.discard(stream_id)
+
+    eventlet.spawn(_async_generate_thumbnail)
+    return placeholder_payload
 ensure_ai_presets_storage()
 # Backfill defaults for existing stream entries
 for k, v in list(settings.items()):
@@ -4569,7 +5101,12 @@ for k, v in list(settings.items()):
         if media_mode not in MEDIA_MODE_CHOICES:
             media_mode = _infer_media_mode(v)
         if media_mode == MEDIA_MODE_AI:
-            desired_mode = AI_MODE
+            current_mode_raw = v.get("mode")
+            current_mode = current_mode_raw.strip().lower() if isinstance(current_mode_raw, str) else ""
+            if current_mode in {AI_RANDOM_MODE, AI_SPECIFIC_MODE, AI_GENERATE_MODE}:
+                desired_mode = current_mode
+            else:
+                desired_mode = AI_GENERATE_MODE
         elif media_mode == MEDIA_MODE_LIVESTREAM:
             desired_mode = "livestream"
         else:
@@ -4616,9 +5153,10 @@ def _parse_truthy(value: Any) -> bool:
     return bool(value)
 
 
-def get_subfolders(hide_nsfw: bool = False) -> List[str]:
+def get_subfolders(hide_nsfw: bool = False, *, library: str = MEDIA_LIBRARY_DEFAULT) -> List[str]:
     subfolders: List[str] = []
     seen: Set[str] = set()
+    normalized_library = _normalize_library_key(library)
 
     def _add(value: str) -> None:
         if value not in seen:
@@ -4626,7 +5164,7 @@ def get_subfolders(hide_nsfw: bool = False) -> List[str]:
             subfolders.append(value)
 
     _add("all")
-    for root in AVAILABLE_MEDIA_ROOTS:
+    for root in _library_roots(normalized_library):
         if hide_nsfw and _path_contains_nsfw(root.alias):
             continue
         try:
@@ -4647,10 +5185,11 @@ def get_subfolders(hide_nsfw: bool = False) -> List[str]:
     return subfolders
 
 
-def get_folder_inventory(hide_nsfw: bool = False) -> List[Dict[str, Any]]:
+def get_folder_inventory(hide_nsfw: bool = False, *, library: str = MEDIA_LIBRARY_DEFAULT) -> List[Dict[str, Any]]:
     inventory: List[Dict[str, Any]] = []
-    for name in get_subfolders(hide_nsfw=hide_nsfw):
-        media_entries = list_media(name, hide_nsfw=hide_nsfw)
+    normalized_library = _normalize_library_key(library)
+    for name in get_subfolders(hide_nsfw=hide_nsfw, library=normalized_library):
+        media_entries = list_media(name, hide_nsfw=hide_nsfw, library=normalized_library)
         has_images = any(entry.get("kind") == "image" for entry in media_entries)
         has_videos = any(entry.get("kind") == "video" for entry in media_entries)
         if "/" in name:
@@ -4882,27 +5421,27 @@ def api_media_preview_frame():
 @app.route("/folders", methods=["GET"])
 def folders_collection():
     hide_nsfw = _parse_truthy(request.args.get("hide_nsfw"))
-    inventory = get_folder_inventory(hide_nsfw=hide_nsfw)
+    library = _normalize_library_key(request.args.get("library"), MEDIA_LIBRARY_DEFAULT)
+    inventory = get_folder_inventory(hide_nsfw=hide_nsfw, library=library)
     return jsonify(inventory)
 
 
-def list_images(folder="all", hide_nsfw: bool = False):
+def list_images(folder="all", hide_nsfw: bool = False, *, library: str = MEDIA_LIBRARY_DEFAULT):
     """Return cached image paths for the folder, refreshing when necessary."""
-    images = refresh_image_cache(folder)
-    return _filter_nsfw_images(images, hide_nsfw)
+    return refresh_image_cache(folder, hide_nsfw=hide_nsfw, library=library)
 
-def list_media(folder="all", hide_nsfw: bool = False) -> List[Dict[str, Any]]:
+def list_media(folder="all", hide_nsfw: bool = False, *, library: str = MEDIA_LIBRARY_DEFAULT) -> List[Dict[str, Any]]:
     """Return cached media entries (images and videos) for the folder."""
     folder_key = _normalize_folder_key(folder)
-    refresh_image_cache(folder)
+    normalized_library = _normalize_library_key(library)
+    refresh_image_cache(folder, hide_nsfw=hide_nsfw, library=normalized_library)
+    cache_key = _cache_scope_key(folder_key, normalized_library)
     with IMAGE_CACHE_LOCK:
-        cached_entry = IMAGE_CACHE.get(folder_key)
+        cached_entry = IMAGE_CACHE.get(cache_key)
         if cached_entry:
             media = [dict(item) for item in cached_entry.get("media", [])]
         else:
             media = []
-    if hide_nsfw:
-        media = [item for item in media if not _path_contains_nsfw(item.get("path"))]
     return media
 
 if playback_manager is None:
@@ -5095,6 +5634,7 @@ def media_management_page():
             "alias": root.alias,
             "display_name": root.display_name or root.alias,
             "path": f"{root.alias}:/",
+            "library": root.library,
         }
         for root in AVAILABLE_MEDIA_ROOTS
     ]
@@ -5113,7 +5653,8 @@ def media_management_page():
 
 @app.route("/")
 def dashboard():
-    folder_inventory = get_folder_inventory()
+    folder_inventory = get_folder_inventory(library=MEDIA_LIBRARY_DEFAULT)
+    ai_folder_inventory = get_folder_inventory(library=AI_MEDIA_LIBRARY)
     subfolders = [item["name"] for item in folder_inventory]
     streams = {k: v for k, v in settings.items() if not k.startswith("_")}
     for stream_id, conf in streams.items():
@@ -5135,6 +5676,7 @@ def dashboard():
         "index.html",
         subfolders=subfolders,
         folder_inventory=folder_inventory,
+        ai_folder_inventory=ai_folder_inventory,
         stream_settings=streams,
         groups=groups,
         global_tags=get_global_tags(),
@@ -5244,7 +5786,11 @@ def render_stream(name):
     ensure_background_defaults(conf)
     ensure_tag_defaults(conf)
     _refresh_embed_metadata(key, conf)
-    images = list_images(conf.get("folder", "all"), hide_nsfw=conf.get("hide_nsfw", False))
+    images = list_images(
+        conf.get("folder", "all"),
+        hide_nsfw=conf.get("hide_nsfw", False),
+        library=_library_for_media_mode(conf.get("media_mode")),
+    )
     requested_quality = (request.args.get("size") or "").strip().lower()
     if requested_quality and requested_quality not in IMAGE_QUALITY_CHOICES:
         requested_quality = ""
@@ -5277,7 +5823,7 @@ def add_stream():
             )
             if playback_manager is not None:
                 playback_manager.update_stream_config(new_id, settings[new_id])
-            save_settings(settings)
+            save_settings_debounced()
             if auto_scheduler is not None:
                 auto_scheduler.reschedule(new_id)
             safe_emit("streams_changed", {"action": "added", "stream_id": new_id})
@@ -5297,7 +5843,7 @@ def delete_stream(stream_id):
             STREAM_RUNTIME_STATE.pop(stream_id, None)
         if playback_manager is not None:
             playback_manager.remove_stream(stream_id)
-        save_settings(settings)
+        save_settings_debounced()
         if auto_scheduler is not None:
             auto_scheduler.remove(stream_id)
         if picsum_scheduler is not None:
@@ -5311,6 +5857,7 @@ def get_stream_settings(stream_id):
     if stream_id not in settings:
         return jsonify({"error": f"No stream '{stream_id}' found"}), 404
     conf = settings[stream_id]
+    _reconcile_stale_ai_state(stream_id, conf)
     ensure_ai_defaults(conf)
     ensure_picsum_defaults(conf)
     ensure_timer_defaults(conf)
@@ -5350,6 +5897,8 @@ def update_stream_settings(stream_id):
     ensure_sync_defaults(conf)
     previous_mode = conf.get("mode")
     previous_sync = dict(conf.get(SYNC_CONFIG_KEY)) if isinstance(conf.get(SYNC_CONFIG_KEY), dict) else {}
+    requested_mode = data.get("mode")
+    requested_mode = requested_mode.strip().lower() if isinstance(requested_mode, str) else ""
 
     stream_url_changed = False
     media_mode_changed = False
@@ -5419,7 +5968,8 @@ def update_stream_settings(stream_id):
                 if media_mode in MEDIA_MODE_CHOICES:
                     conf["media_mode"] = media_mode
                     if media_mode == MEDIA_MODE_AI:
-                        conf["mode"] = AI_MODE
+                        if requested_mode not in {AI_GENERATE_MODE, AI_RANDOM_MODE, AI_SPECIFIC_MODE}:
+                            conf["mode"] = AI_GENERATE_MODE
                     elif media_mode == MEDIA_MODE_LIVESTREAM:
                         conf["mode"] = "livestream"
                     media_mode_changed = True
@@ -5481,7 +6031,10 @@ def update_stream_settings(stream_id):
     current_mode_raw = conf.get("mode")
     current_mode = current_mode_raw.strip().lower() if isinstance(current_mode_raw, str) else ""
     if media_mode == MEDIA_MODE_AI:
-        conf["mode"] = AI_MODE
+        if current_mode not in {AI_GENERATE_MODE, AI_RANDOM_MODE, AI_SPECIFIC_MODE}:
+            conf["mode"] = AI_GENERATE_MODE
+        else:
+            conf["mode"] = current_mode
     elif media_mode == MEDIA_MODE_LIVESTREAM:
         conf["mode"] = "livestream"
     else:
@@ -5497,12 +6050,14 @@ def update_stream_settings(stream_id):
             elif conf["mode"] == "random" and conf.get("video_playback_mode") == "loop":
                 conf["video_playback_mode"] = "duration"
 
-    _refresh_embed_metadata(stream_id, conf, force=stream_url_changed or media_mode_changed)
+    needs_metadata_refresh = stream_url_changed or media_mode_changed or not conf.get("embed_metadata")
+    if needs_metadata_refresh:
+        _refresh_embed_metadata(stream_id, conf, force=stream_url_changed or media_mode_changed)
 
-    mode_requested = data.get("mode")
+    mode_requested = requested_mode
     if (
-        mode_requested == AI_MODE
-        and previous_mode != AI_MODE
+        mode_requested in {AI_MODE, AI_GENERATE_MODE}
+        and previous_mode not in {AI_MODE, AI_GENERATE_MODE}
         and not conf.get("_ai_customized", False)
     ):
         conf[AI_SETTINGS_KEY] = default_ai_settings()
@@ -5534,7 +6089,7 @@ def update_stream_settings(stream_id):
         )
         if sync_changed and sync_timer_id:
             playback_manager.sync_timer_group(sync_timer_id, force_refresh=True)
-    save_settings(settings)
+    save_settings_debounced()
     if auto_scheduler is not None:
         auto_scheduler.reschedule(stream_id)
     if picsum_scheduler is not None:
@@ -5577,7 +6132,7 @@ def update_stream_timer(stream_id: str):
         timer.update_next(None)
 
     scheduler_ts = time.time()
-    if timer_mode == AI_MODE and auto_scheduler is not None:
+    if timer_mode in {AI_MODE, AI_GENERATE_MODE} and auto_scheduler is not None:
         auto_scheduler.reschedule(stream_id, base_time=scheduler_ts)
     elif timer_mode == MEDIA_MODE_PICSUM and picsum_scheduler is not None:
         picsum_scheduler.reschedule(stream_id, base_time=scheduler_ts)
@@ -5586,7 +6141,7 @@ def update_stream_timer(stream_id: str):
     next_label = refreshed_config.get("next_run")
     last_label = refreshed_config.get("last_run")
 
-    if timer_mode == AI_MODE:
+    if timer_mode in {AI_MODE, AI_GENERATE_MODE}:
         ai_state = conf[AI_STATE_KEY]
         ai_state["next_auto_trigger"] = next_label
         if last_label is not None:
@@ -5598,7 +6153,7 @@ def update_stream_timer(stream_id: str):
             picsum_state["last_auto_trigger"] = last_label
         conf[PICSUM_SETTINGS_KEY] = picsum_state
 
-    save_settings(settings)
+    save_settings_debounced()
     return jsonify({
         "status": "success",
         "timer": refreshed_config,
@@ -5748,7 +6303,7 @@ def refresh_picsum_image():
     if picsum_scheduler is not None:
         picsum_scheduler.reschedule(stream_id, base_time=time.time())
 
-    save_settings(settings)
+    save_settings_debounced()
 
     conf = settings.get(stream_id, conf)
     sanitized = result["settings"]
@@ -5813,7 +6368,7 @@ def update_ai_defaults():
         refreshed_presets[name] = _sanitize_ai_settings(preset, defaults=AI_FALLBACK_DEFAULTS)
     settings[AI_PRESETS_KEY] = _sorted_presets(refreshed_presets)
 
-    save_settings(settings)
+    save_settings_debounced()
     return jsonify({"status": "success", "defaults": new_defaults})
 
 @app.route("/ai/presets", methods=["GET"])
@@ -5845,7 +6400,7 @@ def create_ai_preset():
     updated = dict(presets)
     updated[name] = sanitized
     settings[AI_PRESETS_KEY] = _sorted_presets(updated)
-    save_settings(settings)
+    save_settings_debounced()
     return jsonify({"status": "saved", "preset": {"name": name, "settings": deepcopy(sanitized)}})
 
 
@@ -5877,7 +6432,7 @@ def update_ai_preset(preset_name: str):
     updated.pop(name, None)
     updated[target_name] = sanitized
     settings[AI_PRESETS_KEY] = _sorted_presets(updated)
-    save_settings(settings)
+    save_settings_debounced()
     return jsonify({"status": "updated", "preset": {"name": target_name, "settings": deepcopy(sanitized)}})
 
 
@@ -5890,7 +6445,7 @@ def delete_ai_preset(preset_name: str):
     updated = dict(presets)
     updated.pop(name, None)
     settings[AI_PRESETS_KEY] = _sorted_presets(updated)
-    save_settings(settings)
+    save_settings_debounced()
     return jsonify({"status": "deleted"})
 
 @app.route('/ai/loras')
@@ -5966,7 +6521,7 @@ def create_tag():
     if existing is None:
         tags.append(normalized)
         tags.sort(key=str.lower)
-        save_settings(settings)
+        save_settings_debounced()
         canonical = normalized
     else:
         canonical = existing
@@ -5985,15 +6540,19 @@ def delete_tag(tag_name: str):
         return jsonify({"error": "Tag not found"}), 404
     idx, canonical = entry
     canon_key = canonical.casefold()
-    for sid, conf in settings.items():
+
+    # Create a snapshot to avoid concurrent modification issues
+    current_settings = list(settings.items())
+    for sid, conf in current_settings:
         if sid.startswith("_") or not isinstance(conf, dict):
             continue
         stream_tags = conf.get(TAG_KEY) or []
         for tag in stream_tags:
             if isinstance(tag, str) and tag.casefold() == canon_key:
                 return jsonify({"error": "Tag is in use"}), 409
+
     tags.pop(idx)
-    save_settings(settings)
+    save_settings_debounced()
     return jsonify({"status": "deleted", "tags": tags})
 
 
@@ -6049,7 +6608,7 @@ def _queue_ai_generation(stream_id: str, ai_settings: Dict[str, Any], *, trigger
     if not persist:
         _cleanup_temp_outputs(stream_id)
 
-    conf['mode'] = AI_MODE
+    conf['mode'] = AI_GENERATE_MODE
     conf['media_mode'] = MEDIA_MODE_AI
     if previous_selected:
         conf['selected_image'] = previous_selected
@@ -6068,7 +6627,7 @@ def _queue_ai_generation(stream_id: str, ai_settings: Dict[str, Any], *, trigger
         queued_state['last_auto_trigger'] = _format_timer_label(datetime.now())
     queued_state['last_auto_error'] = None
 
-    save_settings(settings)
+    save_settings_debounced()
     _emit_ai_update(stream_id, queued_state, job=ai_jobs[stream_id])
     job_manager.update_status(manager_id, status='queued')
     if job_manager.should_emit(stream_id):
@@ -6090,12 +6649,14 @@ def _queue_ai_generation(stream_id: str, ai_settings: Dict[str, Any], *, trigger
     return {'status': 'queued', 'state': conf[AI_STATE_KEY], 'job': ai_jobs[stream_id]}
 
 
-class AutoGenerateScheduler:
-    def __init__(self) -> None:
+class BaseScheduler:
+    """Generic interval-based scheduler for background tasks."""
+    def __init__(self, name: str):
+        self.name = name
         self._lock = threading.Lock()
         self._next_run: Dict[str, float] = {}
         self._stop = threading.Event()
-        self._thread = threading.Thread(target=self._loop, name='AutoGenerateScheduler', daemon=True)
+        self._thread = threading.Thread(target=self._loop, name=name, daemon=True)
         self._thread.start()
 
     def stop(self) -> None:
@@ -6105,13 +6666,42 @@ class AutoGenerateScheduler:
 
     def reschedule_all(self) -> None:
         for stream_id in list(settings.keys()):
-            if stream_id.startswith('_'):
+            if not isinstance(stream_id, str) or stream_id.startswith('_'):
                 continue
             self.reschedule(stream_id)
 
     def remove(self, stream_id: str) -> None:
         with self._lock:
             self._next_run.pop(stream_id, None)
+        self._on_remove(stream_id)
+
+    def _loop(self) -> None:
+        while not self._stop.is_set():
+            now = time.time()
+            due: List[str] = []
+            with self._lock:
+                for stream_id, next_ts in list(self._next_run.items()):
+                    if next_ts <= now:
+                        due.append(stream_id)
+            for stream_id in due:
+                self._trigger_stream(stream_id)
+            self._stop.wait(5.0)
+
+    def reschedule(self, stream_id: str, *, base_time: Optional[float] = None) -> None:
+        raise NotImplementedError
+
+    def _trigger_stream(self, stream_id: str) -> None:
+        raise NotImplementedError
+
+    def _on_remove(self, stream_id: str) -> None:
+        pass
+
+
+class AutoGenerateScheduler(BaseScheduler):
+    def __init__(self) -> None:
+        super().__init__('AutoGenerateScheduler')
+
+    def _on_remove(self, stream_id: str) -> None:
         conf = settings.get(stream_id)
         if isinstance(conf, dict):
             ensure_timer_defaults(conf)
@@ -6141,7 +6731,7 @@ class AutoGenerateScheduler:
         )
         reference_ts = base_time if base_time is not None else time.time()
 
-        if timer_mode != AI_MODE or not timer.is_enabled():
+        if timer_mode not in {AI_MODE, AI_GENERATE_MODE} or not timer.is_enabled():
             timer.update_next(None)
             with self._lock:
                 self._next_run.pop(stream_id, None)
@@ -6180,18 +6770,6 @@ class AutoGenerateScheduler:
         if changed:
             _emit_ai_update(stream_id, state)
 
-    def _loop(self) -> None:
-        while not self._stop.is_set():
-            now = time.time()
-            due: List[str] = []
-            with self._lock:
-                for stream_id, next_ts in list(self._next_run.items()):
-                    if next_ts <= now:
-                        due.append(stream_id)
-            for stream_id in due:
-                self._trigger_stream(stream_id)
-            self._stop.wait(5.0)
-
     def _trigger_stream(self, stream_id: str) -> None:
         conf = settings.get(stream_id)
         if not isinstance(conf, dict):
@@ -6209,7 +6787,7 @@ class AutoGenerateScheduler:
         )
         ai_settings = conf[AI_SETTINGS_KEY]
         prompt = str(ai_settings.get('prompt') or '').strip()
-        if timer_mode != AI_MODE or not timer.is_enabled():
+        if timer_mode not in {AI_MODE, AI_GENERATE_MODE} or not timer.is_enabled():
             self.remove(stream_id)
             return
         if not prompt:
@@ -6244,32 +6822,11 @@ if auto_scheduler is None:
 # Picsum auto scheduler ------------------------------------------------------
 
 
-class PicsumAutoScheduler:
+class PicsumAutoScheduler(BaseScheduler):
     def __init__(self) -> None:
-        self._lock = threading.Lock()
-        self._next_run: Dict[str, float] = {}
-        self._stop = threading.Event()
-        self._thread = threading.Thread(
-            target=self._loop,
-            name="PicsumAutoScheduler",
-            daemon=True,
-        )
-        self._thread.start()
+        super().__init__('PicsumAutoScheduler')
 
-    def stop(self) -> None:
-        self._stop.set()
-        if self._thread.is_alive():
-            self._thread.join(timeout=2.0)
-
-    def reschedule_all(self) -> None:
-        for stream_id, conf in settings.items():
-            if stream_id.startswith("_") or not isinstance(conf, dict):
-                continue
-            self.reschedule(stream_id)
-
-    def remove(self, stream_id: str) -> None:
-        with self._lock:
-            self._next_run.pop(stream_id, None)
+    def _on_remove(self, stream_id: str) -> None:
         conf = settings.get(stream_id)
         if isinstance(conf, dict):
             ensure_timer_defaults(conf)
@@ -6320,18 +6877,6 @@ class PicsumAutoScheduler:
         picsum["next_auto_trigger"] = _format_timer_label(next_dt)
         _log_timer_schedule(stream_id, timer_mode, next_dt, timer.offset_minutes())
 
-    def _loop(self) -> None:
-        while not self._stop.is_set():
-            now = time.time()
-            due: List[str] = []
-            with self._lock:
-                for stream_id, next_ts in list(self._next_run.items()):
-                    if next_ts <= now:
-                        due.append(stream_id)
-            for stream_id in due:
-                self._trigger_stream(stream_id)
-            self._stop.wait(5.0)
-
     def _trigger_stream(self, stream_id: str) -> None:
         conf = settings.get(stream_id)
         if not isinstance(conf, dict):
@@ -6359,7 +6904,7 @@ class PicsumAutoScheduler:
         if timer_mode == MEDIA_MODE_PICSUM and timer.is_enabled():
             timer.mark_trigger(when=moment)
         self.reschedule(stream_id, base_time=time.time())
-        save_settings(settings)
+        save_settings_debounced()
         _broadcast_picsum_update(
             stream_id,
             conf,
@@ -6476,12 +7021,25 @@ def ai_cancel(stream_id: str):
     with ai_jobs_lock:
         job = ai_jobs.get(stream_id)
         controls = ai_job_controls.get(stream_id)
-        if not job:
+    if not job:
+        if _reconcile_stale_ai_state(stream_id, conf):
+            state = conf.get(AI_STATE_KEY) if isinstance(conf.get(AI_STATE_KEY), dict) else default_ai_state()
+            _emit_ai_update(stream_id, state, job=None)
+            return jsonify({'status': 'cancelled', 'message': 'Cancelled stale AI state'})
+        return jsonify({'error': 'No active AI generation to cancel'}), 404
+    with ai_jobs_lock:
+        current_job = ai_jobs.get(stream_id)
+        controls = ai_job_controls.get(stream_id)
+        if not current_job:
+            if _reconcile_stale_ai_state(stream_id, conf):
+                state = conf.get(AI_STATE_KEY) if isinstance(conf.get(AI_STATE_KEY), dict) else default_ai_state()
+                _emit_ai_update(stream_id, state, job=None)
+                return jsonify({'status': 'cancelled', 'message': 'Cancelled stale AI state'})
             return jsonify({'error': 'No active AI generation to cancel'}), 404
+        job = dict(current_job)
         status = (job.get('status') or '').lower()
         if status in {'completed', 'error', 'timeout', 'cancelled'}:
             return jsonify({'error': 'Job already finished'}), 409
-        job = dict(job)
         job['cancel_requested'] = True
         job['status'] = 'cancelling'
         job['message'] = 'Cancellation requested'
@@ -6533,7 +7091,42 @@ def app_settings():
 
 def _repo_path_from_config(cfg: Optional[Dict[str, Any]] = None) -> str:
     cfg = cfg or load_config()
-    return cfg.get("INSTALL_DIR") or os.getcwd()
+    configured = str(cfg.get("INSTALL_DIR") or "").strip()
+    candidates: List[Path] = []
+
+    if configured:
+        candidates.append(Path(configured).expanduser())
+
+    # Fall back to the active app checkout so dev installs without a local
+    # config.json can still update from the settings page.
+    candidates.append(Path(__file__).resolve().parent)
+    candidates.append(Path.cwd())
+
+    for candidate in candidates:
+        try:
+            resolved = candidate.resolve(strict=False)
+        except OSError:
+            continue
+        git_dir = resolved / ".git"
+        if resolved.is_dir() and git_dir.exists():
+            return resolved.as_posix()
+
+    if configured:
+        return str(Path(configured).expanduser())
+    return Path(__file__).resolve().parent.as_posix()
+
+
+def _restart_configured_service(service_name: str) -> None:
+    commands = [
+        ["systemctl", "--user", "restart", service_name],
+        ["sudo", "systemctl", "restart", service_name],
+    ]
+    for command in commands:
+        try:
+            subprocess.Popen(command)
+            return
+        except OSError:
+            continue
 
 
 def _restore_points_root(repo_path: str) -> str:
@@ -6752,7 +7345,7 @@ def _apply_timer_snap_setting(enabled: bool) -> Dict[str, Dict[str, Optional[str
             "picsum_next": picsum_conf.get("next_auto_trigger") if isinstance(picsum_conf, dict) else None,
         }
 
-    save_settings(settings)
+    save_settings_debounced()
     return summary
 
 
@@ -6825,7 +7418,7 @@ def sync_timers_collection():
     entry = _sanitize_sync_timer_entry(timer_id, {"label": label, "interval": interval})
     timers[timer_id] = entry
     settings[SYNC_TIMERS_KEY] = timers
-    save_settings(settings)
+    save_settings_debounced()
     _emit_sync_timer_update()
     return jsonify({"timer": _sync_timer_payload(timer_id, entry), "timers": get_sync_timers_snapshot()}), 201
 
@@ -6857,7 +7450,7 @@ def sync_timer_item(timer_id: str):
                 if playback_manager is not None:
                     playback_manager.update_stream_config(stream_id, conf)
                 safe_emit("refresh", {"stream_id": stream_id, "config": conf, "tags": get_global_tags()})
-        save_settings(settings)
+        save_settings_debounced()
         _emit_sync_timer_update()
         return jsonify({"status": "deleted", "affected_streams": affected, "timers": get_sync_timers_snapshot()})
 
@@ -6871,7 +7464,7 @@ def sync_timer_item(timer_id: str):
     updated = _sanitize_sync_timer_entry(timer_id, merged)
     timers[timer_id] = updated
     settings[SYNC_TIMERS_KEY] = timers
-    save_settings(settings)
+    save_settings_debounced()
     if playback_manager is not None:
         for stream_id, conf in settings.items():
             if not isinstance(conf, dict) or stream_id.startswith("_"):
@@ -6950,10 +7543,7 @@ def restore_points_restore(point_id):
         _save_restore_point_metadata(point_path, metadata)
     except Exception:
         pass
-    try:
-        subprocess.Popen(["sudo", "systemctl", "restart", service_name])
-    except OSError:
-        pass
+    _restart_configured_service(service_name)
     return jsonify({"status": "ok", "restore_point": _serialize_restore_point(metadata["id"], metadata)})
 
 
@@ -6962,89 +7552,31 @@ def update_app():
     cfg = load_config()
     api_key = cfg.get("API_KEY")
     if api_key and request.headers.get("X-API-Key") != api_key:
-        return "Unauthorized", 401
-    repo_path = cfg.get("INSTALL_DIR") or os.getcwd()
-    branch = cfg.get("UPDATE_BRANCH", "main")
-    service_name = cfg.get("SERVICE_NAME", "echomosaic.service")
+        return jsonify({"error": "Unauthorized"}), 401
+    repo_path = _repo_path_from_config(cfg)
     if not os.path.isdir(repo_path):
-        return render_template(
-            "update_status.html",
-            message=f"Repository path '{repo_path}' not found. Check INSTALL_DIR in config.json",
-        )
-    # capture current commit before update
-    def git_cmd(args, cwd=repo_path):
-        return subprocess.check_output(["git", *args], cwd=cwd, stderr=subprocess.STDOUT).decode().strip()
-    try:
-        current_commit = git_cmd(["rev-parse", "HEAD"])
-    except Exception:
-        current_commit = None
-    try:
-        backup_dir = backup_user_state(repo_path)
-    except Exception:
-        logger.exception("Failed to back up user data before update")
-        return render_template(
-            "update_status.html",
-            message="Unable to back up user data; update aborted.",
-        )
-    restore_error = None
-    try:
-        subprocess.check_call(["git", "fetch"], cwd=repo_path)
-        subprocess.check_call(["git", "checkout", branch], cwd=repo_path)
-        subprocess.check_call(["git", "reset", "--hard", f"origin/{branch}"], cwd=repo_path)
-    except FileNotFoundError:
-        update_error = "Git executable not found. Please install Git to update the application."
-        return render_template("update_status.html", message=update_error)
-    except subprocess.CalledProcessError as e:
-        update_error = f"Git update failed: {e}"
-        return render_template("update_status.html", message=update_error)
-    finally:
-        try:
-            restore_user_state(repo_path, backup_dir, cleanup=True)
-        except Exception:
-            restore_error = "Failed to restore user data after update."
-            logger.exception("Failed to restore user data after update")
-    if restore_error:
-        return render_template("update_status.html", message=restore_error)
-    # record update history
-    try:
-        new_commit = git_cmd(["rev-parse", "HEAD"]) if 'git_cmd' in locals() else None
-        history_path = os.path.join(repo_path, "update_history.json")
-        history = []
-        if os.path.exists(history_path):
-            with open(history_path, "r") as hf:
-                history = json.load(hf)
-        history.append({
-            "timestamp": datetime.utcnow().isoformat() + "Z",
-            "from": current_commit,
-            "to": new_commit,
-            "branch": branch,
-        })
-        with open(history_path, "w") as hf:
-            json.dump(history[-50:], hf, indent=2)
-    except Exception:
-        pass
-    try:
-        subprocess.check_call([
-            os.path.join(repo_path, "venv", "bin", "pip"),
-            "install",
-            "--upgrade",
-            "-r",
-            "requirements.txt",
-        ], cwd=repo_path)
-    except (subprocess.CalledProcessError, OSError):
-        pass
-    try:
-        subprocess.Popen(["sudo", "systemctl", "restart", service_name])
-    except OSError:
-        pass
-    return render_template(
-        "update_status.html", message="Soft update complete. Restarting service..."
+        return jsonify({"error": f"Repository path '{repo_path}' not found. Check INSTALL_DIR in config.json"}), 400
+    update_script = os.path.join(repo_path, "update.sh")
+    if not os.path.isfile(update_script):
+        return jsonify({"error": f"Update script not found at '{update_script}'."}), 400
+    if not _set_update_job_active(True):
+        return jsonify({"error": "An update is already in progress."}), 409
+    data = request.get_json(silent=True) or {}
+    socket_id = str(data.get("socket_id") or "").strip()
+    service_name = str(cfg.get("SERVICE_NAME", "echomosaic.service"))
+    worker = threading.Thread(
+        target=_run_update_job,
+        args=(repo_path, update_script, service_name, socket_id or None),
+        daemon=True,
+        name="echomosaic-update-job",
     )
+    worker.start()
+    return jsonify({"status": "started", "service_name": service_name})
 
 
 def read_update_info():
     cfg = load_config()
-    repo_path = cfg.get("INSTALL_DIR") or os.getcwd()
+    repo_path = _repo_path_from_config(cfg)
     branch = cfg.get("UPDATE_BRANCH", "main")
     info = {"branch": branch}
     def safe(cmd):
@@ -7103,7 +7635,7 @@ def update_history():
     api_key = cfg.get("API_KEY")
     if api_key and request.headers.get("X-API-Key") != api_key:
         return jsonify({"error": "Unauthorized"}), 401
-    repo_path = cfg.get("INSTALL_DIR") or os.getcwd()
+    repo_path = _repo_path_from_config(cfg)
     history_path = os.path.join(repo_path, "update_history.json")
     history = []
     if os.path.exists(history_path):
@@ -7175,10 +7707,7 @@ def rollback_app():
             _save_restore_point_metadata(point_path, metadata)
         except Exception:
             pass
-        try:
-            subprocess.Popen(["sudo", "systemctl", "restart", service_name])
-        except OSError:
-            pass
+        _restart_configured_service(service_name)
         label = metadata.get("label") or restore_point_id
         short_commit = metadata.get("short_commit") or (
             commit[:7] if isinstance(commit, str) else commit
@@ -7202,10 +7731,7 @@ def rollback_app():
         subprocess.check_call(["git", "reset", "--hard", target], cwd=repo_path)
     except subprocess.CalledProcessError as exc:
         return render_template("update_status.html", message=f"Rollback failed: {exc}")
-    try:
-        subprocess.Popen(["sudo", "systemctl", "restart", service_name])
-    except OSError:
-        pass
+    _restart_configured_service(service_name)
     return render_template(
         "update_status.html",
         message=f"Rolled back to {target[:7]}. Restarting service...",
@@ -7267,7 +7793,7 @@ def groups_collection():
         settings["_groups"][name] = {"streams": cleaned, "layout": layout}
     else:
         settings["_groups"][name] = cleaned
-    save_settings(settings)
+    save_settings_debounced()
     safe_emit("mosaic_refresh", {"group": name})
     return jsonify({"status": "ok", "group": {name: settings["_groups"][name]}})
 
@@ -7276,7 +7802,7 @@ def groups_collection():
 def groups_delete(name):
     if "_groups" in settings and name in settings["_groups"]:
         del settings["_groups"][name]
-        save_settings(settings)
+        save_settings_debounced()
         return jsonify({"status": "deleted"})
     return jsonify({"error": "not found"}), 404
 
@@ -7333,6 +7859,24 @@ def stream_live():
             "hls_url": None,
             "original_url": stream_url,
         }
+        if content_type in {"video", "playlist"}:
+            response_payload["sync_enabled"] = True
+            sync_state = _get_youtube_sync_state(
+                stream_id,
+                {
+                    "playlist_id": youtube_details.get("playlist_id"),
+                    "video_id": youtube_details.get("video_id"),
+                    "content_type": content_type,
+                },
+            )
+            if sync_state:
+                if sync_state.get("playlist_index") is not None:
+                    response_payload["start_index"] = sync_state.get("playlist_index")
+                if sync_state.get("start_seconds") is not None:
+                    response_payload["start_seconds"] = sync_state.get("start_seconds")
+                if sync_state.get("video_id"):
+                    response_payload["video_id"] = sync_state.get("video_id")
+                response_payload["server_time"] = sync_state.get("server_time")
         if sanitized_meta:
             response_payload["metadata"] = sanitized_meta
         return jsonify(response_payload)
@@ -7565,7 +8109,8 @@ def get_images():
     if offset < 0 or (limit is not None and limit < 0):
         return jsonify({"error": "limit and offset must be non-negative"}), 400
     hide_nsfw = _parse_truthy(request.args.get("hide_nsfw"))
-    images = list_images(folder, hide_nsfw=hide_nsfw)
+    library = _normalize_library_key(request.args.get("library"), MEDIA_LIBRARY_DEFAULT)
+    images = list_images(folder, hide_nsfw=hide_nsfw, library=library)
     if limit_arg is not None or offset_arg is not None:
         end = offset + limit if limit is not None else None
         images = images[offset:end]
@@ -7576,7 +8121,8 @@ def get_images():
 def get_random_image():
     folder = request.args.get("folder", "all")
     hide_nsfw = _parse_truthy(request.args.get("hide_nsfw"))
-    images = list_images(folder, hide_nsfw=hide_nsfw)
+    library = _normalize_library_key(request.args.get("library"), MEDIA_LIBRARY_DEFAULT)
+    images = list_images(folder, hide_nsfw=hide_nsfw, library=library)
     if not images:
         return jsonify({"error": "No images found"}), 404
     return jsonify({"path": random.choice(images)})
@@ -7596,7 +8142,8 @@ def get_media_entries():
         return jsonify({"error": "limit and offset must be non-negative"}), 400
     hide_nsfw = _parse_truthy(request.args.get("hide_nsfw"))
     kind_filter = (request.args.get("kind") or "").strip().lower()
-    media = list_media(folder, hide_nsfw=hide_nsfw)
+    library = _normalize_library_key(request.args.get("library"), MEDIA_LIBRARY_DEFAULT)
+    media = list_media(folder, hide_nsfw=hide_nsfw, library=library)
     if kind_filter in ("image", "video"):
         media = [item for item in media if item.get("kind") == kind_filter]
     if limit_arg is not None or offset_arg is not None:
@@ -7611,7 +8158,8 @@ def get_random_media():
     hide_nsfw = _parse_truthy(request.args.get("hide_nsfw"))
     kind_filter = (request.args.get("kind") or "").strip().lower()
     stream_id = (request.args.get("stream_id") or "").strip()
-    entries = list_media(folder, hide_nsfw=hide_nsfw)
+    library = _normalize_library_key(request.args.get("library"), MEDIA_LIBRARY_DEFAULT)
+    entries = list_media(folder, hide_nsfw=hide_nsfw, library=library)
     if kind_filter in ("image", "video"):
         entries = [item for item in entries if item.get("kind") == kind_filter]
     if not entries:
@@ -7639,7 +8187,7 @@ def notes():
         return jsonify({"notes": settings.get("_notes", "")})
     data = request.get_json(silent=True) or {}
     settings["_notes"] = data.get("notes", "")
-    save_settings(settings)
+    save_settings_debounced()
     return jsonify({"status": "saved"})
 
 
@@ -8005,6 +8553,7 @@ def _socketio_default_error_handler(e: Exception) -> None:
 @socketio.on("disconnect")
 def handle_socket_disconnect():
     sid = request.sid
+    _remove_youtube_sync_subscriber(sid)
     detached_jobs = job_manager.detach_listener(sid)
     if not detached_jobs:
         logger.info('%s Client %s disconnected; no active Stable Horde jobs linked.', STABLE_HORDE_LOG_PREFIX, sid)
@@ -8062,6 +8611,7 @@ def handle_stream_subscribe(payload):
         return
     join_room(stream_id)
     job_manager.attach_listener(stream_id, request.sid)
+    _assign_youtube_sync_leader(stream_id, request.sid)
     if playback_manager is None:
         return
     state = playback_manager.ensure_started(stream_id)
@@ -8069,6 +8619,34 @@ def handle_stream_subscribe(payload):
         state = playback_manager.get_state(stream_id)
     if state:
         playback_manager.emit_state(state, room=request.sid, event=STREAM_INIT_EVENT)
+    stream_conf = settings.get(stream_id)
+    if isinstance(stream_conf, dict):
+        stream_url = str(stream_conf.get("stream_url") or "").strip()
+        youtube_details = _parse_youtube_url_details(stream_url) if stream_url else None
+        if youtube_details:
+            content_type = (
+                str((stream_conf.get("embed_metadata") or {}).get("content_type") or "").strip().lower()
+                if isinstance(stream_conf.get("embed_metadata"), dict)
+                else ""
+            )
+            if not content_type:
+                if youtube_details.get("playlist_id"):
+                    content_type = "playlist"
+                elif youtube_details.get("is_live"):
+                    content_type = "live"
+                else:
+                    content_type = "video"
+            if content_type in {"video", "playlist"}:
+                sync_state = _get_youtube_sync_state(
+                    stream_id,
+                    {
+                        "playlist_id": youtube_details.get("playlist_id"),
+                        "video_id": youtube_details.get("video_id"),
+                        "content_type": content_type,
+                    },
+                )
+                if sync_state:
+                    safe_emit(YOUTUBE_SYNC_EVENT, sync_state, to=request.sid)
 
 
 @socketio.on("stream_unsubscribe")
@@ -8081,6 +8659,7 @@ def handle_stream_unsubscribe(payload):
     if not stream_id:
         return
     leave_room(stream_id)
+    _remove_youtube_sync_subscriber(request.sid, stream_id)
     job_manager.detach_listener(request.sid, stream_id)
 
 
@@ -8126,6 +8705,69 @@ def handle_video_control(payload):
     if volume_value is not None:
         message['volume'] = max(0.0, min(1.0, volume_value))
     safe_emit('video_control', message)
+
+
+@socketio.on("youtube_state")
+def handle_youtube_state(payload):
+    if not isinstance(payload, dict):
+        return
+    stream_id = str(payload.get("stream_id") or "").strip()
+    if not stream_id:
+        return
+    stream_conf = settings.get(stream_id)
+    if not isinstance(stream_conf, dict):
+        return
+    stream_url = str(stream_conf.get("stream_url") or "").strip()
+    youtube_details = _parse_youtube_url_details(stream_url) if stream_url else None
+    if not youtube_details:
+        return
+    content_type = (
+        str((stream_conf.get("embed_metadata") or {}).get("content_type") or "").strip().lower()
+        if isinstance(stream_conf.get("embed_metadata"), dict)
+        else ""
+    )
+    if not content_type:
+        if youtube_details.get("playlist_id"):
+            content_type = "playlist"
+        elif youtube_details.get("is_live"):
+            content_type = "live"
+        else:
+            content_type = "video"
+    if content_type not in {"video", "playlist"}:
+        return
+    if not _youtube_sync_role_for_sid(stream_id, request.sid):
+        return
+    try:
+        position = float(payload.get("current_time"))
+    except (TypeError, ValueError):
+        return
+    if not math.isfinite(position) or position < 0:
+        return
+    position = min(position, 12 * 60 * 60)
+    playlist_index: Optional[int] = None
+    raw_index = payload.get("playlist_index")
+    if isinstance(raw_index, int):
+        playlist_index = raw_index if raw_index >= 0 else None
+    else:
+        try:
+            parsed_index = int(raw_index)
+            playlist_index = parsed_index if parsed_index >= 0 else None
+        except (TypeError, ValueError):
+            playlist_index = None
+    video_id = str(payload.get("video_id") or "").strip() or None
+    sync_payload = _store_youtube_sync_state(
+        stream_id,
+        {
+            "playlist_id": youtube_details.get("playlist_id"),
+            "video_id": youtube_details.get("video_id"),
+            "content_type": content_type,
+        },
+        position=position,
+        playlist_index=playlist_index,
+        video_id=video_id,
+        reporter_sid=request.sid,
+    )
+    safe_emit(YOUTUBE_SYNC_EVENT, sync_payload, to=stream_id)
 
 
 if __name__ == "__main__":

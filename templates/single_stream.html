@@ -54,9 +54,11 @@ let youTubeApiPromise = null;
 let youTubeLiveRetryTimer = null;
 let youTubeUnmuteHandler = null;
 let youTubeUnmuteOverlay = null;
+let youTubeSyncMeta = null;
+let youTubeSyncReportTimer = null;
 
 socket.on('connect', () => {
-  if (usingSynchronizedPlayback) {
+  if (usingSynchronizedPlayback || (youTubeSyncMeta && youTubeSyncMeta.syncEnabled)) {
     socket.emit('stream_subscribe', { stream_id: streamId });
   }
 });
@@ -173,6 +175,14 @@ function destroyYouTubePlayer() {
     clearTimeout(youTubeLiveRetryTimer);
     youTubeLiveRetryTimer = null;
   }
+  if (youTubeSyncReportTimer) {
+    clearInterval(youTubeSyncReportTimer);
+    youTubeSyncReportTimer = null;
+  }
+  if (youTubeSyncMeta) {
+    youTubeSyncMeta.isLeader = false;
+  }
+  youTubeSyncMeta = null;
   clearYouTubeUnmuteHandler();
   if (youTubePlayer && typeof youTubePlayer.destroy === 'function') {
     try {
@@ -277,6 +287,7 @@ function handleYouTubeStateChange(meta, event) {
     }
     return;
   }
+  reportYouTubeSyncState('state_change');
   if (event.data === yt.PlayerState.ENDED) {
     try {
       if (meta.content_type === 'playlist') {
@@ -289,6 +300,111 @@ function handleYouTubeStateChange(meta, event) {
       console.warn('YouTube loop restart failed', err);
     }
   }
+}
+
+function reportYouTubeSyncState(reason = 'tick') {
+  const player = youTubePlayer;
+  const meta = youTubeSyncMeta;
+  if (!player || !meta || !meta.syncEnabled || !meta.isLeader) {
+    return;
+  }
+  if (typeof player.getCurrentTime !== 'function') {
+    return;
+  }
+  let currentTime = 0;
+  try {
+    currentTime = Number(player.getCurrentTime());
+  } catch (err) {
+    return;
+  }
+  if (!Number.isFinite(currentTime) || currentTime < 0) {
+    return;
+  }
+  let playlistIndex = null;
+  if (meta.contentType === 'playlist' && typeof player.getPlaylistIndex === 'function') {
+    try {
+      const rawIndex = Number(player.getPlaylistIndex());
+      if (Number.isFinite(rawIndex) && rawIndex >= 0) {
+        playlistIndex = Math.floor(rawIndex);
+      }
+    } catch (err) {}
+  }
+  let videoId = meta.videoId || '';
+  if (typeof player.getVideoData === 'function') {
+    try {
+      const data = player.getVideoData();
+      if (data && typeof data.video_id === 'string' && data.video_id.trim()) {
+        videoId = data.video_id.trim();
+      }
+    } catch (err) {}
+  }
+  socket.emit('youtube_state', {
+    stream_id: streamId,
+    current_time: currentTime,
+    playlist_index: playlistIndex,
+    video_id: videoId,
+    reason,
+  });
+}
+
+function applyYouTubeSyncPayload(payload) {
+  const player = youTubePlayer;
+  const meta = youTubeSyncMeta;
+  if (!player || !meta || !payload || payload.stream_id !== streamId) {
+    return;
+  }
+  if (payload.origin_sid && socket && socket.id && payload.origin_sid === socket.id) {
+    return;
+  }
+  const targetSeconds = Number(payload.start_seconds);
+  if (!Number.isFinite(targetSeconds) || targetSeconds < 0) {
+    return;
+  }
+  if (meta.contentType === 'playlist') {
+    const targetIndex = Number(payload.playlist_index);
+    if (Number.isFinite(targetIndex) && targetIndex >= 0 && typeof player.getPlaylistIndex === 'function' && typeof player.playVideoAt === 'function') {
+      try {
+        const currentIndex = Number(player.getPlaylistIndex());
+        if (!Number.isFinite(currentIndex) || Math.floor(currentIndex) !== Math.floor(targetIndex)) {
+          player.playVideoAt(Math.floor(targetIndex));
+        }
+      } catch (err) {
+        console.debug('Failed to align YouTube playlist index', err);
+      }
+    }
+  }
+  if (typeof player.getCurrentTime === 'function' && typeof player.seekTo === 'function') {
+    try {
+      const currentTime = Number(player.getCurrentTime());
+      if (!Number.isFinite(currentTime) || Math.abs(currentTime - targetSeconds) > 2.0) {
+        player.seekTo(Math.max(0, targetSeconds), true);
+      }
+    } catch (err) {
+      console.debug('Failed to align YouTube playback time', err);
+    }
+  }
+}
+
+function updateYouTubeSyncReporting() {
+  if (youTubeSyncReportTimer) {
+    clearInterval(youTubeSyncReportTimer);
+    youTubeSyncReportTimer = null;
+  }
+  if (!youTubeSyncMeta || !youTubeSyncMeta.syncEnabled || !youTubeSyncMeta.isLeader || !youTubePlayer) {
+    return;
+  }
+  youTubeSyncReportTimer = setInterval(() => {
+    reportYouTubeSyncState('interval');
+  }, 5000);
+  reportYouTubeSyncState('role');
+}
+
+function applyYouTubeSyncRole(payload) {
+  if (!payload || payload.stream_id !== streamId || !youTubeSyncMeta) {
+    return;
+  }
+  youTubeSyncMeta.isLeader = Boolean(payload.is_leader);
+  updateYouTubeSyncReporting();
 }
 
 async function loadYouTubeEmbed(container, config, data) {
@@ -325,6 +441,13 @@ async function loadYouTubeEmbed(container, config, data) {
     const contentType = (data && data.content_type) ? String(data.content_type).toLowerCase() : 'video';
     const videoId = data && data.video_id ? String(data.video_id) : undefined;
     const playlistId = data && data.playlist_id ? String(data.playlist_id) : undefined;
+    youTubeSyncMeta = {
+      syncEnabled: Boolean(data && data.sync_enabled && contentType !== 'live'),
+      contentType,
+      videoId: videoId || '',
+      playlistId: playlistId || '',
+      isLeader: false,
+    };
     if (contentType === 'playlist' && playlistId) {
       playerVars.listType = 'playlist';
       playerVars.list = playlistId;
@@ -360,6 +483,10 @@ async function loadYouTubeEmbed(container, config, data) {
               event.target.setShuffle(false);
             }
             event.target.playVideo();
+            if (youTubeSyncMeta && youTubeSyncMeta.syncEnabled) {
+              socket.emit('stream_subscribe', { stream_id: streamId });
+              updateYouTubeSyncReporting();
+            }
             if (wantsAudio) {
               armYouTubeUnmuteOnGesture(container);
             }
@@ -1162,7 +1289,13 @@ async function render(config) {
   container.innerHTML = '';
   setBackdropSettings(config && config.background_blur_enabled, config && config.background_blur_amount);
   setMediaController(createNoopMediaController());
-  const mediaMode = (config && typeof config.media_mode === 'string') ? config.media_mode.trim().toLowerCase() : ((config && typeof config.mode === 'string' && config.mode.toLowerCase() === 'livestream') ? 'livestream' : (config && typeof config.mode === 'string' && config.mode.toLowerCase() === 'ai') ? 'ai' : (config && config.selected_media_kind === 'video') ? 'video' : 'image');
+  const mediaMode = (config && typeof config.media_mode === 'string')
+    ? config.media_mode.trim().toLowerCase()
+    : ((config && typeof config.mode === 'string' && config.mode.toLowerCase() === 'livestream')
+      ? 'livestream'
+      : ((config && typeof config.mode === 'string' && config.mode.toLowerCase() === 'ai')
+        ? 'ai'
+        : ((config && config.selected_media_kind === 'video') ? 'video' : 'image')));
   const modeValue = (config && typeof config.mode === 'string') ? config.mode.trim().toLowerCase() : 'random';
   if (mediaMode === 'livestream') {
     updateBackdropSource('');
@@ -1238,7 +1371,15 @@ async function render(config) {
     return;
   }
 
-  if (mediaMode === 'ai' || modeValue === 'ai') {
+  if (mediaMode === 'ai') {
+    if (modeValue === 'random') {
+      startSynchronizedStream(config, container);
+      return;
+    }
+    if (modeValue === 'specific') {
+      await displaySingleMedia(config, container);
+      return;
+    }
     const aiImages = (config.ai_state && Array.isArray(config.ai_state.images)) ? config.ai_state.images : [];
     const paths = aiImages
       .map(item => (item && item.path) ? item.path : item)
@@ -1340,6 +1481,8 @@ socket.on('video_control', handleVideoControl);
 socket.on('stream_init', handleStreamUpdate);
 socket.on('stream_update', handleStreamUpdate);
 socket.on('sync_time', handleSyncTime);
+socket.on('youtube_sync', applyYouTubeSyncPayload);
+socket.on('youtube_sync_role', applyYouTubeSyncRole);
 
 load();
 </script>
