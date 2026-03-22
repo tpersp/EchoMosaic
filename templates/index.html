@@ -4734,23 +4734,53 @@
     return 'generate';
   }
 
+  const MODE_VARIANT_OPTIONS = Object.freeze({
+    image: [
+      { value: 'random', label: 'Random' },
+      { value: 'specific', label: 'Specific' },
+    ],
+    video: [
+      { value: 'random', label: 'Random (Video)' },
+      { value: 'specific', label: 'Specific (Video)' },
+    ],
+    ai: [
+      { value: 'ai_generate', label: 'Generate' },
+      { value: 'ai_random', label: 'View Random' },
+      { value: 'ai_specific', label: 'View Specific' },
+    ],
+  });
+
+  function rebuildModeVariantSelect(modeSelect, mediaMode, nextMode) {
+    if (!modeSelect) return;
+    const normalizedMedia = typeof mediaMode === 'string' ? mediaMode.toLowerCase() : 'image';
+    const entries = MODE_VARIANT_OPTIONS[normalizedMedia] || [];
+    const normalizedUiMode = normalizeModeForUi(normalizedMedia, nextMode);
+    if (!entries.length) {
+      modeSelect.replaceChildren();
+      return;
+    }
+    const frag = document.createDocumentFragment();
+    let selectedIndex = 0;
+    entries.forEach((entry, index) => {
+      const option = document.createElement('option');
+      option.value = entry.value;
+      option.textContent = entry.label;
+      option.dataset.category = normalizedMedia;
+      if (entry.value === normalizedUiMode) {
+        option.selected = true;
+        selectedIndex = index;
+      }
+      frag.appendChild(option);
+    });
+    modeSelect.replaceChildren(frag);
+    modeSelect.selectedIndex = selectedIndex;
+    modeSelect.value = entries[selectedIndex].value;
+  }
+
   function selectModeVariant(modeSelect, mediaMode, nextMode) {
     if (!modeSelect) return;
     const normalizedMedia = typeof mediaMode === 'string' ? mediaMode.toLowerCase() : 'image';
-    const normalizedMode = normalizeModeForUi(normalizedMedia, nextMode);
-    const options = Array.from(modeSelect.options);
-    const matching = options.find(opt => {
-      const category = (opt.dataset.category || 'image').toLowerCase();
-      return category === normalizedMedia && String(opt.value || '').toLowerCase() === normalizedMode;
-    });
-    if (matching) {
-      const matchingIndex = options.indexOf(matching);
-      options.forEach(opt => { opt.selected = (opt === matching); });
-      if (matchingIndex >= 0) {
-        modeSelect.selectedIndex = matchingIndex;
-      }
-      modeSelect.value = matching.value;
-    }
+    rebuildModeVariantSelect(modeSelect, normalizedMedia, nextMode);
   }
 
   const PICSUM_LIMITS = Object.freeze({
@@ -5127,24 +5157,11 @@ function applyPicsumSettings(card, settings, opts = {}) {
       variantWrapper.style.display = showVariant ? '' : 'none';
     }
     if (modeSelect) {
-      const options = Array.from(modeSelect.options);
-      options.forEach(opt => {
-        const category = (opt.dataset.category || 'image').toLowerCase();
-        const visible = showVariant && category === normalizedMedia;
-        opt.hidden = !visible;
-      });
       if (showVariant) {
-        const matching = options.find(opt => !opt.hidden && opt.value === uiMode);
-        if (matching) {
-          selectModeVariant(modeSelect, normalizedMedia, normalizedMode);
-        } else {
-          const fallback = options.find(opt => !opt.hidden);
-          if (fallback) {
-            selectModeVariant(modeSelect, normalizedMedia, fallback.value);
-          }
-        }
+        rebuildModeVariantSelect(modeSelect, normalizedMedia, normalizedMode);
         modeSelect.disabled = false;
       } else {
+        modeSelect.replaceChildren();
         modeSelect.disabled = true;
       }
     }
