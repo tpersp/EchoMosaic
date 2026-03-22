@@ -2888,7 +2888,7 @@
       renderAiStatus(card, data.state, data.job || aiActiveJobs.get(streamId) || null);
       const status = String((data.job && data.job.status) || data.state.status || '').toLowerCase();
       if (status === 'completed') {
-        refreshAiViewLibrary(card);
+        refreshAllAiViewLibraries();
       }
     } else if (data.job) {
       renderAiStatus(card, {}, data.job);
@@ -3551,6 +3551,12 @@
       return;
     }
     loadMediaFor(streamId, currentFolder || 'all');
+  }
+
+  function refreshAllAiViewLibraries() {
+    document.querySelectorAll('.stream-card[data-stream]').forEach(card => {
+      refreshAiViewLibrary(card);
+    });
   }
 
   function gatherPostProcessing(card) {
