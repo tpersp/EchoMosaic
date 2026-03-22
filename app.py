@@ -1212,6 +1212,8 @@ STREAM_UPDATE_EVENT = "stream_update"
 STREAM_INIT_EVENT = "stream_init"
 SYNC_TIME_EVENT = "sync_time"
 STREAM_SYNC_INTERVAL_SECONDS = 3.0
+YOUTUBE_SYNC_EVENT = "youtube_sync"
+YOUTUBE_SYNC_MAX_AGE_SECONDS = 20.0
 
 LIVE_HLS_ASYNC = True
 HLS_TTL_SECS = 3600
@@ -1219,6 +1221,78 @@ MAX_HLS_WORKERS = 3
 HLS_ERROR_RETRY_SECS = 30
 
 playback_manager: Optional["StreamPlaybackManager"] = None
+YOUTUBE_SYNC_STATE_LOCK = threading.Lock()
+YOUTUBE_SYNC_STATE: Dict[str, Dict[str, Any]] = {}
+
+
+def _youtube_sync_source_signature(details: Optional[Dict[str, Any]]) -> Tuple[str, str, str]:
+    if not isinstance(details, dict):
+        return ("", "", "")
+    return (
+        str(details.get("playlist_id") or "").strip(),
+        str(details.get("video_id") or "").strip(),
+        str(details.get("content_type") or "").strip().lower(),
+    )
+
+
+def _get_youtube_sync_state(
+    stream_id: str,
+    details: Optional[Dict[str, Any]],
+    *,
+    max_age: float = YOUTUBE_SYNC_MAX_AGE_SECONDS,
+) -> Optional[Dict[str, Any]]:
+    expected = _youtube_sync_source_signature(details)
+    now = time.time()
+    with YOUTUBE_SYNC_STATE_LOCK:
+        entry = YOUTUBE_SYNC_STATE.get(stream_id)
+        if not entry:
+            return None
+        if entry.get("source_signature") != expected:
+            return None
+        server_time = entry.get("server_time")
+        if not isinstance(server_time, (int, float)):
+            return None
+        age = now - float(server_time)
+        if age < 0:
+            age = 0.0
+        if age > max_age:
+            return None
+        synced = dict(entry)
+    base_seconds = synced.get("start_seconds")
+    if isinstance(base_seconds, (int, float)):
+        synced["start_seconds"] = max(0.0, float(base_seconds) + age)
+    synced["server_time"] = now
+    return synced
+
+
+def _store_youtube_sync_state(
+    stream_id: str,
+    details: Dict[str, Any],
+    *,
+    position: float,
+    playlist_index: Optional[int] = None,
+    video_id: Optional[str] = None,
+    reporter_sid: Optional[str] = None,
+) -> Dict[str, Any]:
+    now = time.time()
+    content_type = str(details.get("content_type") or "").strip().lower()
+    normalized_video_id = str(video_id or details.get("video_id") or "").strip() or None
+    normalized_index = playlist_index if isinstance(playlist_index, int) and playlist_index >= 0 else None
+    payload: Dict[str, Any] = {
+        "stream_id": stream_id,
+        "content_type": content_type,
+        "video_id": normalized_video_id,
+        "playlist_id": str(details.get("playlist_id") or "").strip() or None,
+        "playlist_index": normalized_index,
+        "start_seconds": max(0.0, float(position)),
+        "server_time": now,
+        "source_signature": _youtube_sync_source_signature(details),
+    }
+    if reporter_sid:
+        payload["origin_sid"] = reporter_sid
+    with YOUTUBE_SYNC_STATE_LOCK:
+        YOUTUBE_SYNC_STATE[stream_id] = dict(payload)
+    return payload
 
 
 def _normalize_folder_key(folder: Optional[str]) -> str:
@@ -7419,6 +7493,24 @@ def stream_live():
             "hls_url": None,
             "original_url": stream_url,
         }
+        if content_type in {"video", "playlist"}:
+            sync_state = _get_youtube_sync_state(
+                stream_id,
+                {
+                    "playlist_id": youtube_details.get("playlist_id"),
+                    "video_id": youtube_details.get("video_id"),
+                    "content_type": content_type,
+                },
+            )
+            if sync_state:
+                if sync_state.get("playlist_index") is not None:
+                    response_payload["start_index"] = sync_state.get("playlist_index")
+                if sync_state.get("start_seconds") is not None:
+                    response_payload["start_seconds"] = sync_state.get("start_seconds")
+                if sync_state.get("video_id"):
+                    response_payload["video_id"] = sync_state.get("video_id")
+                response_payload["server_time"] = sync_state.get("server_time")
+                response_payload["sync_enabled"] = True
         if sanitized_meta:
             response_payload["metadata"] = sanitized_meta
         return jsonify(response_payload)
@@ -8155,6 +8247,34 @@ def handle_stream_subscribe(payload):
         state = playback_manager.get_state(stream_id)
     if state:
         playback_manager.emit_state(state, room=request.sid, event=STREAM_INIT_EVENT)
+    stream_conf = settings.get(stream_id)
+    if isinstance(stream_conf, dict):
+        stream_url = str(stream_conf.get("stream_url") or "").strip()
+        youtube_details = _parse_youtube_url_details(stream_url) if stream_url else None
+        if youtube_details:
+            content_type = (
+                str((stream_conf.get("embed_metadata") or {}).get("content_type") or "").strip().lower()
+                if isinstance(stream_conf.get("embed_metadata"), dict)
+                else ""
+            )
+            if not content_type:
+                if youtube_details.get("playlist_id"):
+                    content_type = "playlist"
+                elif youtube_details.get("is_live"):
+                    content_type = "live"
+                else:
+                    content_type = "video"
+            if content_type in {"video", "playlist"}:
+                sync_state = _get_youtube_sync_state(
+                    stream_id,
+                    {
+                        "playlist_id": youtube_details.get("playlist_id"),
+                        "video_id": youtube_details.get("video_id"),
+                        "content_type": content_type,
+                    },
+                )
+                if sync_state:
+                    safe_emit(YOUTUBE_SYNC_EVENT, sync_state, to=request.sid)
 
 
 @socketio.on("stream_unsubscribe")
@@ -8212,6 +8332,67 @@ def handle_video_control(payload):
     if volume_value is not None:
         message['volume'] = max(0.0, min(1.0, volume_value))
     safe_emit('video_control', message)
+
+
+@socketio.on("youtube_state")
+def handle_youtube_state(payload):
+    if not isinstance(payload, dict):
+        return
+    stream_id = str(payload.get("stream_id") or "").strip()
+    if not stream_id:
+        return
+    stream_conf = settings.get(stream_id)
+    if not isinstance(stream_conf, dict):
+        return
+    stream_url = str(stream_conf.get("stream_url") or "").strip()
+    youtube_details = _parse_youtube_url_details(stream_url) if stream_url else None
+    if not youtube_details:
+        return
+    content_type = (
+        str((stream_conf.get("embed_metadata") or {}).get("content_type") or "").strip().lower()
+        if isinstance(stream_conf.get("embed_metadata"), dict)
+        else ""
+    )
+    if not content_type:
+        if youtube_details.get("playlist_id"):
+            content_type = "playlist"
+        elif youtube_details.get("is_live"):
+            content_type = "live"
+        else:
+            content_type = "video"
+    if content_type not in {"video", "playlist"}:
+        return
+    try:
+        position = float(payload.get("current_time"))
+    except (TypeError, ValueError):
+        return
+    if not math.isfinite(position) or position < 0:
+        return
+    position = min(position, 12 * 60 * 60)
+    playlist_index: Optional[int] = None
+    raw_index = payload.get("playlist_index")
+    if isinstance(raw_index, int):
+        playlist_index = raw_index if raw_index >= 0 else None
+    else:
+        try:
+            parsed_index = int(raw_index)
+            playlist_index = parsed_index if parsed_index >= 0 else None
+        except (TypeError, ValueError):
+            playlist_index = None
+    video_id = str(payload.get("video_id") or "").strip() or None
+    sync_payload = _store_youtube_sync_state(
+        stream_id,
+        {
+            "playlist_id": youtube_details.get("playlist_id"),
+            "video_id": youtube_details.get("video_id"),
+            "content_type": content_type,
+        },
+        position=position,
+        playlist_index=playlist_index,
+        video_id=video_id,
+        reporter_sid=request.sid,
+    )
+    safe_emit(YOUTUBE_SYNC_EVENT, sync_payload, to=stream_id)
 
 
 if __name__ == "__main__":
