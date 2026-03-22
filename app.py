@@ -278,6 +278,10 @@ logger = logging.getLogger(__name__)
 _emit_throttle_lock = threading.Lock()
 _emit_min_interval = 0.05  # seconds
 _last_emit_timestamp = 0.0
+UPDATE_PROGRESS_EVENT = "update_progress"
+UPDATE_STAGE_SEQUENCE = ("fetch", "checkout", "apply", "dependencies", "restart", "wait_restart")
+_update_job_lock = threading.Lock()
+_update_job_active = False
 
 
 def safe_emit(
@@ -313,6 +317,121 @@ def safe_emit(
             event_name,
             exc,
         )
+
+
+def _set_update_job_active(active: bool) -> bool:
+    global _update_job_active
+    with _update_job_lock:
+        if active and _update_job_active:
+            return False
+        _update_job_active = active
+        return True
+
+
+def _emit_update_progress(
+    socket_id: Optional[str],
+    *,
+    stage: Optional[str] = None,
+    message: Optional[str] = None,
+    line: Optional[str] = None,
+    state: str = "info",
+    complete: bool = False,
+    failed: bool = False,
+) -> None:
+    if not socket_id:
+        return
+    payload: Dict[str, Any] = {
+        "state": state,
+        "complete": bool(complete),
+        "failed": bool(failed),
+    }
+    if stage:
+        payload["stage"] = stage
+    if message:
+        payload["message"] = message
+    if line is not None:
+        payload["line"] = line
+    safe_emit(UPDATE_PROGRESS_EVENT, payload, to=socket_id)
+
+
+def _update_stage_from_line(line: str, current_stage: str) -> str:
+    lowered = line.strip().lower()
+    if "fetching latest changes" in lowered:
+        return "fetch"
+    if "already on '" in lowered or "head is now at" in lowered or "checking out" in lowered:
+        return "checkout"
+    if "restoring" in lowered or "applying" in lowered:
+        return "apply"
+    if "updating python dependencies" in lowered:
+        return "dependencies"
+    if lowered.startswith("restarting ") or "restarting echomosaic" in lowered:
+        return "restart"
+    if "update complete" in lowered:
+        return "wait_restart"
+    return current_stage
+
+
+def _run_update_job(repo_path: str, update_script: str, service_name: str, socket_id: Optional[str]) -> None:
+    stage = "fetch"
+    _emit_update_progress(socket_id, stage=stage, message="Starting update…", state="info")
+    process: Optional[subprocess.Popen[str]] = None
+    try:
+        process = subprocess.Popen(
+            ["bash", update_script],
+            cwd=repo_path,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1,
+        )
+        assert process.stdout is not None
+        for raw_line in process.stdout:
+            clean_line = raw_line.rstrip("\n")
+            if not clean_line:
+                continue
+            next_stage = _update_stage_from_line(clean_line, stage)
+            stage = next_stage
+            _emit_update_progress(
+                socket_id,
+                stage=stage,
+                message=clean_line,
+                line=clean_line,
+                state="info",
+            )
+        return_code = process.wait()
+        if return_code == 0:
+            _emit_update_progress(
+                socket_id,
+                stage="wait_restart",
+                message=f"{service_name} restarting… waiting for service to come back.",
+                state="info",
+                complete=True,
+            )
+        else:
+            _emit_update_progress(
+                socket_id,
+                stage=stage,
+                message=f"Update failed with exit code {return_code}.",
+                state="error",
+                failed=True,
+            )
+    except Exception as exc:
+        logger.exception("In-app update failed")
+        _emit_update_progress(
+            socket_id,
+            stage=stage,
+            message=f"Update failed: {exc}",
+            line=f"ERROR: {exc}",
+            state="error",
+            failed=True,
+        )
+    finally:
+        _set_update_job_active(False)
+        if process is not None and process.poll() is None:
+            try:
+                process.kill()
+            except Exception:
+                pass
 
 
 SETTINGS_FILE = "settings.json"
@@ -7424,35 +7543,26 @@ def update_app():
     cfg = load_config()
     api_key = cfg.get("API_KEY")
     if api_key and request.headers.get("X-API-Key") != api_key:
-        return "Unauthorized", 401
+        return jsonify({"error": "Unauthorized"}), 401
     repo_path = _repo_path_from_config(cfg)
     if not os.path.isdir(repo_path):
-        return render_template(
-            "update_status.html",
-            message=f"Repository path '{repo_path}' not found. Check INSTALL_DIR in config.json",
-        )
+        return jsonify({"error": f"Repository path '{repo_path}' not found. Check INSTALL_DIR in config.json"}), 400
     update_script = os.path.join(repo_path, "update.sh")
     if not os.path.isfile(update_script):
-        return render_template(
-            "update_status.html",
-            message=f"Update script not found at '{update_script}'.",
-        )
-    try:
-        subprocess.check_call(["bash", update_script], cwd=repo_path)
-    except FileNotFoundError:
-        return render_template(
-            "update_status.html",
-            message="Bash is required to run the updater.",
-        )
-    except subprocess.CalledProcessError as exc:
-        logger.exception("In-app update failed")
-        return render_template(
-            "update_status.html",
-            message=f"Update failed: {exc}",
-        )
-    return render_template(
-        "update_status.html", message="Update complete. Restarting service..."
+        return jsonify({"error": f"Update script not found at '{update_script}'."}), 400
+    if not _set_update_job_active(True):
+        return jsonify({"error": "An update is already in progress."}), 409
+    data = request.get_json(silent=True) or {}
+    socket_id = str(data.get("socket_id") or "").strip()
+    service_name = str(cfg.get("SERVICE_NAME", "echomosaic.service"))
+    worker = threading.Thread(
+        target=_run_update_job,
+        args=(repo_path, update_script, service_name, socket_id or None),
+        daemon=True,
+        name="echomosaic-update-job",
     )
+    worker.start()
+    return jsonify({"status": "started", "service_name": service_name})
 
 
 def read_update_info():

@@ -6,11 +6,30 @@
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
   <style>
     .progress { height: 10px; background: #333; border-radius: 6px; overflow: hidden; }
-    .bar { height: 100%; width: 0%; background: var(--accent); transition: width 0.6s ease; }
-    .steps { list-style: none; padding: 0; margin: 0.5rem 0 0; }
-    .steps li { opacity: 0.7; margin: 0.25rem 0; }
+    .bar { height: 100%; width: 0%; background: var(--accent); transition: width 0.35s ease; }
+    .steps { list-style: none; padding: 0; margin: 0.75rem 0 0; display: grid; gap: 0.3rem; }
+    .steps li { opacity: 0.65; }
     .steps li.active { opacity: 1; color: var(--text); }
-    .steps li.done { opacity: 0.9; }
+    .steps li.done { opacity: 0.95; }
+    .steps li.error { color: #ff6b6b; opacity: 1; }
+    .status { margin-top: 0.75rem; opacity: 0.95; }
+    .log-panel {
+      margin-top: 1rem;
+      background: #161616;
+      border: 1px solid #303030;
+      border-radius: 6px;
+      padding: 0.85rem;
+      font-family: 'Fira Mono', 'Consolas', monospace;
+      font-size: 0.84rem;
+      line-height: 1.45;
+      height: 45vh;
+      overflow-y: auto;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    .log-line.error { color: #ff7b7b; }
+    .log-line.info { color: #ddd; }
+    .log-line.dim { color: #999; }
   </style>
 </head>
 <body>
@@ -21,102 +40,148 @@
     </nav>
   </header>
   <div class="container">
-    <p>We’re applying the latest update. This may take a minute.</p>
+    <p>We’re applying the latest update. This page now follows the real updater output.</p>
     <div class="progress"><div id="bar" class="bar"></div></div>
     <ul id="steps" class="steps">
-      <li class="active">Fetching latest code</li>
-      <li>Checking out branch</li>
-      <li>Applying update</li>
-      <li>Updating dependencies</li>
-      <li>Restarting service</li>
-      <li>Waiting for restart</li>
+      <li data-stage="fetch" class="active">Fetching latest code</li>
+      <li data-stage="checkout">Checking out branch</li>
+      <li data-stage="apply">Applying update</li>
+      <li data-stage="dependencies">Updating dependencies</li>
+      <li data-stage="restart">Restarting service</li>
+      <li data-stage="wait_restart">Waiting for restart</li>
     </ul>
-    <p id="status" style="margin-top:0.5rem; opacity:0.9;">Starting…</p>
+    <p id="status" class="status">Connecting…</p>
+    <div id="log-output" class="log-panel" aria-live="polite"></div>
   </div>
+  <script src="https://cdn.socket.io/4.0.1/socket.io.min.js"></script>
   <script>
+    const stageOrder = ['fetch', 'checkout', 'apply', 'dependencies', 'restart', 'wait_restart'];
     const steps = Array.from(document.querySelectorAll('#steps li'));
     const bar = document.getElementById('bar');
     const statusEl = document.getElementById('status');
-
-    let i = 0;
-    function advance(msg) {
-      if (i < steps.length) {
-        steps[i].classList.remove('active');
-        steps[i].classList.add('done');
-      }
-      i = Math.min(i + 1, steps.length - 1);
-      steps[i].classList.add('active');
-      bar.style.width = Math.round(((i) / (steps.length)) * 100) + '%';
-      if (msg) statusEl.textContent = msg;
-    }
-
-    // Animate progress locally while the server does real work
-    const msgs = [
-      'Fetching latest code…',
-      'Switching to update branch…',
-      'Applying updates…',
-      'Updating dependencies…',
-      'Restarting service…',
-      'Waiting for restart…'
-    ];
-    let t = 0;
-    function tick() { if (t < msgs.length) { advance(msgs[t++]); setTimeout(tick, 900); } }
-    setTimeout(tick, 500);
-
-    // Kick off update; when done, finalize and redirect
+    const logOutput = document.getElementById('log-output');
+    const socket = io();
     const headers = {};
     {% if api_key %}headers['X-API-Key'] = '{{ api_key }}';{% endif %}
-    fetch('/update_app', { method: 'POST', headers })
-      .then(r => r.text())
-      .then(txt => {
-        const lower = txt.toLowerCase();
-        const isError = lower.includes('failed') || lower.includes('unauthorized') || lower.includes('error');
-        if (isError) {
-          statusEl.textContent = 'Update encountered an error. See details below.';
-          const detail = document.createElement('div');
-          detail.style.marginTop = '0.75rem';
-          detail.innerHTML = txt;
-          document.querySelector('.container').appendChild(detail);
-          return;
-        }
-        // Start restart wait loop
-        waitForRestart();
-      })
-      .catch(err => {
-        statusEl.textContent = 'Update failed: ' + err;
-      });
 
-    function waitForRestart() {
-      // Move to last step UI-wise
-      while (i < steps.length - 1) { advance('Waiting for restart…'); }
+    let updateStarted = false;
+    let waitingForRestart = false;
+    let completed = false;
+
+    function setStatus(text) {
+      statusEl.textContent = text;
+    }
+
+    function appendLog(text, kind = 'info') {
+      if (!text) return;
+      const line = document.createElement('div');
+      line.className = `log-line ${kind}`;
+      line.textContent = text;
+      logOutput.appendChild(line);
+      logOutput.scrollTop = logOutput.scrollHeight;
+    }
+
+    function setStage(stage, failed = false) {
+      const idx = stageOrder.indexOf(stage);
+      steps.forEach((step, index) => {
+        step.classList.remove('active', 'done', 'error');
+        if (failed && index === idx) {
+          step.classList.add('error');
+        } else if (idx >= 0 && index < idx) {
+          step.classList.add('done');
+        } else if (idx >= 0 && index === idx) {
+          step.classList.add('active');
+        }
+      });
+      const progressIndex = idx >= 0 ? idx : 0;
+      const pct = Math.round((progressIndex / Math.max(1, stageOrder.length - 1)) * 100);
+      bar.style.width = `${pct}%`;
+    }
+
+    async function waitForRestart() {
+      if (waitingForRestart || completed) return;
+      waitingForRestart = true;
+      setStage('wait_restart');
+      setStatus('Waiting for restart…');
+      appendLog('Waiting for service to come back…', 'dim');
       const start = Date.now();
       let attempts = 0;
-      const maxWaitMs = 120000; // 2 minutes
-      const tick = async () => {
-        attempts++;
-        statusEl.textContent = `Waiting for restart… (attempt ${attempts})`;
+      const maxWaitMs = 120000;
+      while (Date.now() - start <= maxWaitMs) {
+        attempts += 1;
         try {
           const res = await fetch('/health', { cache: 'no-store' });
           if (res.ok) {
+            completed = true;
             bar.style.width = '100%';
-            statusEl.textContent = 'Back online. Redirecting…';
+            steps.forEach(step => step.classList.remove('active', 'error'));
+            steps.forEach(step => step.classList.add('done'));
+            setStatus('Back online. Redirecting…');
+            appendLog('Service is back online.', 'info');
             setTimeout(() => { window.location.href = '/'; }, 1200);
             return;
           }
-        } catch (e) { /* ignore; server may be down */ }
-        if (Date.now() - start > maxWaitMs) {
-          statusEl.textContent = 'Taking longer than usual. You can try refreshing the dashboard.';
-          const link = document.createElement('a');
-          link.href = '/';
-          link.textContent = 'Go to Dashboard';
-          link.style.marginLeft = '8px';
-          statusEl.appendChild(link);
-          return;
+        } catch (err) {
+          // service is likely still restarting
         }
-        setTimeout(tick, Math.min(5000, 500 + attempts * 200));
-      };
-      setTimeout(tick, 1000);
+        setStatus(`Waiting for restart… (attempt ${attempts})`);
+        await new Promise(resolve => setTimeout(resolve, Math.min(5000, 500 + attempts * 250)));
+      }
+      setStatus('Taking longer than usual. You can refresh the dashboard manually.');
+      appendLog('Timed out while waiting for restart.', 'error');
     }
+
+    socket.on('connect', async () => {
+      setStatus('Connected. Starting update…');
+      appendLog('Socket connected. Starting update job…', 'dim');
+      try {
+        const res = await fetch('/update_app', {
+          method: 'POST',
+          headers: Object.assign({ 'Content-Type': 'application/json' }, headers),
+          body: JSON.stringify({ socket_id: socket.id }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          throw new Error(data.error || `Update failed (${res.status})`);
+        }
+        updateStarted = true;
+        appendLog('Update job accepted by server.', 'dim');
+      } catch (err) {
+        const msg = err && err.message ? err.message : String(err);
+        setStatus(`Update failed to start: ${msg}`);
+        appendLog(`ERROR: ${msg}`, 'error');
+      }
+    });
+
+    socket.on('disconnect', () => {
+      appendLog('Socket disconnected.', 'dim');
+      if (updateStarted && !completed) {
+        waitForRestart();
+      }
+    });
+
+    socket.on('update_progress', (payload) => {
+      if (!payload || completed) return;
+      if (payload.stage) {
+        setStage(payload.stage, !!payload.failed);
+      }
+      if (payload.line) {
+        appendLog(payload.line, payload.failed ? 'error' : 'info');
+      } else if (payload.message) {
+        appendLog(payload.message, payload.failed ? 'error' : 'dim');
+      }
+      if (payload.message) {
+        setStatus(payload.message);
+      }
+      if (payload.failed) {
+        completed = true;
+        appendLog('Update failed.', 'error');
+        return;
+      }
+      if (payload.complete || payload.stage === 'wait_restart') {
+        waitForRestart();
+      }
+    });
   </script>
 </body>
 </html>
