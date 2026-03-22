@@ -28,10 +28,10 @@ else
   BRANCH="main"
 fi
 
-# Prompt for the service user (default: current user)
-default_user="$(whoami)"
-read -r -p "Enter the user account that should run the service [${default_user}]: " SERVICE_USER
-SERVICE_USER="${SERVICE_USER:-$default_user}"
+# The installer manages a systemd --user service, so it always runs as the
+# invoking user. Keep that explicit to avoid mismatched ownership/runtime state.
+SERVICE_USER="$(whoami)"
+echo "Installing as user: ${SERVICE_USER}"
 # Prompt for installation directory
 read -r -p "Enter installation directory [${default_install_dir}]: " INSTALL_DIR
 INSTALL_DIR="${INSTALL_DIR:-$default_install_dir}"

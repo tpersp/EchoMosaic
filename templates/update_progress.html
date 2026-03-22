@@ -62,12 +62,13 @@
     const logOutput = document.getElementById('log-output');
     const socket = io();
     const headers = {};
-    {% if api_key %}headers['X-API-Key'] = '{{ api_key }}';{% endif %}
+    {% if api_key %}headers['X-API-Key'] = {{ api_key|tojson }};{% endif %}
 
     let updateStarted = false;
     let waitingForRestart = false;
     let completed = false;
     let startingUpdate = false;
+    let restartPhaseReached = false;
 
     function setStatus(text) {
       statusEl.textContent = text;
@@ -169,8 +170,10 @@
 
     socket.on('disconnect', () => {
       appendLog('Socket disconnected.', 'dim');
-      if (updateStarted && !completed) {
+      if (restartPhaseReached && !completed) {
         waitForRestart();
+      } else if (updateStarted && !completed) {
+        setStatus('Connection dropped while update is still running. Waiting to reconnect…');
       }
     });
 
@@ -191,6 +194,9 @@
         completed = true;
         appendLog('Update failed.', 'error');
         return;
+      }
+      if (payload.stage === 'wait_restart' || payload.complete) {
+        restartPhaseReached = true;
       }
       if (payload.complete || payload.stage === 'wait_restart') {
         updateStarted = true;

@@ -18,15 +18,6 @@ htmlcov/
 .tox/
 .DS_Store
 
-# Local-only tests
-tests/
-test_*.py
-*_test.py
-pytest.ini
-tox.ini
-pyproject.toml
-setup.cfg
-
 # Editor/IDE
 .vscode/
 .idea/
