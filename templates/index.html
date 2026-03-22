@@ -5763,6 +5763,10 @@ function applyPicsumSettings(card, settings, opts = {}) {
       const initialMediaMode = (modeCategorySelect ? modeCategorySelect.value : (card.dataset.mediaMode || 'image')).toLowerCase();
       const initialModeValue = modeSelect ? (modeSelect.value || '').toLowerCase() : ((initialMediaMode === 'livestream' || initialMediaMode === 'ai') ? initialMediaMode : 'random');
       applyModeState(card, initialMediaMode, initialModeValue, urlInput ? urlInput.value : '');
+      if ((initialMediaMode === 'image' || initialMediaMode === 'video') && initialModeValue === 'specific') {
+        const effectiveFolder = folderSelect ? (folderSelect.value === '__filtered__' ? (folderSelect.dataset.currentFolder || 'all') : (folderSelect.value || folderSelect.dataset.currentFolder || 'all')) : 'all';
+        loadMediaFor(streamId, effectiveFolder);
+      }
     });
     syncMinimizedGridState();
     originalCardOrder = Array.from(cardTagsMap.keys());
