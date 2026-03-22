@@ -3141,30 +3141,54 @@ def _run_ai_generation(
     if style_value:
         extras_payload['style'] = style_value
 
+    generation_kwargs = {
+        'negative_prompt': negative_prompt,
+        'models': models,
+        'width': int(options.get('width', AI_DEFAULT_WIDTH)),
+        'height': int(options.get('height', AI_DEFAULT_HEIGHT)),
+        'steps': int(options.get('steps', AI_DEFAULT_STEPS)),
+        'cfg_scale': float(options.get('cfg_scale', AI_DEFAULT_CFG)),
+        'sampler_name': sampler,
+        'seed': seed_payload,
+        'samples': int(options.get('samples', AI_DEFAULT_SAMPLES)),
+        'nsfw': bool(options.get('nsfw')),
+        'censor_nsfw': bool(options.get('censor_nsfw')),
+        'post_processing': post_processing or None,
+        'params': advanced_params or None,
+        'extras': extras_payload or None,
+        'poll_interval': float(options.get('poll_interval', AI_POLL_INTERVAL)),
+        'timeout': timeout_value,
+        'persist': persist,
+        'output_dir': target_root if persist else None,
+        'status_callback': _status_callback,
+        'cancel_callback': (lambda: bool(cancel_event and cancel_event.is_set())),
+    }
+
     try:
-        result = stable_horde_client.generate_images(
-            prompt,
-            negative_prompt=negative_prompt,
-            models=models,
-            width=int(options.get('width', AI_DEFAULT_WIDTH)),
-            height=int(options.get('height', AI_DEFAULT_HEIGHT)),
-            steps=int(options.get('steps', AI_DEFAULT_STEPS)),
-            cfg_scale=float(options.get('cfg_scale', AI_DEFAULT_CFG)),
-            sampler_name=sampler,
-            seed=seed_payload,
-            samples=int(options.get('samples', AI_DEFAULT_SAMPLES)),
-            nsfw=bool(options.get('nsfw')),
-            censor_nsfw=bool(options.get('censor_nsfw')),
-            post_processing=post_processing or None,
-            params=advanced_params or None,
-            extras=extras_payload or None,
-            poll_interval=float(options.get('poll_interval', AI_POLL_INTERVAL)),
-            timeout=timeout_value,
-            persist=persist,
-            output_dir=target_root if persist else None,
-            status_callback=_status_callback,
-            cancel_callback=(lambda: bool(cancel_event and cancel_event.is_set())),
-        )
+        result = None
+        for attempt in range(1, 3):
+            try:
+                result = stable_horde_client.generate_images(prompt, **generation_kwargs)
+                break
+            except StableHordeError as exc:
+                lost_track = "lost track of job" in str(exc).lower()
+                if lost_track and attempt == 1 and not (cancel_event and cancel_event.is_set()):
+                    logger.warning(
+                        "Stable Horde lost track of job for %s; retrying once with a fresh request",
+                        stream_id,
+                    )
+                    _update_ai_state(
+                        stream_id,
+                        {
+                            'status': 'queued',
+                            'message': 'Stable Horde lost the first job; retrying once',
+                            'error': None,
+                            'persisted': persist,
+                        },
+                        persist=True,
+                    )
+                    continue
+                raise
     except StableHordeCancelled as exc:
         logger.info('Stable Horde job for %s cancelled: %s', stream_id, exc)
         message = 'Cancelled by user'
