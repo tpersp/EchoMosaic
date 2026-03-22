@@ -30,11 +30,12 @@ A running list of ideas and future improvements. Add new items anywhere below.
 
 ### AI Images Sub-Modes
 - Keep `AI Images` as one top-level mode, but split it into `Generate`, `View Random`, and `View Specific`.
-- `Generate` keeps the current Stable Horde workflow and saves results into the AI media library.
-- `View Random` and `View Specific` should behave like the existing `Images / GIFs` random/specific modes, but only browse AI-generated media.
-- Normal `Images / GIFs` should not show AI-generated folders, and AI view sub-modes should not show normal media folders.
-- Prefer separating AI media by storage root or explicit metadata instead of folder-name matching alone, so the split stays reliable long-term.
-- Decide how manually moved files should behave: either preserve original media type via metadata, or treat files based on the library/folder they are currently stored in.
+- Use two first-class library roots internally: `/media` for normal uploaded/manual media and `/ai_media` for generated AI output.
+- `Generate` keeps the current Stable Horde workflow but saves results into `/ai_media`.
+- `View Random` and `View Specific` should behave like the existing `Images / GIFs` random/specific modes, but only browse `/ai_media`.
+- Normal `Images / GIFs` should continue browsing only `/media`.
+- The media manager should understand both roots as separate libraries internally, while each mode is limited to the intended library.
+- This keeps the separation structural and reliable instead of depending on folder-name matching inside one shared media tree.
 
 ## Implemented / Completed Ideas
 - [x] Implement Stable Horde image generation. (Streams can switch to AI mode, queue jobs, and manage presets.)
