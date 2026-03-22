@@ -127,6 +127,9 @@ raw_paths = []
 raw_paths.extend(normalize_paths(config_data.get("MEDIA_PATHS") or default_data.get("MEDIA_PATHS"), "./media"))
 raw_paths.extend(normalize_paths(config_data.get("AI_MEDIA_PATHS") or default_data.get("AI_MEDIA_PATHS"), "./ai_media"))
 
+for persistent_dir in ("backups", "restorepoints"):
+    print(f"{persistent_dir}/")
+
 seen = set()
 for raw in raw_paths:
     text = str(raw).strip() if raw is not None else ""
