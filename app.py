@@ -7494,6 +7494,7 @@ def stream_live():
             "original_url": stream_url,
         }
         if content_type in {"video", "playlist"}:
+            response_payload["sync_enabled"] = True
             sync_state = _get_youtube_sync_state(
                 stream_id,
                 {
@@ -7510,7 +7511,6 @@ def stream_live():
                 if sync_state.get("video_id"):
                     response_payload["video_id"] = sync_state.get("video_id")
                 response_payload["server_time"] = sync_state.get("server_time")
-                response_payload["sync_enabled"] = True
         if sanitized_meta:
             response_payload["metadata"] = sanitized_meta
         return jsonify(response_payload)
