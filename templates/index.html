@@ -4570,9 +4570,7 @@
             }
           }
           if (modeVariantSelect) {
-            if (updatedMode === 'random' || updatedMode === 'specific') {
-              modeVariantSelect.value = updatedMode;
-            }
+            selectModeVariant(modeVariantSelect, updatedMediaMode, updatedMode);
           }
           const effectiveMode = updatedMode || (variantlessModes.has(updatedMediaMode) ? updatedMediaMode : 'random');
           applyModeState(card, updatedMediaMode, effectiveMode, urlInputEl ? urlInputEl.value : '');
@@ -4685,6 +4683,20 @@
   function currentLibraryForMode(mediaMode) {
     const normalized = typeof mediaMode === 'string' ? mediaMode.toLowerCase() : 'image';
     return normalized === 'ai' ? 'ai' : 'media';
+  }
+
+  function selectModeVariant(modeSelect, mediaMode, nextMode) {
+    if (!modeSelect) return;
+    const normalizedMedia = typeof mediaMode === 'string' ? mediaMode.toLowerCase() : 'image';
+    const normalizedMode = typeof nextMode === 'string' ? nextMode.toLowerCase() : '';
+    const options = Array.from(modeSelect.options);
+    const matching = options.find(opt => {
+      const category = (opt.dataset.category || 'image').toLowerCase();
+      return category === normalizedMedia && String(opt.value || '').toLowerCase() === normalizedMode;
+    });
+    if (matching) {
+      options.forEach(opt => { opt.selected = (opt === matching); });
+    }
   }
 
   const PICSUM_LIMITS = Object.freeze({
@@ -5532,7 +5544,7 @@ function applyPicsumSettings(card, settings, opts = {}) {
             nextMode = (modeSelect && !modeSelect.disabled) ? (modeSelect.value || 'random').toLowerCase() : 'random';
             if (nextMode !== 'random' && nextMode !== 'specific') {
               nextMode = 'random';
-              if (modeSelect) modeSelect.value = nextMode;
+              selectModeVariant(modeSelect, mediaMode, nextMode);
             }
           } else if (mediaMode === 'ai') {
             nextMode = (modeSelect && !modeSelect.disabled) ? (modeSelect.value || 'generate').toLowerCase() : 'generate';
@@ -5542,7 +5554,7 @@ function applyPicsumSettings(card, settings, opts = {}) {
             if (nextMode === 'ai') {
               nextMode = 'generate';
             }
-            if (modeSelect) modeSelect.value = nextMode;
+            selectModeVariant(modeSelect, mediaMode, nextMode);
           } else if (mediaMode === 'livestream') {
             nextMode = 'livestream';
           } else if (mediaMode === 'picsum') {
