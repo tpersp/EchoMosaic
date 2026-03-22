@@ -36,6 +36,8 @@ A running list of ideas and future improvements. Add new items anywhere below.
 - Normal `Images / GIFs` should continue browsing only `/media`.
 - The media manager should understand both roots as separate libraries internally, while each mode is limited to the intended library.
 - This keeps the separation structural and reliable instead of depending on folder-name matching inside one shared media tree.
+- The design should remain compatible with installs where `/media` is backed by a CIFS/SMB/network share.
+- Keep the library-root configuration flexible enough to support future folder structures or alternate layouts without rewriting mode logic.
 
 ## Implemented / Completed Ideas
 - [x] Implement Stable Horde image generation. (Streams can switch to AI mode, queue jobs, and manage presets.)
