@@ -127,7 +127,7 @@
     {% set embed_title = embed_meta.title if embed_meta and embed_meta.title else '' %}
     {% set embed_type = embed_meta.content_type if embed_meta and embed_meta.content_type else '' %}
     {% set embed_provider = embed_meta.provider if embed_meta and embed_meta.provider else '' %}
-    <div class="stream-card" data-stream="{{ stream_id }}" data-hide-nsfw="{{ "true" if conf.hide_nsfw|default(False) else "false" }}" data-tags='{{ (conf.tags|default([]))|tojson }}' data-selected-path="{{ conf.selected_image or '' }}" data-selected-kind="{{ conf.selected_media_kind or '' }}" data-video-mode="{{ conf.video_playback_mode|default('duration') }}" data-video-volume="{{ conf.video_volume|default(1.0) }}" data-media-mode="{{ conf.media_mode|default('image') }}" data-picsum-seed="{{ conf.picsum_settings.seed if conf.picsum_settings and conf.picsum_settings.seed is not none else '' }}" data-sync-timer="{{ conf.sync.timer_id if conf.sync and conf.sync.timer_id else '' }}" data-sync-offset="{{ conf.sync.offset if conf.sync and conf.sync.offset is not none else 0 }}" data-embed-title="{{ embed_title }}" data-embed-type="{{ embed_type }}" data-embed-provider="{{ embed_provider }}">
+    <div class="stream-card" data-stream="{{ stream_id }}" data-hide-nsfw="{{ "true" if conf.hide_nsfw|default(False) else "false" }}" data-tags='{{ (conf.tags|default([]))|tojson }}' data-selected-path="{{ conf.selected_image or '' }}" data-selected-kind="{{ conf.selected_media_kind or '' }}" data-video-mode="{{ conf.video_playback_mode|default('duration') }}" data-video-volume="{{ conf.video_volume|default(1.0) }}" data-media-mode="{{ conf.media_mode|default('image') }}" data-mode="{{ conf.mode|default('random') }}" data-picsum-seed="{{ conf.picsum_settings.seed if conf.picsum_settings and conf.picsum_settings.seed is not none else '' }}" data-sync-timer="{{ conf.sync.timer_id if conf.sync and conf.sync.timer_id else '' }}" data-sync-offset="{{ conf.sync.offset if conf.sync and conf.sync.offset is not none else 0 }}" data-embed-title="{{ embed_title }}" data-embed-type="{{ embed_type }}" data-embed-provider="{{ embed_provider }}">
       <div class="card-header">
         <div class="card-header-info">
           <div class="title-row">
@@ -706,7 +706,20 @@
 
   const timerControls = (() => {
     const registry = new Map();
-    const supportedModes = new Set(['ai', 'picsum', 'pexels']);
+    const supportedModes = new Set(['picsum', 'pexels']);
+
+    function supportsTimerMode(card, modeOverride = null) {
+      if (!card) return false;
+      const mediaMode = String(card.dataset.mediaMode || '').toLowerCase();
+      const rawMode = modeOverride !== null && modeOverride !== undefined
+        ? modeOverride
+        : (card.dataset.mode || card.querySelector('.mode-select')?.value || '');
+      const normalizedMode = normalizeModeForSave(mediaMode, String(rawMode || '').toLowerCase());
+      if (supportedModes.has(mediaMode)) {
+        return true;
+      }
+      return mediaMode === 'ai' && normalizedMode === 'generate';
+    }
 
     function formatNumber(value, precision = 2) {
       if (!Number.isFinite(value)) return '';
@@ -925,12 +938,13 @@
       if (!section) return;
       const streamId = card.dataset.stream;
       const mode = (card.dataset.mediaMode || '').toLowerCase();
-      const supported = supportedModes.has(mode);
+      const timerMode = card.dataset.mode || card.querySelector('.mode-select')?.value || '';
+      const supported = supportsTimerMode(card, timerMode);
       section.hidden = !supported;
       section.dataset.timerSupported = supported ? 'true' : 'false';
       if (streamId && registry.has(streamId)) {
         const state = registry.get(streamId);
-        state.mode = mode;
+        state.mode = normalizeModeForSave(mode, timerMode);
         if (state.toggle) state.toggle.disabled = !supported;
       }
     }
@@ -4569,6 +4583,7 @@
               updatedMode = normalizedMode;
             }
           }
+          card.dataset.mode = updatedMode;
           if (modeVariantSelect) {
             selectModeVariant(modeVariantSelect, updatedMediaMode, updatedMode);
           }
@@ -4641,7 +4656,7 @@
       return;
     }
     const normalized = typeof mediaMode === 'string' ? mediaMode.toLowerCase() : 'image';
-    const currentMode = (card.querySelector('.mode-select')?.value || '').toLowerCase();
+    const currentMode = normalizeModeForSave(normalized, (card.querySelector('.mode-select')?.value || card.dataset.mode || '').toLowerCase());
     const wantsImages = normalized === 'image' || (normalized === 'ai' && (currentMode === 'random' || currentMode === 'specific'));
     const wantsVideos = normalized === 'video';
     const shouldFilter = wantsImages || wantsVideos;
@@ -5043,6 +5058,8 @@ function applyPicsumSettings(card, settings, opts = {}) {
     const normalizedMedia = typeof mediaMode === 'string' ? mediaMode.toLowerCase() : 'image';
     const normalizedMode = normalizeModeForSave(normalizedMedia, mode);
     const uiMode = normalizeModeForUi(normalizedMedia, mode);
+    card.dataset.mediaMode = normalizedMedia;
+    card.dataset.mode = normalizedMode;
     const isImage = normalizedMedia === 'image';
     const isVideo = normalizedMedia === 'video';
     const isLivestream = normalizedMedia === 'livestream';
@@ -5155,6 +5172,7 @@ function applyPicsumSettings(card, settings, opts = {}) {
     if (picsumRow) {
       picsumRow.style.display = isPicsum ? '' : 'none';
     }
+    timerControls.updateVisibility(card);
 
     if (videoModeSelect) {
       if (isVideo && isRandom) {
@@ -5174,7 +5192,6 @@ function applyPicsumSettings(card, settings, opts = {}) {
     const urlType = detectUrlType(streamUrl);
     if (ytSettingsDiv) ytSettingsDiv.style.display = (isLivestream && urlType === 'YouTube') ? '' : 'none';
 
-    timerControls.updateVisibility(card);
     filterFolderOptions(card, normalizedMedia);
   }
 
@@ -5824,9 +5841,10 @@ function applyPicsumSettings(card, settings, opts = {}) {
       }
 
       const initialMediaMode = (modeCategorySelect ? modeCategorySelect.value : (card.dataset.mediaMode || 'image')).toLowerCase();
-      const initialModeValue = modeSelect
-        ? normalizeModeForSave(initialMediaMode, (modeSelect.value || '').toLowerCase())
-        : (initialMediaMode === 'livestream' ? 'livestream' : (initialMediaMode === 'ai' ? 'generate' : 'random'));
+      const initialModeValue = normalizeModeForSave(
+        initialMediaMode,
+        String(card.dataset.mode || (modeSelect ? modeSelect.value : '') || (initialMediaMode === 'livestream' ? 'livestream' : (initialMediaMode === 'ai' ? 'generate' : 'random'))).toLowerCase()
+      );
       applyModeState(card, initialMediaMode, initialModeValue, urlInput ? urlInput.value : '');
       refreshFoldersForCard(card, card.dataset.hideNsfw === 'true');
       if (((initialMediaMode === 'image' || initialMediaMode === 'video') && initialModeValue === 'specific') || (initialMediaMode === 'ai' && initialModeValue === 'specific')) {
