@@ -3002,7 +3002,7 @@ except Exception as exc:  # pragma: no cover - defensive during optional setup
     logger.warning("Stable Horde client unavailable: %s", exc)
     stable_horde_client = None
 
-ai_jobs_lock = threading.Lock()
+ai_jobs_lock = threading.RLock()
 ai_jobs: Dict[str, Dict[str, Any]] = {}
 ai_job_controls: Dict[str, Dict[str, Any]] = {}
 ai_model_cache: Dict[str, Any] = {"timestamp": 0.0, "data": []}
@@ -6750,16 +6750,25 @@ def ai_cancel(stream_id: str):
     with ai_jobs_lock:
         job = ai_jobs.get(stream_id)
         controls = ai_job_controls.get(stream_id)
-        if not job:
+    if not job:
+        if _reconcile_stale_ai_state(stream_id, conf):
+            state = conf.get(AI_STATE_KEY) if isinstance(conf.get(AI_STATE_KEY), dict) else default_ai_state()
+            _emit_ai_update(stream_id, state, job=None)
+            return jsonify({'status': 'cancelled', 'message': 'Cancelled stale AI state'})
+        return jsonify({'error': 'No active AI generation to cancel'}), 404
+    with ai_jobs_lock:
+        current_job = ai_jobs.get(stream_id)
+        controls = ai_job_controls.get(stream_id)
+        if not current_job:
             if _reconcile_stale_ai_state(stream_id, conf):
                 state = conf.get(AI_STATE_KEY) if isinstance(conf.get(AI_STATE_KEY), dict) else default_ai_state()
                 _emit_ai_update(stream_id, state, job=None)
                 return jsonify({'status': 'cancelled', 'message': 'Cancelled stale AI state'})
             return jsonify({'error': 'No active AI generation to cancel'}), 404
+        job = dict(current_job)
         status = (job.get('status') or '').lower()
         if status in {'completed', 'error', 'timeout', 'cancelled'}:
             return jsonify({'error': 'Job already finished'}), 409
-        job = dict(job)
         job['cancel_requested'] = True
         job['status'] = 'cancelling'
         job['message'] = 'Cancellation requested'
