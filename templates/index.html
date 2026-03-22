@@ -2900,6 +2900,18 @@
     if (!streamId || !conf) return;
     const card = findStreamCard(streamId);
     if (!card) return;
+    const nextMediaMode = String(conf.media_mode || card.dataset.mediaMode || 'image').toLowerCase();
+    const nextMode = String(conf.mode || card.dataset.mode || '').toLowerCase();
+    card.dataset.mediaMode = nextMediaMode;
+    card.dataset.mode = nextMode;
+    const modeCategorySelect = card.querySelector('.mode-category-select');
+    if (modeCategorySelect) {
+      modeCategorySelect.value = nextMediaMode;
+    }
+    const modeVariantSelect = card.querySelector('.mode-select');
+    if (modeVariantSelect) {
+      selectModeVariant(modeVariantSelect, nextMediaMode, nextMode);
+    }
     refreshThumbnail(card, streamId);
     if (conf.timer !== undefined) {
       let nextAuto = null;
@@ -2912,7 +2924,7 @@
         lastAuto = conf.picsum_settings.last_auto_trigger || null;
       }
       timerControls.applyServerState(card, conf.timer, {
-        mode: conf.media_mode || conf.mode,
+        mode: conf.mode || conf.media_mode,
         next_auto_trigger: nextAuto,
         last_auto_trigger: lastAuto,
       });
@@ -2980,8 +2992,8 @@
         offsetInput.value = Number.isFinite(offsetVal) ? String(offsetVal) : '0';
         offsetInput.disabled = !(select && select.value);
       }
-      applyModeState(card, conf.media_mode || conf.mode || card.dataset.mediaMode, conf.mode || '', card.querySelector('.stream-url-input')?.value || '');
     }
+    applyModeState(card, nextMediaMode, nextMode, card.querySelector('.stream-url-input')?.value || '');
     if (conf.picsum_settings !== undefined) {
       applyPicsumSettings(card, conf.picsum_settings);
       const mediaMode = (conf.media_mode || card.dataset.mediaMode || '').toLowerCase();
@@ -4622,7 +4634,7 @@
               ? data.new_config.ai_state.last_auto_trigger
               : (data.new_config.picsum_settings && data.new_config.picsum_settings.last_auto_trigger ? data.new_config.picsum_settings.last_auto_trigger : null);
             timerControls.applyServerState(card, data.new_config.timer, {
-              mode: data.new_config.media_mode || data.new_config.mode || card.dataset.mediaMode,
+              mode: data.new_config.mode || data.new_config.media_mode || card.dataset.mode || card.dataset.mediaMode,
               next_auto_trigger: nextTrigger,
               last_auto_trigger: lastTrigger,
             });
@@ -4732,7 +4744,12 @@
       return category === normalizedMedia && String(opt.value || '').toLowerCase() === normalizedMode;
     });
     if (matching) {
+      const matchingIndex = options.indexOf(matching);
       options.forEach(opt => { opt.selected = (opt === matching); });
+      if (matchingIndex >= 0) {
+        modeSelect.selectedIndex = matchingIndex;
+      }
+      modeSelect.value = matching.value;
     }
   }
 
@@ -5119,11 +5136,11 @@ function applyPicsumSettings(card, settings, opts = {}) {
       if (showVariant) {
         const matching = options.find(opt => !opt.hidden && opt.value === uiMode);
         if (matching) {
-          options.forEach(opt => { opt.selected = (opt === matching); });
+          selectModeVariant(modeSelect, normalizedMedia, normalizedMode);
         } else {
           const fallback = options.find(opt => !opt.hidden);
           if (fallback) {
-            options.forEach(opt => { opt.selected = (opt === fallback); });
+            selectModeVariant(modeSelect, normalizedMedia, fallback.value);
           }
         }
         modeSelect.disabled = false;
