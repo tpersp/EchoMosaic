@@ -343,6 +343,9 @@ _BAD_MEDIA_LOG_CACHE = LRUCache(maxsize=1024)
 IMAGE_QUALITY_CHOICES = {"auto", "thumb", "medium", "full"}
 
 AI_MODE = "ai"
+AI_GENERATE_MODE = "generate"
+AI_RANDOM_MODE = "random"
+AI_SPECIFIC_MODE = "specific"
 AI_SETTINGS_KEY = "ai_settings"
 AI_STATE_KEY = "ai_state"
 AI_PRESETS_KEY = "_ai_presets"
@@ -364,6 +367,8 @@ AI_TEMP_SUBDIR = "_ai_temp"
 AI_DEFAULT_PERSIST = True
 AI_POLL_INTERVAL = 5.0
 AI_TIMEOUT = 0.0
+MEDIA_LIBRARY_DEFAULT = "media"
+AI_MEDIA_LIBRARY = "ai"
 INTERNAL_MEDIA_DIRS = {THUMBNAIL_SUBDIR, AI_TEMP_SUBDIR, MEDIA_MANAGER_CACHE_SUBDIR}
 IGNORED_MEDIA_PREFIX = "_"
 STABLE_HORDE_LOG_PREFIX = "[StableHorde]"
@@ -501,11 +506,12 @@ MEDIA_MODE_VARIANTS = {
     MEDIA_MODE_IMAGE: {"random", "specific"},
     MEDIA_MODE_VIDEO: {"random", "specific"},
     MEDIA_MODE_LIVESTREAM: {"livestream"},
-    MEDIA_MODE_AI: {AI_MODE},
+    MEDIA_MODE_AI: {AI_GENERATE_MODE, AI_RANDOM_MODE, AI_SPECIFIC_MODE, AI_MODE},
     MEDIA_MODE_PICSUM: {MEDIA_MODE_PICSUM},
 }
-TIMER_SUPPORTED_MODES = {AI_MODE, MEDIA_MODE_PICSUM}
+TIMER_SUPPORTED_MODES = {AI_GENERATE_MODE, MEDIA_MODE_PICSUM, AI_MODE}
 TIMER_MODE_LABELS = {
+    AI_GENERATE_MODE: "AI Images",
     AI_MODE: "AI Images",
     MEDIA_MODE_PICSUM: "Picsum",
 }
@@ -520,20 +526,74 @@ SYNC_TIMER_MIN_OFFSET = 0.0
 SYNC_SWITCH_LEAD_SECONDS = 0.25
 SYNC_SUPPORTED_MEDIA_MODES = {MEDIA_MODE_IMAGE}
 
+
+def _dedupe_media_root_aliases(roots: List[config_manager.MediaRoot]) -> List[config_manager.MediaRoot]:
+    seen: Set[str] = set()
+    deduped: List[config_manager.MediaRoot] = []
+    for root in roots:
+        alias = root.alias
+        suffix = 2
+        while alias in seen or alias == "all":
+            alias = f"{root.alias}-{suffix}"
+            suffix += 1
+        seen.add(alias)
+        if alias == root.alias:
+            deduped.append(root)
+        else:
+            deduped.append(
+                config_manager.MediaRoot(
+                    alias=alias,
+                    path=root.path,
+                    display_name=root.display_name,
+                    library=root.library,
+                )
+            )
+    return deduped
+
+
 DEFAULT_MEDIA_ROOT_PATH = Path(os.path.abspath("./media")).resolve()
+DEFAULT_AI_MEDIA_ROOT_PATH = Path(os.path.abspath("./ai_media")).resolve()
 
 CONFIG: Dict[str, Any] = config_manager.load_config()
-MEDIA_ROOTS = config_manager.build_media_roots(CONFIG.get("MEDIA_PATHS", []))
-if not MEDIA_ROOTS:
+STANDARD_MEDIA_ROOTS = config_manager.build_media_roots(
+    CONFIG.get("MEDIA_PATHS", []),
+    library=MEDIA_LIBRARY_DEFAULT,
+)
+if not STANDARD_MEDIA_ROOTS:
     default_path = DEFAULT_MEDIA_ROOT_PATH
     default_alias = default_path.name or "media"
-    MEDIA_ROOTS = [
-        config_manager.MediaRoot(alias=default_alias, path=default_path, display_name=default_alias)
+    STANDARD_MEDIA_ROOTS = [
+        config_manager.MediaRoot(
+            alias=default_alias,
+            path=default_path,
+            display_name=default_alias,
+            library=MEDIA_LIBRARY_DEFAULT,
+        )
     ]
 
-for root in MEDIA_ROOTS:
+AI_MEDIA_ROOTS = config_manager.build_media_roots(
+    CONFIG.get("AI_MEDIA_PATHS", []),
+    library=AI_MEDIA_LIBRARY,
+)
+if not AI_MEDIA_ROOTS:
+    default_ai_path = DEFAULT_AI_MEDIA_ROOT_PATH
+    default_ai_alias = default_ai_path.name or "ai-media"
+    AI_MEDIA_ROOTS = [
+        config_manager.MediaRoot(
+            alias=default_ai_alias,
+            path=default_ai_path,
+            display_name=default_ai_alias,
+            library=AI_MEDIA_LIBRARY,
+        )
+    ]
+
+MEDIA_ROOTS = _dedupe_media_root_aliases(STANDARD_MEDIA_ROOTS + AI_MEDIA_ROOTS)
+STANDARD_MEDIA_ROOTS = [root for root in MEDIA_ROOTS if root.library == MEDIA_LIBRARY_DEFAULT]
+AI_MEDIA_ROOTS = [root for root in MEDIA_ROOTS if root.library == AI_MEDIA_LIBRARY]
+
+for root in STANDARD_MEDIA_ROOTS + AI_MEDIA_ROOTS:
     try:
-        if root.path.resolve(strict=False) == DEFAULT_MEDIA_ROOT_PATH:
+        if root.path.resolve(strict=False) in {DEFAULT_MEDIA_ROOT_PATH, DEFAULT_AI_MEDIA_ROOT_PATH}:
             root.path.mkdir(parents=True, exist_ok=True)
     except OSError as exc:
         logger.warning("Unable to ensure media directory %s: %s", root.path, exc)
@@ -549,15 +609,30 @@ for candidate_root in MEDIA_ROOTS:
         continue
 
 if not AVAILABLE_MEDIA_ROOTS:
-    fallback_root = MEDIA_ROOTS[0]
+    fallback_root = STANDARD_MEDIA_ROOTS[0]
     try:
         fallback_root.path.mkdir(parents=True, exist_ok=True)
     except OSError as exc:
         logger.warning("Unable to prepare fallback media directory %s: %s", fallback_root.path, exc)
     AVAILABLE_MEDIA_ROOTS = [fallback_root]
 
+AVAILABLE_MEDIA_ROOTS_BY_LIBRARY: Dict[str, List[config_manager.MediaRoot]] = {
+    MEDIA_LIBRARY_DEFAULT: [root for root in AVAILABLE_MEDIA_ROOTS if root.library == MEDIA_LIBRARY_DEFAULT],
+    AI_MEDIA_LIBRARY: [root for root in AVAILABLE_MEDIA_ROOTS if root.library == AI_MEDIA_LIBRARY],
+}
+if not AVAILABLE_MEDIA_ROOTS_BY_LIBRARY[MEDIA_LIBRARY_DEFAULT]:
+    AVAILABLE_MEDIA_ROOTS_BY_LIBRARY[MEDIA_LIBRARY_DEFAULT] = [STANDARD_MEDIA_ROOTS[0]]
+if not AVAILABLE_MEDIA_ROOTS_BY_LIBRARY[AI_MEDIA_LIBRARY]:
+    fallback_ai_root = AI_MEDIA_ROOTS[0]
+    try:
+        fallback_ai_root.path.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        logger.warning("Unable to prepare fallback AI media directory %s: %s", fallback_ai_root.path, exc)
+    AVAILABLE_MEDIA_ROOTS_BY_LIBRARY[AI_MEDIA_LIBRARY] = [fallback_ai_root]
+
 MEDIA_ROOT_LOOKUP = {root.alias: root for root in MEDIA_ROOTS}
-PRIMARY_MEDIA_ROOT = AVAILABLE_MEDIA_ROOTS[0]
+PRIMARY_MEDIA_ROOT = AVAILABLE_MEDIA_ROOTS_BY_LIBRARY[MEDIA_LIBRARY_DEFAULT][0]
+PRIMARY_AI_MEDIA_ROOT = AVAILABLE_MEDIA_ROOTS_BY_LIBRARY[AI_MEDIA_LIBRARY][0]
 THUMBNAIL_CACHE_DIR = PRIMARY_MEDIA_ROOT.path / THUMBNAIL_SUBDIR
 
 NSFW_KEYWORD = "nsfw"
@@ -618,6 +693,23 @@ def _media_root_available(root: config_manager.MediaRoot) -> bool:
         return root.path.exists() and root.path.is_dir() and os.access(root.path, os.R_OK)
     except OSError:
         return False
+
+
+def _normalize_library_key(value: Any, default: str = MEDIA_LIBRARY_DEFAULT) -> str:
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {MEDIA_LIBRARY_DEFAULT, AI_MEDIA_LIBRARY}:
+            return normalized
+    return default
+
+
+def _library_roots(library: str) -> List[config_manager.MediaRoot]:
+    return list(AVAILABLE_MEDIA_ROOTS_BY_LIBRARY.get(_normalize_library_key(library), []))
+
+
+def _library_for_media_mode(media_mode: Optional[str]) -> str:
+    normalized = media_mode.strip().lower() if isinstance(media_mode, str) else ""
+    return AI_MEDIA_LIBRARY if normalized == MEDIA_MODE_AI else MEDIA_LIBRARY_DEFAULT
 
 
 def _build_virtual_media_path(alias: str, relative: Union[str, Path]) -> str:
@@ -1376,13 +1468,18 @@ def _normalize_folder_key(folder: Optional[str]) -> str:
     return normalized
 
 
-def _resolve_folder_path(folder_key: str) -> Optional[Tuple[config_manager.MediaRoot, Path]]:
+def _cache_scope_key(folder_key: str, library: str) -> str:
+    return f"{_normalize_library_key(library)}::{folder_key}"
+
+
+def _resolve_folder_path(folder_key: str, *, library: str = MEDIA_LIBRARY_DEFAULT) -> Optional[Tuple[config_manager.MediaRoot, Path]]:
     """Return the media root and absolute filesystem path for a cache key."""
     if folder_key == "all":
         return None
     alias, relative = _split_virtual_media_path(folder_key)
     root = MEDIA_ROOT_LOOKUP.get(alias)
-    if root is None:
+    normalized_library = _normalize_library_key(library)
+    if root is None or root.library != normalized_library:
         return None
     target_dir = (root.path / relative).resolve()
     try:
@@ -1445,19 +1542,20 @@ def _scan_root_for_cache(
     return media, dir_markers
 
 
-def _scan_folder_for_cache(folder_key: str) -> Tuple[List[Dict[str, str]], Dict[str, Tuple[int, int]]]:
+def _scan_folder_for_cache(folder_key: str, *, library: str = MEDIA_LIBRARY_DEFAULT) -> Tuple[List[Dict[str, str]], Dict[str, Tuple[int, int]]]:
     """Scan configured media directories and build the cached payload for a folder key."""
+    normalized_library = _normalize_library_key(library)
     if folder_key == "all":
         combined_media: List[Dict[str, str]] = []
         combined_markers: Dict[str, Tuple[int, int]] = {}
-        for root in AVAILABLE_MEDIA_ROOTS:
+        for root in _library_roots(normalized_library):
             media_entries, dir_markers = _scan_root_for_cache(root, root.path)
             combined_media.extend(media_entries)
             combined_markers.update(dir_markers)
         combined_media.sort(key=lambda item: item["path"].lower())
         return combined_media, combined_markers
 
-    resolved = _resolve_folder_path(folder_key)
+    resolved = _resolve_folder_path(folder_key, library=normalized_library)
     if resolved is None:
         return [], {}
     root, target_dir = resolved
@@ -1481,12 +1579,14 @@ def _directory_markers_changed(markers: Dict[str, Tuple[int, int]]) -> bool:
     return False
 
 
-def refresh_image_cache(folder: str = "all", force: bool = False) -> List[str]:
+def refresh_image_cache(folder: str = "all", hide_nsfw: bool = False, *, force: bool = False, library: str = MEDIA_LIBRARY_DEFAULT) -> List[str]:
     """Return the cached image list for a folder, refreshing if anything changed."""
     folder_key = _normalize_folder_key(folder)
+    normalized_library = _normalize_library_key(library)
+    cache_key = _cache_scope_key(folder_key, normalized_library)
 
     with IMAGE_CACHE_LOCK:
-        cached_entry = IMAGE_CACHE.get(folder_key)
+        cached_entry = IMAGE_CACHE.get(cache_key)
         if cached_entry:
             cached_images = list(cached_entry.get("images", []))
             markers_snapshot = dict(cached_entry.get("dir_markers", {}))
@@ -1502,7 +1602,9 @@ def refresh_image_cache(folder: str = "all", force: bool = False) -> List[str]:
     if not needs_refresh:
         return cached_images
 
-    media, dir_markers = _scan_folder_for_cache(folder_key)
+    media, dir_markers = _scan_folder_for_cache(folder_key, library=normalized_library)
+    if hide_nsfw:
+        media = [item for item in media if not _path_contains_nsfw(item.get("path"))]
     images = [item["path"] for item in media if item.get("kind") == "image"]
     entry = {
         "images": images,
@@ -1511,7 +1613,7 @@ def refresh_image_cache(folder: str = "all", force: bool = False) -> List[str]:
         "last_updated": time.time(),
     }
     with IMAGE_CACHE_LOCK:
-        IMAGE_CACHE[folder_key] = entry
+        IMAGE_CACHE[cache_key] = entry
     return list(images)
 
 
@@ -1534,18 +1636,22 @@ def _cache_folder_for_path(path: Optional[str]) -> Optional[str]:
     return _build_virtual_media_path(alias, rel_text)
 
 
-def _invalidate_media_cache(path: Optional[str]) -> None:
+def _invalidate_media_cache(path: Optional[str], *, library: Optional[str] = None) -> None:
     keys = ["all"]
     folder_key = _cache_folder_for_path(path)
     if folder_key and folder_key not in keys:
         keys.append(folder_key)
+    library_key = _normalize_library_key(library) if library else None
+    libraries = [library_key] if library_key else [MEDIA_LIBRARY_DEFAULT, AI_MEDIA_LIBRARY]
     for key in keys:
-        refresh_image_cache(key, force=True)
+        for current_library in libraries:
+            refresh_image_cache(key, force=True, library=current_library)
 
 
 def initialize_image_cache() -> None:
     """Warm the cache for the root folder on startup."""
-    refresh_image_cache("all", force=True)
+    refresh_image_cache("all", force=True, library=MEDIA_LIBRARY_DEFAULT)
+    refresh_image_cache("all", force=True, library=AI_MEDIA_LIBRARY)
 
 
 initialize_image_cache()
@@ -2066,7 +2172,7 @@ def migrate_legacy_timer_config(stream_id: str, conf: Dict[str, Any]) -> bool:
             return None
         return minutes
 
-    if timer_mode == AI_MODE:
+    if timer_mode in {AI_MODE, AI_GENERATE_MODE}:
         mode_value = str(legacy_ai_mode).strip().lower() if isinstance(legacy_ai_mode, str) else ""
         if mode_value == "timer":
             minutes = _convert_interval(legacy_ai_interval, legacy_ai_unit)
@@ -2466,7 +2572,7 @@ def _sanitize_imported_stream_config(stream_id: str, raw_conf: Any) -> Dict[str,
         conf[key] = deepcopy(value) if isinstance(value, (dict, list)) else value
     mode_raw = conf.get('mode')
     mode = mode_raw.strip().lower() if isinstance(mode_raw, str) else conf['mode']
-    if mode not in {'random', 'specific', 'livestream', AI_MODE, MEDIA_MODE_PICSUM}:
+    if mode not in {'random', 'specific', 'livestream', AI_MODE, AI_GENERATE_MODE, AI_RANDOM_MODE, AI_SPECIFIC_MODE, MEDIA_MODE_PICSUM}:
         mode = conf['mode']
     conf['mode'] = mode
     folder_raw = conf.get('folder')
@@ -2525,7 +2631,8 @@ def _sanitize_imported_stream_config(stream_id: str, raw_conf: Any) -> Dict[str,
         media_mode = _infer_media_mode(conf)
     conf['media_mode'] = media_mode
     if media_mode == MEDIA_MODE_AI:
-        conf['mode'] = AI_MODE
+        if conf['mode'] not in {AI_GENERATE_MODE, AI_RANDOM_MODE, AI_SPECIFIC_MODE}:
+            conf['mode'] = AI_GENERATE_MODE
     elif media_mode == MEDIA_MODE_LIVESTREAM:
         conf['mode'] = 'livestream'
     else:
@@ -2987,8 +3094,8 @@ HLS_ERROR_RETRY_SECS = max(5, _coerce_int(CONFIG.get("LIVE_HLS_ERROR_RETRY_SECS"
 HLS_ERROR_RETRY_SECS = min(HLS_ERROR_RETRY_SECS, HLS_TTL_SECS)
 
 
-AI_OUTPUT_ROOT = _ensure_dir(PRIMARY_MEDIA_ROOT.path / AI_OUTPUT_SUBDIR)
-AI_TEMP_ROOT = _ensure_dir(PRIMARY_MEDIA_ROOT.path / AI_TEMP_SUBDIR)
+AI_OUTPUT_ROOT = _ensure_dir(PRIMARY_AI_MEDIA_ROOT.path)
+AI_TEMP_ROOT = _ensure_dir(PRIMARY_AI_MEDIA_ROOT.path / AI_TEMP_SUBDIR)
 
 try:
     stable_horde_client = StableHorde(
@@ -3469,7 +3576,7 @@ def _run_ai_generation(
         conf[AI_STATE_KEY].update(updates)
         if images:
             conf['selected_image'] = images[0]['path']
-        conf['mode'] = AI_MODE
+        conf['mode'] = AI_GENERATE_MODE
         conf['media_mode'] = MEDIA_MODE_AI
         _update_stream_runtime_state(
             stream_id,
@@ -3527,7 +3634,7 @@ def _detect_media_kind(value: Optional[str]) -> str:
 def _infer_media_mode(conf: Dict[str, Any]) -> str:
     mode_raw = conf.get("mode")
     mode = mode_raw.strip().lower() if isinstance(mode_raw, str) else ""
-    if mode == AI_MODE:
+    if mode in {AI_MODE, AI_GENERATE_MODE, AI_RANDOM_MODE, AI_SPECIFIC_MODE}:
         return MEDIA_MODE_AI
     if mode == "livestream":
         return MEDIA_MODE_LIVESTREAM
@@ -3781,6 +3888,8 @@ class StreamPlaybackState:
         }
 
     def should_run(self) -> bool:
+        if self.media_mode == MEDIA_MODE_AI:
+            return self.mode == AI_RANDOM_MODE
         return self.mode == "random" and self.media_mode in (MEDIA_MODE_IMAGE, MEDIA_MODE_VIDEO)
 
     def sync_active(self) -> bool:
@@ -4271,8 +4380,12 @@ class StreamPlaybackManager:
             safe_emit(event, payload)
 
     def _next_media(self, state: StreamPlaybackState) -> Optional[Dict[str, Any]]:
-        entries = list_media(state.folder, hide_nsfw=state.hide_nsfw)
-        if state.media_mode == MEDIA_MODE_IMAGE:
+        entries = list_media(
+            state.folder,
+            hide_nsfw=state.hide_nsfw,
+            library=_library_for_media_mode(state.media_mode),
+        )
+        if state.media_mode in (MEDIA_MODE_IMAGE, MEDIA_MODE_AI):
             entries = [item for item in entries if item.get("kind") == "image"]
         elif state.media_mode == MEDIA_MODE_VIDEO:
             entries = [item for item in entries if item.get("kind") == "video"]
@@ -4850,7 +4963,12 @@ for k, v in list(settings.items()):
         if media_mode not in MEDIA_MODE_CHOICES:
             media_mode = _infer_media_mode(v)
         if media_mode == MEDIA_MODE_AI:
-            desired_mode = AI_MODE
+            current_mode_raw = v.get("mode")
+            current_mode = current_mode_raw.strip().lower() if isinstance(current_mode_raw, str) else ""
+            if current_mode in {AI_RANDOM_MODE, AI_SPECIFIC_MODE, AI_GENERATE_MODE}:
+                desired_mode = current_mode
+            else:
+                desired_mode = AI_GENERATE_MODE
         elif media_mode == MEDIA_MODE_LIVESTREAM:
             desired_mode = "livestream"
         else:
@@ -4897,9 +5015,10 @@ def _parse_truthy(value: Any) -> bool:
     return bool(value)
 
 
-def get_subfolders(hide_nsfw: bool = False) -> List[str]:
+def get_subfolders(hide_nsfw: bool = False, *, library: str = MEDIA_LIBRARY_DEFAULT) -> List[str]:
     subfolders: List[str] = []
     seen: Set[str] = set()
+    normalized_library = _normalize_library_key(library)
 
     def _add(value: str) -> None:
         if value not in seen:
@@ -4907,7 +5026,7 @@ def get_subfolders(hide_nsfw: bool = False) -> List[str]:
             subfolders.append(value)
 
     _add("all")
-    for root in AVAILABLE_MEDIA_ROOTS:
+    for root in _library_roots(normalized_library):
         if hide_nsfw and _path_contains_nsfw(root.alias):
             continue
         try:
@@ -4928,10 +5047,11 @@ def get_subfolders(hide_nsfw: bool = False) -> List[str]:
     return subfolders
 
 
-def get_folder_inventory(hide_nsfw: bool = False) -> List[Dict[str, Any]]:
+def get_folder_inventory(hide_nsfw: bool = False, *, library: str = MEDIA_LIBRARY_DEFAULT) -> List[Dict[str, Any]]:
     inventory: List[Dict[str, Any]] = []
-    for name in get_subfolders(hide_nsfw=hide_nsfw):
-        media_entries = list_media(name, hide_nsfw=hide_nsfw)
+    normalized_library = _normalize_library_key(library)
+    for name in get_subfolders(hide_nsfw=hide_nsfw, library=normalized_library):
+        media_entries = list_media(name, hide_nsfw=hide_nsfw, library=normalized_library)
         has_images = any(entry.get("kind") == "image" for entry in media_entries)
         has_videos = any(entry.get("kind") == "video" for entry in media_entries)
         if "/" in name:
@@ -5163,27 +5283,27 @@ def api_media_preview_frame():
 @app.route("/folders", methods=["GET"])
 def folders_collection():
     hide_nsfw = _parse_truthy(request.args.get("hide_nsfw"))
-    inventory = get_folder_inventory(hide_nsfw=hide_nsfw)
+    library = _normalize_library_key(request.args.get("library"), MEDIA_LIBRARY_DEFAULT)
+    inventory = get_folder_inventory(hide_nsfw=hide_nsfw, library=library)
     return jsonify(inventory)
 
 
-def list_images(folder="all", hide_nsfw: bool = False):
+def list_images(folder="all", hide_nsfw: bool = False, *, library: str = MEDIA_LIBRARY_DEFAULT):
     """Return cached image paths for the folder, refreshing when necessary."""
-    images = refresh_image_cache(folder)
-    return _filter_nsfw_images(images, hide_nsfw)
+    return refresh_image_cache(folder, hide_nsfw=hide_nsfw, library=library)
 
-def list_media(folder="all", hide_nsfw: bool = False) -> List[Dict[str, Any]]:
+def list_media(folder="all", hide_nsfw: bool = False, *, library: str = MEDIA_LIBRARY_DEFAULT) -> List[Dict[str, Any]]:
     """Return cached media entries (images and videos) for the folder."""
     folder_key = _normalize_folder_key(folder)
-    refresh_image_cache(folder)
+    normalized_library = _normalize_library_key(library)
+    refresh_image_cache(folder, hide_nsfw=hide_nsfw, library=normalized_library)
+    cache_key = _cache_scope_key(folder_key, normalized_library)
     with IMAGE_CACHE_LOCK:
-        cached_entry = IMAGE_CACHE.get(folder_key)
+        cached_entry = IMAGE_CACHE.get(cache_key)
         if cached_entry:
             media = [dict(item) for item in cached_entry.get("media", [])]
         else:
             media = []
-    if hide_nsfw:
-        media = [item for item in media if not _path_contains_nsfw(item.get("path"))]
     return media
 
 if playback_manager is None:
@@ -5376,6 +5496,7 @@ def media_management_page():
             "alias": root.alias,
             "display_name": root.display_name or root.alias,
             "path": f"{root.alias}:/",
+            "library": root.library,
         }
         for root in AVAILABLE_MEDIA_ROOTS
     ]
@@ -5394,7 +5515,8 @@ def media_management_page():
 
 @app.route("/")
 def dashboard():
-    folder_inventory = get_folder_inventory()
+    folder_inventory = get_folder_inventory(library=MEDIA_LIBRARY_DEFAULT)
+    ai_folder_inventory = get_folder_inventory(library=AI_MEDIA_LIBRARY)
     subfolders = [item["name"] for item in folder_inventory]
     streams = {k: v for k, v in settings.items() if not k.startswith("_")}
     for stream_id, conf in streams.items():
@@ -5416,6 +5538,7 @@ def dashboard():
         "index.html",
         subfolders=subfolders,
         folder_inventory=folder_inventory,
+        ai_folder_inventory=ai_folder_inventory,
         stream_settings=streams,
         groups=groups,
         global_tags=get_global_tags(),
@@ -5525,7 +5648,11 @@ def render_stream(name):
     ensure_background_defaults(conf)
     ensure_tag_defaults(conf)
     _refresh_embed_metadata(key, conf)
-    images = list_images(conf.get("folder", "all"), hide_nsfw=conf.get("hide_nsfw", False))
+    images = list_images(
+        conf.get("folder", "all"),
+        hide_nsfw=conf.get("hide_nsfw", False),
+        library=_library_for_media_mode(conf.get("media_mode")),
+    )
     requested_quality = (request.args.get("size") or "").strip().lower()
     if requested_quality and requested_quality not in IMAGE_QUALITY_CHOICES:
         requested_quality = ""
@@ -5701,7 +5828,7 @@ def update_stream_settings(stream_id):
                 if media_mode in MEDIA_MODE_CHOICES:
                     conf["media_mode"] = media_mode
                     if media_mode == MEDIA_MODE_AI:
-                        conf["mode"] = AI_MODE
+                        conf["mode"] = AI_GENERATE_MODE
                     elif media_mode == MEDIA_MODE_LIVESTREAM:
                         conf["mode"] = "livestream"
                     media_mode_changed = True
@@ -5763,7 +5890,10 @@ def update_stream_settings(stream_id):
     current_mode_raw = conf.get("mode")
     current_mode = current_mode_raw.strip().lower() if isinstance(current_mode_raw, str) else ""
     if media_mode == MEDIA_MODE_AI:
-        conf["mode"] = AI_MODE
+        if current_mode not in {AI_GENERATE_MODE, AI_RANDOM_MODE, AI_SPECIFIC_MODE}:
+            conf["mode"] = AI_GENERATE_MODE
+        else:
+            conf["mode"] = current_mode
     elif media_mode == MEDIA_MODE_LIVESTREAM:
         conf["mode"] = "livestream"
     else:
@@ -5785,8 +5915,8 @@ def update_stream_settings(stream_id):
 
     mode_requested = data.get("mode")
     if (
-        mode_requested == AI_MODE
-        and previous_mode != AI_MODE
+        mode_requested in {AI_MODE, AI_GENERATE_MODE}
+        and previous_mode not in {AI_MODE, AI_GENERATE_MODE}
         and not conf.get("_ai_customized", False)
     ):
         conf[AI_SETTINGS_KEY] = default_ai_settings()
@@ -5861,7 +5991,7 @@ def update_stream_timer(stream_id: str):
         timer.update_next(None)
 
     scheduler_ts = time.time()
-    if timer_mode == AI_MODE and auto_scheduler is not None:
+    if timer_mode in {AI_MODE, AI_GENERATE_MODE} and auto_scheduler is not None:
         auto_scheduler.reschedule(stream_id, base_time=scheduler_ts)
     elif timer_mode == MEDIA_MODE_PICSUM and picsum_scheduler is not None:
         picsum_scheduler.reschedule(stream_id, base_time=scheduler_ts)
@@ -5870,7 +6000,7 @@ def update_stream_timer(stream_id: str):
     next_label = refreshed_config.get("next_run")
     last_label = refreshed_config.get("last_run")
 
-    if timer_mode == AI_MODE:
+    if timer_mode in {AI_MODE, AI_GENERATE_MODE}:
         ai_state = conf[AI_STATE_KEY]
         ai_state["next_auto_trigger"] = next_label
         if last_label is not None:
@@ -6337,7 +6467,7 @@ def _queue_ai_generation(stream_id: str, ai_settings: Dict[str, Any], *, trigger
     if not persist:
         _cleanup_temp_outputs(stream_id)
 
-    conf['mode'] = AI_MODE
+    conf['mode'] = AI_GENERATE_MODE
     conf['media_mode'] = MEDIA_MODE_AI
     if previous_selected:
         conf['selected_image'] = previous_selected
@@ -6460,7 +6590,7 @@ class AutoGenerateScheduler(BaseScheduler):
         )
         reference_ts = base_time if base_time is not None else time.time()
 
-        if timer_mode != AI_MODE or not timer.is_enabled():
+        if timer_mode not in {AI_MODE, AI_GENERATE_MODE} or not timer.is_enabled():
             timer.update_next(None)
             with self._lock:
                 self._next_run.pop(stream_id, None)
@@ -6516,7 +6646,7 @@ class AutoGenerateScheduler(BaseScheduler):
         )
         ai_settings = conf[AI_SETTINGS_KEY]
         prompt = str(ai_settings.get('prompt') or '').strip()
-        if timer_mode != AI_MODE or not timer.is_enabled():
+        if timer_mode not in {AI_MODE, AI_GENERATE_MODE} or not timer.is_enabled():
             self.remove(stream_id)
             return
         if not prompt:
@@ -7847,7 +7977,8 @@ def get_images():
     if offset < 0 or (limit is not None and limit < 0):
         return jsonify({"error": "limit and offset must be non-negative"}), 400
     hide_nsfw = _parse_truthy(request.args.get("hide_nsfw"))
-    images = list_images(folder, hide_nsfw=hide_nsfw)
+    library = _normalize_library_key(request.args.get("library"), MEDIA_LIBRARY_DEFAULT)
+    images = list_images(folder, hide_nsfw=hide_nsfw, library=library)
     if limit_arg is not None or offset_arg is not None:
         end = offset + limit if limit is not None else None
         images = images[offset:end]
@@ -7858,7 +7989,8 @@ def get_images():
 def get_random_image():
     folder = request.args.get("folder", "all")
     hide_nsfw = _parse_truthy(request.args.get("hide_nsfw"))
-    images = list_images(folder, hide_nsfw=hide_nsfw)
+    library = _normalize_library_key(request.args.get("library"), MEDIA_LIBRARY_DEFAULT)
+    images = list_images(folder, hide_nsfw=hide_nsfw, library=library)
     if not images:
         return jsonify({"error": "No images found"}), 404
     return jsonify({"path": random.choice(images)})
@@ -7878,7 +8010,8 @@ def get_media_entries():
         return jsonify({"error": "limit and offset must be non-negative"}), 400
     hide_nsfw = _parse_truthy(request.args.get("hide_nsfw"))
     kind_filter = (request.args.get("kind") or "").strip().lower()
-    media = list_media(folder, hide_nsfw=hide_nsfw)
+    library = _normalize_library_key(request.args.get("library"), MEDIA_LIBRARY_DEFAULT)
+    media = list_media(folder, hide_nsfw=hide_nsfw, library=library)
     if kind_filter in ("image", "video"):
         media = [item for item in media if item.get("kind") == kind_filter]
     if limit_arg is not None or offset_arg is not None:
@@ -7893,7 +8026,8 @@ def get_random_media():
     hide_nsfw = _parse_truthy(request.args.get("hide_nsfw"))
     kind_filter = (request.args.get("kind") or "").strip().lower()
     stream_id = (request.args.get("stream_id") or "").strip()
-    entries = list_media(folder, hide_nsfw=hide_nsfw)
+    library = _normalize_library_key(request.args.get("library"), MEDIA_LIBRARY_DEFAULT)
+    entries = list_media(folder, hide_nsfw=hide_nsfw, library=library)
     if kind_filter in ("image", "video"):
         entries = [item for item in entries if item.get("kind") == kind_filter]
     if not entries:

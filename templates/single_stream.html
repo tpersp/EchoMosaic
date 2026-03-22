@@ -1289,7 +1289,13 @@ async function render(config) {
   container.innerHTML = '';
   setBackdropSettings(config && config.background_blur_enabled, config && config.background_blur_amount);
   setMediaController(createNoopMediaController());
-  const mediaMode = (config && typeof config.media_mode === 'string') ? config.media_mode.trim().toLowerCase() : ((config && typeof config.mode === 'string' && config.mode.toLowerCase() === 'livestream') ? 'livestream' : (config && typeof config.mode === 'string' && config.mode.toLowerCase() === 'ai') ? 'ai' : (config && config.selected_media_kind === 'video') ? 'video' : 'image');
+  const mediaMode = (config && typeof config.media_mode === 'string')
+    ? config.media_mode.trim().toLowerCase()
+    : ((config && typeof config.mode === 'string' && config.mode.toLowerCase() === 'livestream')
+      ? 'livestream'
+      : ((config && typeof config.mode === 'string' && config.mode.toLowerCase() === 'ai')
+        ? 'ai'
+        : ((config && config.selected_media_kind === 'video') ? 'video' : 'image')));
   const modeValue = (config && typeof config.mode === 'string') ? config.mode.trim().toLowerCase() : 'random';
   if (mediaMode === 'livestream') {
     updateBackdropSource('');
@@ -1365,7 +1371,15 @@ async function render(config) {
     return;
   }
 
-  if (mediaMode === 'ai' || modeValue === 'ai') {
+  if (mediaMode === 'ai') {
+    if (modeValue === 'random') {
+      startSynchronizedStream(config, container);
+      return;
+    }
+    if (modeValue === 'specific') {
+      await displaySingleMedia(config, container);
+      return;
+    }
     const aiImages = (config.ai_state && Array.isArray(config.ai_state.images)) ? config.ai_state.images : [];
     const paths = aiImages
       .map(item => (item && item.path) ? item.path : item)

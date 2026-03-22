@@ -34,6 +34,7 @@ DEFAULT_CONFIG_FALLBACK: Dict[str, Any] = {
     "AI_DEFAULT_PERSIST": True,
     "AI_POLL_INTERVAL": 5.0,
     "AI_TIMEOUT": 0.0,
+    "AI_MEDIA_PATHS": ["./ai_media"],
     "TIMER_SNAP_ENABLED": False,
     "LIVE_HLS_ASYNC": True,
     "LIVE_HLS_TTL_SECS": 3600,
@@ -70,6 +71,7 @@ class MediaRoot:
     alias: str
     path: Path
     display_name: str
+    library: str = "media"
 
 
 def ensure_env_file(env_path: Path = ENV_FILE, placeholders: Optional[Dict[str, str]] = None) -> None:
@@ -178,12 +180,14 @@ def load_config(
 
     merged = _deep_merge(default_data, config_data)
     merged["MEDIA_PATHS"] = _normalize_media_paths(merged.get("MEDIA_PATHS"))
+    merged["AI_MEDIA_PATHS"] = _normalize_media_paths(merged.get("AI_MEDIA_PATHS"), default="./ai_media")
 
     env_overrides = _collect_environment_overrides(merged)
     for key, value in env_overrides.items():
         merged[key] = value
 
     merged["MEDIA_PATHS"] = _normalize_media_paths(merged.get("MEDIA_PATHS"))
+    merged["AI_MEDIA_PATHS"] = _normalize_media_paths(merged.get("AI_MEDIA_PATHS"), default="./ai_media")
     return merged
 
 
@@ -221,7 +225,7 @@ def validate_media_paths(paths: Iterable[str]) -> List[Path]:
     return valid_paths
 
 
-def build_media_roots(paths: Iterable[str], *, log_warnings: bool = False) -> List[MediaRoot]:
+def build_media_roots(paths: Iterable[str], *, log_warnings: bool = False, library: str = "media") -> List[MediaRoot]:
     """Create MediaRoot entries with unique aliases for the provided paths."""
 
     roots: List[MediaRoot] = []
@@ -250,7 +254,7 @@ def build_media_roots(paths: Iterable[str], *, log_warnings: bool = False) -> Li
             elif not os.access(path, os.R_OK):
                 logger.warning("Media path '%s' is not readable", path)
         seen_aliases.add(alias)
-        roots.append(MediaRoot(alias=alias, path=path, display_name=display_name))
+        roots.append(MediaRoot(alias=alias, path=path, display_name=display_name, library=library))
     return roots
 
 
@@ -271,17 +275,20 @@ def _collect_environment_overrides(base: Dict[str, Any]) -> Dict[str, Any]:
         env_value = os.getenv(key)
         if env_value is None or env_value == "":
             continue
-        if key == "MEDIA_PATHS":
+        if key in {"MEDIA_PATHS", "AI_MEDIA_PATHS"}:
             overrides[key] = _normalize_media_paths(env_value)
         else:
             overrides[key] = env_value
     media_env = os.getenv("ECHOMOSAIC_MEDIA_PATHS")
     if media_env:
         overrides["MEDIA_PATHS"] = _normalize_media_paths(media_env)
+    ai_media_env = os.getenv("ECHOMOSAIC_AI_MEDIA_PATHS")
+    if ai_media_env:
+        overrides["AI_MEDIA_PATHS"] = _normalize_media_paths(ai_media_env, default="./ai_media")
     return overrides
 
 
-def _normalize_media_paths(value: Any) -> List[str]:
+def _normalize_media_paths(value: Any, *, default: str = "./media") -> List[str]:
     if isinstance(value, (list, tuple)):
         candidates = [str(item).strip() for item in value]
     elif isinstance(value, str):
@@ -313,7 +320,7 @@ def _normalize_media_paths(value: Any) -> List[str]:
         seen.add(normalized)
         cleaned.append(normalized)
     if not cleaned:
-        cleaned = [os.path.abspath("./media")]
+        cleaned = [os.path.abspath(default)]
     return cleaned
 
 

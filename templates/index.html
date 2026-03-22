@@ -163,6 +163,7 @@
         {% set media_mode = conf.media_mode|default('image') %}
         {% set mode_value = conf.mode|default('random') %}
         {% set picsum = conf.picsum_settings or {} %}
+        {% set folder_options = ai_folder_inventory if media_mode == 'ai' else folder_inventory %}
         <div class="form-row mode-row">
           <label for="mode-category-{{ stream_id }}">Mode</label>
           <div class="mode-selectors">
@@ -179,13 +180,16 @@
                 <option value="specific" data-category="image" {% if media_mode == 'image' and mode_value == 'specific' %}selected{% endif %}>Specific</option>
                 <option value="random" data-category="video" {% if media_mode == 'video' and mode_value == 'random' %}selected{% endif %}>Random (Video)</option>
                 <option value="specific" data-category="video" {% if media_mode == 'video' and mode_value == 'specific' %}selected{% endif %}>Specific (Video)</option>
+                <option value="generate" data-category="ai" {% if media_mode == 'ai' and mode_value in ['generate', 'ai'] %}selected{% endif %}>Generate</option>
+                <option value="random" data-category="ai" {% if media_mode == 'ai' and mode_value == 'random' %}selected{% endif %}>View Random</option>
+                <option value="specific" data-category="ai" {% if media_mode == 'ai' and mode_value == 'specific' %}selected{% endif %}>View Specific</option>
               </select>
             </div>
           </div>
         </div>
 
         <!-- Folder Selection -->
-        <div class="form-row folder-row" {% if media_mode in ['livestream', 'ai'] %} style="display:none;" {% endif %}>
+        <div class="form-row folder-row" {% if media_mode == 'livestream' or (media_mode == 'ai' and mode_value in ['generate', 'ai']) %} style="display:none;" {% endif %}>
           <label for="folder-{{ stream_id }}">Folder</label>
           {% set current_folder = conf.folder if conf.folder else 'all' %}
           {% set hide_nsfw = conf.hide_nsfw|default(False) %}
@@ -193,7 +197,7 @@
             {% if hide_nsfw and current_folder and 'nsfw' in current_folder|lower %}
               <option value="__filtered__" data-filtered="true" title="{{ current_folder }}" selected>Filtered ({{ current_folder }})</option>
             {% endif %}
-            {% for entry in folder_inventory %}
+            {% for entry in folder_options %}
               {% set name = entry.name %}
               {% set display_name = entry.display_name if entry.display_name is defined and entry.display_name else name %}
               {% if not (hide_nsfw and 'nsfw' in name|lower) %}
@@ -390,7 +394,7 @@
           {% set auto_label = 'Off' %}
         {% endif %}
         {% set next_label = timer_info.next_run if timer_info.next_run else ai_state.next_auto_trigger %}
-        <div class="ai-summary" data-stream="{{ stream_id }}" {% if conf.mode != 'ai' %} style="display:none;" {% endif %}>
+        <div class="ai-summary" data-stream="{{ stream_id }}" {% if media_mode != 'ai' %} style="display:none;" {% endif %}>
           <div class="ai-summary-grid">
             <div class="ai-summary-item"><span class="ai-summary-label">Model</span><span class="ai-summary-value ai-summary-model">{{ ai.model or 'Auto' }}</span></div>
             <div class="ai-summary-item"><span class="ai-summary-label">Sampler</span><span class="ai-summary-value ai-summary-sampler">{{ ai.sampler or 'k_euler' }}</span></div>
@@ -578,7 +582,7 @@
         </div>
       </div>
       <!-- Specific Image Picker -->
-      <div class="image-picker" data-stream="{{ stream_id }}" {% if mode_value != 'specific' %} style="display:none;" {% endif %}>
+      <div class="image-picker" data-stream="{{ stream_id }}" {% if not ((media_mode in ['image', 'video', 'ai']) and mode_value == 'specific') %} style="display:none;" {% endif %}>
         <div class="image-picker-header">
           <label>Pick Media (Folder: {{ conf.folder }})</label>
           <button type="button" class="reload-images-btn" data-stream="{{ stream_id }}">Reload</button>
@@ -593,7 +597,7 @@
         {% include '_timer_section.html' %}
       {% endwith %}
 
-      <p class="selected-image-row" {% if mode_value not in ['specific', 'ai'] %} style="display:none;" {% endif %}>
+      <p class="selected-image-row" {% if not ((media_mode in ['image', 'video', 'ai'] and mode_value == 'specific') or (media_mode == 'ai' and mode_value in ['generate', 'ai']) or media_mode == 'picsum') %} style="display:none;" {% endif %}>
         <strong>Selected Media:</strong>
         <span class="selected-image-display">{{ conf.selected_image if conf.selected_image else "None" }}{% if conf.selected_media_kind == 'video' and conf.selected_image %} (video){% endif %}</span>
       </p>
@@ -4639,7 +4643,8 @@
       return;
     }
     const normalized = typeof mediaMode === 'string' ? mediaMode.toLowerCase() : 'image';
-    const wantsImages = normalized === 'image';
+    const currentMode = (card.querySelector('.mode-select')?.value || '').toLowerCase();
+    const wantsImages = normalized === 'image' || (normalized === 'ai' && (currentMode === 'random' || currentMode === 'specific'));
     const wantsVideos = normalized === 'video';
     const shouldFilter = wantsImages || wantsVideos;
     const options = Array.from(select.options);
@@ -4675,6 +4680,11 @@
         }
       }
     }
+  }
+
+  function currentLibraryForMode(mediaMode) {
+    const normalized = typeof mediaMode === 'string' ? mediaMode.toLowerCase() : 'image';
+    return normalized === 'ai' ? 'ai' : 'media';
   }
 
   const PICSUM_LIMITS = Object.freeze({
@@ -4904,7 +4914,12 @@ function applyPicsumSettings(card, settings, opts = {}) {
       }
       return text.split('/').slice(1).join('/');
     };
-    const url = hideNsfw ? '/folders?hide_nsfw=1' : '/folders';
+    const library = currentLibraryForMode(card.dataset.mediaMode || 'image');
+    const params = new URLSearchParams({ library });
+    if (hideNsfw) {
+      params.set('hide_nsfw', '1');
+    }
+    const url = `/folders?${params.toString()}`;
     try {
       const response = await fetch(url);
       if (!response.ok) {
@@ -4998,6 +5013,9 @@ function applyPicsumSettings(card, settings, opts = {}) {
     const isLivestream = normalizedMedia === 'livestream';
     const isAi = normalizedMedia === 'ai';
     const isPicsum = normalizedMedia === 'picsum';
+    const isAiGenerate = isAi && (normalizedMode === 'generate' || normalizedMode === 'ai');
+    const isAiRandom = isAi && normalizedMode === 'random';
+    const isAiSpecific = isAi && normalizedMode === 'specific';
     const isRandom = normalizedMode === 'random';
     const isSpecific = normalizedMode === 'specific';
 
@@ -5035,7 +5053,7 @@ function applyPicsumSettings(card, settings, opts = {}) {
     const aiSummary = card.querySelector('.ai-summary');
     const picsumRow = card.querySelector('.picsum-row');
 
-    const showVariant = isImage || isVideo;
+    const showVariant = isImage || isVideo || isAi;
     if (variantWrapper) {
       variantWrapper.style.display = showVariant ? '' : 'none';
     }
@@ -5061,8 +5079,8 @@ function applyPicsumSettings(card, settings, opts = {}) {
     }
 
     const syncActive = isImage && syncSelect && (syncSelect.value || card.dataset.syncTimer);
-    if (durationDiv) durationDiv.style.display = (isRandom && (isImage || isVideo) && !syncActive) ? '' : 'none';
-    if (shuffleLabel) shuffleLabel.style.display = (isRandom && (isImage || isVideo)) ? '' : 'none';
+    if (durationDiv) durationDiv.style.display = ((isRandom && (isImage || isVideo) && !syncActive) || isAiRandom) ? '' : 'none';
+    if (shuffleLabel) shuffleLabel.style.display = (isRandom && (isImage || isVideo)) || isAiRandom ? '' : 'none';
     if (syncRow) syncRow.style.display = (isRandom && isImage) ? '' : 'none';
     if (syncSelect && syncOffsetInput) {
       const disabled = !(syncSelect.value || '').trim();
@@ -5070,7 +5088,7 @@ function applyPicsumSettings(card, settings, opts = {}) {
     }
     if (urlDiv) urlDiv.style.display = isLivestream ? '' : 'none';
     if (playingRow) playingRow.style.display = isLivestream ? '' : 'none';
-    if (imagePicker) imagePicker.style.display = (isSpecific && (isImage || isVideo)) ? '' : 'none';
+    if (imagePicker) imagePicker.style.display = ((isSpecific && (isImage || isVideo)) || isAiSpecific) ? '' : 'none';
     if (videoModeRow) videoModeRow.style.display = (isVideo && isRandom) ? '' : 'none';
     if (playbackRow) playbackRow.style.display = isVideo ? '' : 'none';
 
@@ -5088,10 +5106,10 @@ function applyPicsumSettings(card, settings, opts = {}) {
     if (summaryUpdater) summaryUpdater();
 
     if (selectedRow) {
-      const showSelected = (isSpecific && (isImage || isVideo)) || isAi || isPicsum;
+      const showSelected = (isSpecific && (isImage || isVideo)) || isAiSpecific || isAiGenerate || isPicsum;
       selectedRow.style.display = showSelected ? '' : 'none';
     }
-    if (folderRow) folderRow.style.display = (isImage || isVideo) ? '' : 'none';
+    if (folderRow) folderRow.style.display = (isImage || isVideo || isAiRandom || isAiSpecific) ? '' : 'none';
     if (nsfwRow) nsfwRow.style.display = (isLivestream || isPicsum) ? 'none' : '';
     if (qualityRow) qualityRow.style.display = (isLivestream || isVideo || isPicsum) ? 'none' : '';
     if (backgroundRow) backgroundRow.style.display = (isLivestream || isVideo) ? 'none' : '';
@@ -5129,10 +5147,11 @@ function applyPicsumSettings(card, settings, opts = {}) {
     const mediaMode = (card.dataset.mediaMode || 'image').toLowerCase();
     const hideNsfw = card.dataset.hideNsfw === 'true';
     const params = new URLSearchParams({ folder });
+    params.set('library', currentLibraryForMode(mediaMode));
     if (hideNsfw) {
       params.set('hide_nsfw', '1');
     }
-    if (mediaMode === 'image') {
+    if (mediaMode === 'image' || mediaMode === 'ai') {
       params.set('kind', 'image');
     } else if (mediaMode === 'video') {
       params.set('kind', 'video');
@@ -5155,7 +5174,7 @@ function applyPicsumSettings(card, settings, opts = {}) {
             return;
           }
           const kind = (item.kind || '').toLowerCase() === 'video' ? 'video' : 'image';
-          if (mediaMode === 'image' && kind !== 'image') {
+          if ((mediaMode === 'image' || mediaMode === 'ai') && kind !== 'image') {
             return;
           }
           if (mediaMode === 'video' && kind !== 'video') {
@@ -5513,12 +5532,21 @@ function applyPicsumSettings(card, settings, opts = {}) {
               nextMode = 'random';
               if (modeSelect) modeSelect.value = nextMode;
             }
+          } else if (mediaMode === 'ai') {
+            nextMode = (modeSelect && !modeSelect.disabled) ? (modeSelect.value || 'generate').toLowerCase() : 'generate';
+            if (!['generate', 'random', 'specific', 'ai'].includes(nextMode)) {
+              nextMode = 'generate';
+            }
+            if (nextMode === 'ai') {
+              nextMode = 'generate';
+            }
+            if (modeSelect) modeSelect.value = nextMode;
           } else if (mediaMode === 'livestream') {
             nextMode = 'livestream';
           } else if (mediaMode === 'picsum') {
             nextMode = 'picsum';
           } else {
-            nextMode = 'ai';
+            nextMode = 'generate';
           }
           const payload = { media_mode: mediaMode, mode: nextMode };
           if ((mediaMode === 'image' || mediaMode === 'video') && nextMode === 'random') {
@@ -5544,7 +5572,8 @@ function applyPicsumSettings(card, settings, opts = {}) {
           }
           saveSettings(streamId, payload);
           applyModeState(card, mediaMode, nextMode, getStreamUrl());
-          if (nextMode === 'specific' && (mediaMode === 'image' || mediaMode === 'video')) {
+          refreshFoldersForCard(card, card.dataset.hideNsfw === 'true');
+          if ((nextMode === 'specific' && (mediaMode === 'image' || mediaMode === 'video')) || (mediaMode === 'ai' && nextMode === 'specific')) {
             const effectiveFolder = folderSelect ? (folderSelect.value === '__filtered__' ? (folderSelect.dataset.currentFolder || 'all') : folderSelect.value) : 'all';
             loadMediaFor(streamId, effectiveFolder);
           }
@@ -5566,7 +5595,7 @@ function applyPicsumSettings(card, settings, opts = {}) {
           }
           saveSettings(streamId, payload);
           applyModeState(card, mediaMode, mode, getStreamUrl());
-          if (mode === 'specific' && (mediaMode === 'image' || mediaMode === 'video')) {
+          if ((mode === 'specific' && (mediaMode === 'image' || mediaMode === 'video')) || (mediaMode === 'ai' && mode === 'specific')) {
             const effectiveFolder = folderSelect ? (folderSelect.value === '__filtered__' ? (folderSelect.dataset.currentFolder || 'all') : folderSelect.value) : 'all';
             loadMediaFor(streamId, effectiveFolder);
           }
@@ -5761,9 +5790,10 @@ function applyPicsumSettings(card, settings, opts = {}) {
       }
 
       const initialMediaMode = (modeCategorySelect ? modeCategorySelect.value : (card.dataset.mediaMode || 'image')).toLowerCase();
-      const initialModeValue = modeSelect ? (modeSelect.value || '').toLowerCase() : ((initialMediaMode === 'livestream' || initialMediaMode === 'ai') ? initialMediaMode : 'random');
+      const initialModeValue = modeSelect ? (modeSelect.value || '').toLowerCase() : (initialMediaMode === 'livestream' ? 'livestream' : (initialMediaMode === 'ai' ? 'generate' : 'random'));
       applyModeState(card, initialMediaMode, initialModeValue, urlInput ? urlInput.value : '');
-      if ((initialMediaMode === 'image' || initialMediaMode === 'video') && initialModeValue === 'specific') {
+      refreshFoldersForCard(card, card.dataset.hideNsfw === 'true');
+      if (((initialMediaMode === 'image' || initialMediaMode === 'video') && initialModeValue === 'specific') || (initialMediaMode === 'ai' && initialModeValue === 'specific')) {
         const effectiveFolder = folderSelect ? (folderSelect.value === '__filtered__' ? (folderSelect.dataset.currentFolder || 'all') : (folderSelect.value || folderSelect.dataset.currentFolder || 'all')) : 'all';
         loadMediaFor(streamId, effectiveFolder);
       }
