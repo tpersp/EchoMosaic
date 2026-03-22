@@ -179,6 +179,9 @@ function destroyYouTubePlayer() {
     clearInterval(youTubeSyncReportTimer);
     youTubeSyncReportTimer = null;
   }
+  if (youTubeSyncMeta) {
+    youTubeSyncMeta.isLeader = false;
+  }
   youTubeSyncMeta = null;
   clearYouTubeUnmuteHandler();
   if (youTubePlayer && typeof youTubePlayer.destroy === 'function') {
@@ -302,7 +305,7 @@ function handleYouTubeStateChange(meta, event) {
 function reportYouTubeSyncState(reason = 'tick') {
   const player = youTubePlayer;
   const meta = youTubeSyncMeta;
-  if (!player || !meta || !meta.syncEnabled) {
+  if (!player || !meta || !meta.syncEnabled || !meta.isLeader) {
     return;
   }
   if (typeof player.getCurrentTime !== 'function') {
@@ -382,6 +385,28 @@ function applyYouTubeSyncPayload(payload) {
   }
 }
 
+function updateYouTubeSyncReporting() {
+  if (youTubeSyncReportTimer) {
+    clearInterval(youTubeSyncReportTimer);
+    youTubeSyncReportTimer = null;
+  }
+  if (!youTubeSyncMeta || !youTubeSyncMeta.syncEnabled || !youTubeSyncMeta.isLeader || !youTubePlayer) {
+    return;
+  }
+  youTubeSyncReportTimer = setInterval(() => {
+    reportYouTubeSyncState('interval');
+  }, 5000);
+  reportYouTubeSyncState('role');
+}
+
+function applyYouTubeSyncRole(payload) {
+  if (!payload || payload.stream_id !== streamId || !youTubeSyncMeta) {
+    return;
+  }
+  youTubeSyncMeta.isLeader = Boolean(payload.is_leader);
+  updateYouTubeSyncReporting();
+}
+
 async function loadYouTubeEmbed(container, config, data) {
   destroyYouTubePlayer();
   const host = document.createElement('div');
@@ -421,6 +446,7 @@ async function loadYouTubeEmbed(container, config, data) {
       contentType,
       videoId: videoId || '',
       playlistId: playlistId || '',
+      isLeader: false,
     };
     if (contentType === 'playlist' && playlistId) {
       playerVars.listType = 'playlist';
@@ -459,13 +485,7 @@ async function loadYouTubeEmbed(container, config, data) {
             event.target.playVideo();
             if (youTubeSyncMeta && youTubeSyncMeta.syncEnabled) {
               socket.emit('stream_subscribe', { stream_id: streamId });
-              if (youTubeSyncReportTimer) {
-                clearInterval(youTubeSyncReportTimer);
-              }
-              youTubeSyncReportTimer = setInterval(() => {
-                reportYouTubeSyncState('interval');
-              }, 5000);
-              reportYouTubeSyncState('ready');
+              updateYouTubeSyncReporting();
             }
             if (wantsAudio) {
               armYouTubeUnmuteOnGesture(container);
@@ -1448,6 +1468,7 @@ socket.on('stream_init', handleStreamUpdate);
 socket.on('stream_update', handleStreamUpdate);
 socket.on('sync_time', handleSyncTime);
 socket.on('youtube_sync', applyYouTubeSyncPayload);
+socket.on('youtube_sync_role', applyYouTubeSyncRole);
 
 load();
 </script>

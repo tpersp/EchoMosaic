@@ -1213,6 +1213,7 @@ STREAM_INIT_EVENT = "stream_init"
 SYNC_TIME_EVENT = "sync_time"
 STREAM_SYNC_INTERVAL_SECONDS = 3.0
 YOUTUBE_SYNC_EVENT = "youtube_sync"
+YOUTUBE_SYNC_ROLE_EVENT = "youtube_sync_role"
 YOUTUBE_SYNC_MAX_AGE_SECONDS = 20.0
 
 LIVE_HLS_ASYNC = True
@@ -1223,6 +1224,8 @@ HLS_ERROR_RETRY_SECS = 30
 playback_manager: Optional["StreamPlaybackManager"] = None
 YOUTUBE_SYNC_STATE_LOCK = threading.Lock()
 YOUTUBE_SYNC_STATE: Dict[str, Dict[str, Any]] = {}
+YOUTUBE_SYNC_SUBSCRIBERS: Dict[str, Set[str]] = {}
+YOUTUBE_SYNC_LEADERS: Dict[str, str] = {}
 
 
 def _youtube_sync_source_signature(details: Optional[Dict[str, Any]]) -> Tuple[str, str, str]:
@@ -1293,6 +1296,68 @@ def _store_youtube_sync_state(
     with YOUTUBE_SYNC_STATE_LOCK:
         YOUTUBE_SYNC_STATE[stream_id] = dict(payload)
     return payload
+
+
+def _youtube_subscriber_ids(stream_id: str) -> List[str]:
+    with YOUTUBE_SYNC_STATE_LOCK:
+        return sorted(YOUTUBE_SYNC_SUBSCRIBERS.get(stream_id, set()))
+
+
+def _assign_youtube_sync_leader(stream_id: str, sid: str) -> None:
+    with YOUTUBE_SYNC_STATE_LOCK:
+        subscribers = YOUTUBE_SYNC_SUBSCRIBERS.setdefault(stream_id, set())
+        subscribers.add(sid)
+        leader_sid = YOUTUBE_SYNC_LEADERS.get(stream_id)
+        if not leader_sid or leader_sid not in subscribers:
+            YOUTUBE_SYNC_LEADERS[stream_id] = sid
+            leader_sid = sid
+    safe_emit(
+        YOUTUBE_SYNC_ROLE_EVENT,
+        {"stream_id": stream_id, "is_leader": leader_sid == sid},
+        to=sid,
+    )
+
+
+def _promote_youtube_sync_leader(stream_id: str) -> None:
+    new_leader: Optional[str] = None
+    with YOUTUBE_SYNC_STATE_LOCK:
+        subscribers = YOUTUBE_SYNC_SUBSCRIBERS.get(stream_id, set())
+        if subscribers:
+            new_leader = sorted(subscribers)[0]
+            YOUTUBE_SYNC_LEADERS[stream_id] = new_leader
+        else:
+            YOUTUBE_SYNC_LEADERS.pop(stream_id, None)
+    if new_leader:
+        safe_emit(
+            YOUTUBE_SYNC_ROLE_EVENT,
+            {"stream_id": stream_id, "is_leader": True},
+            to=new_leader,
+        )
+
+
+def _remove_youtube_sync_subscriber(sid: str, stream_id: Optional[str] = None) -> None:
+    promotions: List[str] = []
+    with YOUTUBE_SYNC_STATE_LOCK:
+        stream_ids = [stream_id] if stream_id else list(YOUTUBE_SYNC_SUBSCRIBERS.keys())
+        for current_stream_id in stream_ids:
+            subscribers = YOUTUBE_SYNC_SUBSCRIBERS.get(current_stream_id)
+            if not subscribers or sid not in subscribers:
+                continue
+            subscribers.discard(sid)
+            if not subscribers:
+                YOUTUBE_SYNC_SUBSCRIBERS.pop(current_stream_id, None)
+                YOUTUBE_SYNC_LEADERS.pop(current_stream_id, None)
+                continue
+            if YOUTUBE_SYNC_LEADERS.get(current_stream_id) == sid:
+                YOUTUBE_SYNC_LEADERS.pop(current_stream_id, None)
+                promotions.append(current_stream_id)
+    for current_stream_id in promotions:
+        _promote_youtube_sync_leader(current_stream_id)
+
+
+def _youtube_sync_role_for_sid(stream_id: str, sid: str) -> bool:
+    with YOUTUBE_SYNC_STATE_LOCK:
+        return YOUTUBE_SYNC_LEADERS.get(stream_id) == sid
 
 
 def _normalize_folder_key(folder: Optional[str]) -> str:
@@ -8183,6 +8248,7 @@ def _socketio_default_error_handler(e: Exception) -> None:
 @socketio.on("disconnect")
 def handle_socket_disconnect():
     sid = request.sid
+    _remove_youtube_sync_subscriber(sid)
     detached_jobs = job_manager.detach_listener(sid)
     if not detached_jobs:
         logger.info('%s Client %s disconnected; no active Stable Horde jobs linked.', STABLE_HORDE_LOG_PREFIX, sid)
@@ -8240,6 +8306,7 @@ def handle_stream_subscribe(payload):
         return
     join_room(stream_id)
     job_manager.attach_listener(stream_id, request.sid)
+    _assign_youtube_sync_leader(stream_id, request.sid)
     if playback_manager is None:
         return
     state = playback_manager.ensure_started(stream_id)
@@ -8287,6 +8354,7 @@ def handle_stream_unsubscribe(payload):
     if not stream_id:
         return
     leave_room(stream_id)
+    _remove_youtube_sync_subscriber(request.sid, stream_id)
     job_manager.detach_listener(request.sid, stream_id)
 
 
@@ -8361,6 +8429,8 @@ def handle_youtube_state(payload):
         else:
             content_type = "video"
     if content_type not in {"video", "playlist"}:
+        return
+    if not _youtube_sync_role_for_sid(stream_id, request.sid):
         return
     try:
         position = float(payload.get("current_time"))
