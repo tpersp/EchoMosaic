@@ -55,13 +55,21 @@ def _normalize_media_paths(paths: Any) -> List[str]:
     return normalized
 
 
-def _load_media_paths(repo: Path) -> List[str]:
+def _load_library_paths(repo: Path, key: str, default: str) -> List[str]:
     config_data = _load_json_file(repo / "config.json")
     default_data = _load_json_file(repo / "config.default.json")
-    paths = _normalize_media_paths(config_data.get("MEDIA_PATHS"))
+    paths = _normalize_media_paths(config_data.get(key))
     if paths:
         return paths
-    return _normalize_media_paths(default_data.get("MEDIA_PATHS")) or ["./media"]
+    return _normalize_media_paths(default_data.get(key)) or [default]
+
+
+def _load_media_paths(repo: Path) -> List[str]:
+    return _load_library_paths(repo, "MEDIA_PATHS", "./media")
+
+
+def _load_ai_media_paths(repo: Path) -> List[str]:
+    return _load_library_paths(repo, "AI_MEDIA_PATHS", "./ai_media")
 
 
 def _resolve_media_path(repo: Path, raw_path: str) -> Optional[Path]:
@@ -91,7 +99,13 @@ def _backup_repo_media_dirs(repo: Path, temp_dir: Path) -> None:
     manifest: List[Dict[str, str]] = []
     media_root = temp_dir / MEDIA_BACKUP_ROOT
 
-    for raw_path in _load_media_paths(repo):
+    all_paths = _load_media_paths(repo) + _load_ai_media_paths(repo)
+    seen_paths: set[str] = set()
+    for raw_path in all_paths:
+        raw_key = str(raw_path).strip()
+        if not raw_key or raw_key in seen_paths:
+            continue
+        seen_paths.add(raw_key)
         resolved = _resolve_media_path(repo, raw_path)
         if resolved is None or not resolved.exists() or not resolved.is_dir():
             continue

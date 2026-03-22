@@ -105,11 +105,27 @@ def load_json(path: Path):
 
 config_data = load_json(repo / "config.json")
 default_data = load_json(repo / "config.default.json")
-raw_paths = config_data.get("MEDIA_PATHS") or default_data.get("MEDIA_PATHS") or ["./media"]
-if isinstance(raw_paths, str):
-    raw_paths = [raw_paths]
-elif not isinstance(raw_paths, list):
-    raw_paths = ["./media"]
+
+def normalize_paths(value, default):
+    if isinstance(value, str):
+        items = [value]
+    elif isinstance(value, list):
+        items = value
+    else:
+        items = [default]
+    cleaned = []
+    seen_local = set()
+    for raw in items:
+        text = str(raw).strip() if raw is not None else ""
+        if not text or text in seen_local:
+            continue
+        seen_local.add(text)
+        cleaned.append(text)
+    return cleaned or [default]
+
+raw_paths = []
+raw_paths.extend(normalize_paths(config_data.get("MEDIA_PATHS") or default_data.get("MEDIA_PATHS"), "./media"))
+raw_paths.extend(normalize_paths(config_data.get("AI_MEDIA_PATHS") or default_data.get("AI_MEDIA_PATHS"), "./ai_media"))
 
 seen = set()
 for raw in raw_paths:
