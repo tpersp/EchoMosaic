@@ -15,6 +15,7 @@ PERSISTENT_FILES = ("settings.json", "config.json", "update_history.json")
 PERSISTENT_DIRS = ("backups", "restorepoints")
 MEDIA_BACKUP_ROOT = "repo_media"
 MEDIA_MANIFEST_NAME = "repo_media_manifest.json"
+INTERNAL_MEDIA_DIRS = {"_thumbnails", "_ai_temp", "_thumbnails_cache"}
 
 
 def _resolve_repo_path(repo_path: str) -> Path:
@@ -82,6 +83,10 @@ def _is_within_repo(repo: Path, target: Path) -> bool:
         return False
 
 
+def _ignore_internal_media_dirs(_dir: str, names: List[str]) -> List[str]:
+    return [name for name in names if name in INTERNAL_MEDIA_DIRS]
+
+
 def _backup_repo_media_dirs(repo: Path, temp_dir: Path) -> None:
     manifest: List[Dict[str, str]] = []
     media_root = temp_dir / MEDIA_BACKUP_ROOT
@@ -96,7 +101,12 @@ def _backup_repo_media_dirs(repo: Path, temp_dir: Path) -> None:
         rel_path = resolved.relative_to(repo)
         dest = media_root / rel_path
         dest.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copytree(resolved, dest, dirs_exist_ok=True)
+        shutil.copytree(
+            resolved,
+            dest,
+            dirs_exist_ok=True,
+            ignore=_ignore_internal_media_dirs,
+        )
         manifest.append({
             "raw_path": raw_path,
             "repo_relative_path": rel_path.as_posix(),
@@ -242,15 +252,20 @@ def _restore_repo_media_dirs(repo: Path, backup: Path) -> None:
         dest = repo / relative_text
         if not source.exists():
             continue
-        if dest.exists():
-            if dest.is_dir():
-                shutil.rmtree(dest)
-            else:
-                dest.unlink()
-        dest.parent.mkdir(parents=True, exist_ok=True)
         if source.is_dir():
-            shutil.copytree(source, dest)
+            if dest.exists() and not dest.is_dir():
+                dest.unlink()
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copytree(
+                source,
+                dest,
+                dirs_exist_ok=True,
+                ignore=_ignore_internal_media_dirs,
+            )
         else:
+            if dest.exists() and dest.is_dir():
+                shutil.rmtree(dest, ignore_errors=True)
+            dest.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(source, dest)
 
 
