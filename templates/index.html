@@ -175,14 +175,18 @@
               <option value="ai" {% if media_mode == 'ai' %}selected{% endif %}>AI Images</option>
             </select>
             <div class="mode-variant-wrapper">
-              <select id="mode-option-{{ stream_id }}" class="mode-select" data-stream="{{ stream_id }}">
+              <select id="mode-option-image-{{ stream_id }}" class="mode-select" data-stream="{{ stream_id }}" data-category="image" {% if media_mode != 'image' %}style="display:none;" disabled{% endif %}>
                 <option value="random" data-category="image" {% if media_mode == 'image' and mode_value == 'random' %}selected{% endif %}>Random</option>
                 <option value="specific" data-category="image" {% if media_mode == 'image' and mode_value == 'specific' %}selected{% endif %}>Specific</option>
-                <option value="random" data-category="video" {% if media_mode == 'video' and mode_value == 'random' %}selected{% endif %}>Random (Video)</option>
-                <option value="specific" data-category="video" {% if media_mode == 'video' and mode_value == 'specific' %}selected{% endif %}>Specific (Video)</option>
-                <option value="ai_generate" data-category="ai" {% if media_mode == 'ai' and mode_value in ['generate', 'ai'] %}selected{% endif %}>Generate</option>
-                <option value="ai_random" data-category="ai" {% if media_mode == 'ai' and mode_value == 'random' %}selected{% endif %}>View Random</option>
-                <option value="ai_specific" data-category="ai" {% if media_mode == 'ai' and mode_value == 'specific' %}selected{% endif %}>View Specific</option>
+              </select>
+              <select id="mode-option-video-{{ stream_id }}" class="mode-select" data-stream="{{ stream_id }}" data-category="video" {% if media_mode != 'video' %}style="display:none;" disabled{% endif %}>
+                <option value="random" {% if media_mode == 'video' and mode_value == 'random' %}selected{% endif %}>Random (Video)</option>
+                <option value="specific" {% if media_mode == 'video' and mode_value == 'specific' %}selected{% endif %}>Specific (Video)</option>
+              </select>
+              <select id="mode-option-ai-{{ stream_id }}" class="mode-select" data-stream="{{ stream_id }}" data-category="ai" {% if media_mode != 'ai' %}style="display:none;" disabled{% endif %}>
+                <option value="generate" {% if media_mode == 'ai' and mode_value in ['generate', 'ai'] %}selected{% endif %}>Generate</option>
+                <option value="random" {% if media_mode == 'ai' and mode_value == 'random' %}selected{% endif %}>View Random</option>
+                <option value="specific" {% if media_mode == 'ai' and mode_value == 'specific' %}selected{% endif %}>View Specific</option>
               </select>
             </div>
           </div>
@@ -713,7 +717,7 @@
       const mediaMode = String(card.dataset.mediaMode || '').toLowerCase();
       const rawMode = modeOverride !== null && modeOverride !== undefined
         ? modeOverride
-        : (card.dataset.mode || card.querySelector('.mode-select')?.value || '');
+        : (card.dataset.mode || getModeValue(card) || '');
       const normalizedMode = normalizeModeForSave(mediaMode, String(rawMode || '').toLowerCase());
       if (supportedModes.has(mediaMode)) {
         return true;
@@ -938,7 +942,7 @@
       if (!section) return;
       const streamId = card.dataset.stream;
       const mode = (card.dataset.mediaMode || '').toLowerCase();
-      const timerMode = card.dataset.mode || card.querySelector('.mode-select')?.value || '';
+      const timerMode = card.dataset.mode || getModeValue(card) || '';
       const supported = supportsTimerMode(card, timerMode);
       section.hidden = !supported;
       section.dataset.timerSupported = supported ? 'true' : 'false';
@@ -1889,9 +1893,8 @@
       }
       if (card) {
         const mediaMode = card.dataset.mediaMode || 'image';
-        const modeSelect = card.querySelector('.mode-select');
         const streamUrlInput = card.querySelector('.stream-url-input');
-        const modeValue = modeSelect ? modeSelect.value : '';
+        const modeValue = getModeValue(card, mediaMode);
         applyModeState(card, mediaMode, modeValue, streamUrlInput ? streamUrlInput.value : '');
       }
     });
@@ -2908,10 +2911,7 @@
     if (modeCategorySelect) {
       modeCategorySelect.value = nextMediaMode;
     }
-    const modeVariantSelect = card.querySelector('.mode-select');
-    if (modeVariantSelect) {
-      selectModeVariant(modeVariantSelect, nextMediaMode, nextMode);
-    }
+    selectModeVariant(card, nextMediaMode, nextMode);
     refreshThumbnail(card, streamId);
     if (conf.timer !== undefined) {
       let nextAuto = null;
@@ -3862,7 +3862,6 @@
       modalBackdrop.addEventListener('click', () => closeAiSettings(card));
     }
 
-    const modeSelect = card.querySelector('.mode-select');
     const promptInput = card.querySelector('.ai-prompt-input');
     if (promptInput) {
       promptInput.addEventListener('blur', e => {
@@ -4446,16 +4445,16 @@
         if (display) display.textContent = path || 'None';
       });
     }
-    if (modeSelect) {
+    card.querySelectorAll('.mode-select').forEach(modeSelect => {
       if ((card.dataset.mediaMode || '').toLowerCase() === 'ai' && modelSelect) {
         modelSelect.dispatchEvent(new Event('focus'));
       }
-      modeSelect.addEventListener('change', e => {
+      modeSelect.addEventListener('change', () => {
         if ((card.dataset.mediaMode || '').toLowerCase() === 'ai' && modelSelect) {
           modelSelect.dispatchEvent(new Event('focus'));
         }
       });
-    }
+    });
     renderAiStatus(card, { status: card.querySelector('.ai-status')?.dataset.status || 'idle' }, aiActiveJobs.get(streamId) || null);
     highlightAiSelection(resultsEl, resultsEl ? resultsEl.dataset.selected || '' : '');
     if (streamId) {
@@ -4483,11 +4482,10 @@
         const card = document.querySelector(`.stream-card[data-stream="${streamId}"]`);
         if (card) {
           const modeCategorySelect = card.querySelector('.mode-category-select');
-          const modeVariantSelect = card.querySelector('.mode-select');
           const urlInputEl = card.querySelector('.stream-url-input');
           let updatedMediaMode = (modeCategorySelect ? modeCategorySelect.value : (card.dataset.mediaMode || 'image')).toLowerCase();
-          const variantlessModes = new Set(['livestream', 'ai', 'picsum']);
-          let updatedMode = modeVariantSelect ? (modeVariantSelect.value || '').toLowerCase() : (variantlessModes.has(updatedMediaMode) ? updatedMediaMode : 'random');
+          const variantlessModes = new Set(['livestream', 'picsum']);
+          let updatedMode = getModeValue(card, updatedMediaMode) || (updatedMediaMode === 'ai' ? 'generate' : (variantlessModes.has(updatedMediaMode) ? updatedMediaMode : 'random'));
 
           if (data.new_config && (data.new_config.selected_image !== undefined || data.new_config.selected_media_kind !== undefined)) {
             const selectedPath = data.new_config.selected_image || "";
@@ -4596,10 +4594,8 @@
             }
           }
           card.dataset.mode = updatedMode;
-          if (modeVariantSelect) {
-            selectModeVariant(modeVariantSelect, updatedMediaMode, updatedMode);
-          }
-          const effectiveMode = updatedMode || (variantlessModes.has(updatedMediaMode) ? updatedMediaMode : 'random');
+          selectModeVariant(card, updatedMediaMode, updatedMode);
+          const effectiveMode = updatedMode || (updatedMediaMode === 'ai' ? 'generate' : (variantlessModes.has(updatedMediaMode) ? updatedMediaMode : 'random'));
           applyModeState(card, updatedMediaMode, effectiveMode, urlInputEl ? urlInputEl.value : '');
           if (data.new_config && data.new_config.picsum_settings !== undefined) {
             applyPicsumSettings(card, data.new_config.picsum_settings);
@@ -4668,7 +4664,7 @@
       return;
     }
     const normalized = typeof mediaMode === 'string' ? mediaMode.toLowerCase() : 'image';
-    const currentMode = normalizeModeForSave(normalized, (card.querySelector('.mode-select')?.value || card.dataset.mode || '').toLowerCase());
+    const currentMode = normalizeModeForSave(normalized, (getModeValue(card, normalized) || card.dataset.mode || '').toLowerCase());
     const wantsImages = normalized === 'image' || (normalized === 'ai' && (currentMode === 'random' || currentMode === 'specific'));
     const wantsVideos = normalized === 'video';
     const shouldFilter = wantsImages || wantsVideos;
@@ -4712,75 +4708,48 @@
     return normalized === 'ai' ? 'ai' : 'media';
   }
 
+  function getModeSelect(card, mediaMode = null) {
+    if (!card) return null;
+    const normalizedMedia = typeof mediaMode === 'string' && mediaMode
+      ? mediaMode.toLowerCase()
+      : String(card.dataset.mediaMode || '').toLowerCase();
+    if (!normalizedMedia) return null;
+    return card.querySelector(`.mode-select[data-category="${normalizedMedia}"]`);
+  }
+
+  function getModeValue(card, mediaMode = null) {
+    const select = getModeSelect(card, mediaMode);
+    return select ? String(select.value || '').toLowerCase() : '';
+  }
+
   function normalizeModeForUi(mediaMode, mode) {
     const normalizedMedia = typeof mediaMode === 'string' ? mediaMode.toLowerCase() : 'image';
     const normalizedMode = typeof mode === 'string' ? mode.toLowerCase() : '';
-    if (normalizedMedia !== 'ai') {
-      return normalizedMode;
+    if (normalizedMedia === 'ai') {
+      if (normalizedMode === 'ai_random') return 'random';
+      if (normalizedMode === 'ai_specific') return 'specific';
+      if (normalizedMode === 'ai_generate' || normalizedMode === 'ai') return 'generate';
     }
-    if (normalizedMode === 'random') return 'ai_random';
-    if (normalizedMode === 'specific') return 'ai_specific';
-    return 'ai_generate';
+    return normalizedMode;
   }
 
   function normalizeModeForSave(mediaMode, mode) {
-    const normalizedMedia = typeof mediaMode === 'string' ? mediaMode.toLowerCase() : 'image';
-    const normalizedMode = typeof mode === 'string' ? mode.toLowerCase() : '';
-    if (normalizedMedia !== 'ai') {
-      return normalizedMode;
-    }
-    if (normalizedMode === 'ai_random') return 'random';
-    if (normalizedMode === 'ai_specific') return 'specific';
-    return 'generate';
+    return normalizeModeForUi(mediaMode, mode);
   }
 
-  const MODE_VARIANT_OPTIONS = Object.freeze({
-    image: [
-      { value: 'random', label: 'Random' },
-      { value: 'specific', label: 'Specific' },
-    ],
-    video: [
-      { value: 'random', label: 'Random (Video)' },
-      { value: 'specific', label: 'Specific (Video)' },
-    ],
-    ai: [
-      { value: 'ai_generate', label: 'Generate' },
-      { value: 'ai_random', label: 'View Random' },
-      { value: 'ai_specific', label: 'View Specific' },
-    ],
-  });
-
-  function rebuildModeVariantSelect(modeSelect, mediaMode, nextMode) {
-    if (!modeSelect) return;
+  function selectModeVariant(card, mediaMode, nextMode) {
+    if (!card) return;
     const normalizedMedia = typeof mediaMode === 'string' ? mediaMode.toLowerCase() : 'image';
-    const entries = MODE_VARIANT_OPTIONS[normalizedMedia] || [];
-    const normalizedUiMode = normalizeModeForUi(normalizedMedia, nextMode);
-    if (!entries.length) {
-      modeSelect.replaceChildren();
-      return;
-    }
-    const frag = document.createDocumentFragment();
-    let selectedIndex = 0;
-    entries.forEach((entry, index) => {
-      const option = document.createElement('option');
-      option.value = entry.value;
-      option.textContent = entry.label;
-      option.dataset.category = normalizedMedia;
-      if (entry.value === normalizedUiMode) {
-        option.selected = true;
-        selectedIndex = index;
+    const normalizedMode = normalizeModeForUi(normalizedMedia, nextMode);
+    card.querySelectorAll('.mode-select').forEach(select => {
+      const category = String(select.dataset.category || '').toLowerCase();
+      const active = category === normalizedMedia;
+      select.style.display = active ? '' : 'none';
+      select.disabled = !active;
+      if (active && normalizedMode) {
+        select.value = normalizedMode;
       }
-      frag.appendChild(option);
     });
-    modeSelect.replaceChildren(frag);
-    modeSelect.selectedIndex = selectedIndex;
-    modeSelect.value = entries[selectedIndex].value;
-  }
-
-  function selectModeVariant(modeSelect, mediaMode, nextMode) {
-    if (!modeSelect) return;
-    const normalizedMedia = typeof mediaMode === 'string' ? mediaMode.toLowerCase() : 'image';
-    rebuildModeVariantSelect(modeSelect, normalizedMedia, nextMode);
   }
 
   const PICSUM_LIMITS = Object.freeze({
@@ -5138,7 +5107,6 @@ function applyPicsumSettings(card, settings, opts = {}) {
     const playingRow = card.querySelector('.playing-row');
     const imagePicker = card.querySelector('.image-picker');
     const variantWrapper = card.querySelector('.mode-variant-wrapper');
-    const modeSelect = card.querySelector('.mode-select');
     const videoModeRow = card.querySelector('.video-mode-row');
     const videoModeSelect = card.querySelector('.video-mode-select');
     const playbackRow = card.querySelector('.playback-controls-row');
@@ -5156,15 +5124,7 @@ function applyPicsumSettings(card, settings, opts = {}) {
     if (variantWrapper) {
       variantWrapper.style.display = showVariant ? '' : 'none';
     }
-    if (modeSelect) {
-      if (showVariant) {
-        rebuildModeVariantSelect(modeSelect, normalizedMedia, normalizedMode);
-        modeSelect.disabled = false;
-      } else {
-        modeSelect.replaceChildren();
-        modeSelect.disabled = true;
-      }
-    }
+    selectModeVariant(card, normalizedMedia, normalizedMode);
 
     const syncActive = isImage && syncSelect && (syncSelect.value || card.dataset.syncTimer);
     if (durationDiv) durationDiv.style.display = ((isRandom && (isImage || isVideo) && !syncActive) || isAiRandom) ? '' : 'none';
@@ -5602,7 +5562,6 @@ function applyPicsumSettings(card, settings, opts = {}) {
       }
       // Mode change
       const modeCategorySelect = card.querySelector('.mode-category-select');
-      const modeSelect = card.querySelector('.mode-select');
       const urlInput = card.querySelector('.stream-url-input');
 
       const getCurrentMediaMode = () => {
@@ -5615,17 +5574,18 @@ function applyPicsumSettings(card, settings, opts = {}) {
         modeCategorySelect.addEventListener('change', e => {
           const mediaMode = (e.target.value || 'image').toLowerCase();
           card.dataset.mediaMode = mediaMode;
+          const modeSelect = getModeSelect(card, mediaMode);
           let nextMode;
           if (mediaMode === 'image' || mediaMode === 'video') {
             nextMode = (modeSelect && !modeSelect.disabled) ? (modeSelect.value || 'random').toLowerCase() : 'random';
             if (nextMode !== 'random' && nextMode !== 'specific') {
               nextMode = 'random';
-              selectModeVariant(modeSelect, mediaMode, nextMode);
+              selectModeVariant(card, mediaMode, nextMode);
             }
           } else if (mediaMode === 'ai') {
-            const uiMode = (modeSelect && !modeSelect.disabled) ? (modeSelect.value || 'ai_generate').toLowerCase() : 'ai_generate';
+            const uiMode = (modeSelect && !modeSelect.disabled) ? (modeSelect.value || 'generate').toLowerCase() : 'generate';
             nextMode = normalizeModeForSave(mediaMode, uiMode);
-            selectModeVariant(modeSelect, mediaMode, nextMode);
+            selectModeVariant(card, mediaMode, nextMode);
           } else if (mediaMode === 'livestream') {
             nextMode = 'livestream';
           } else if (mediaMode === 'picsum') {
@@ -5665,9 +5625,13 @@ function applyPicsumSettings(card, settings, opts = {}) {
         });
       }
 
-      if (modeSelect) {
+      card.querySelectorAll('.mode-select').forEach(modeSelect => {
         modeSelect.addEventListener('change', e => {
           const mediaMode = getCurrentMediaMode();
+          const selectCategory = String(modeSelect.dataset.category || '').toLowerCase();
+          if (selectCategory !== mediaMode) {
+            return;
+          }
           if (mediaMode === 'picsum') {
             applyModeState(card, mediaMode, 'picsum', getStreamUrl());
             return;
@@ -5685,7 +5649,7 @@ function applyPicsumSettings(card, settings, opts = {}) {
             loadMediaFor(streamId, effectiveFolder);
           }
         });
-      }
+      });
 
       // Duration change
       const durInput = card.querySelector('.duration-input');
@@ -5728,7 +5692,7 @@ function applyPicsumSettings(card, settings, opts = {}) {
           card.dataset.syncTimer = syncSelect.value || '';
           updateSyncDisabled();
           saveSettings(streamId, buildSyncPayload());
-          applyModeState(card, getCurrentMediaMode(), modeSelect ? modeSelect.value : '', getStreamUrl());
+          applyModeState(card, getCurrentMediaMode(), getModeValue(card, getCurrentMediaMode()), getStreamUrl());
         });
       }
       if (syncOffsetInput) {
@@ -5799,12 +5763,12 @@ function applyPicsumSettings(card, settings, opts = {}) {
         runEmbedTest(urlInput.value || '');
         urlInput.addEventListener('input', e => {
           setUrlBadge(e.target.value);
-          applyModeState(card, getCurrentMediaMode(), modeSelect ? modeSelect.value : '', e.target.value);
+          applyModeState(card, getCurrentMediaMode(), getModeValue(card, getCurrentMediaMode()), e.target.value);
           runEmbedTest(e.target.value);
         });
         urlInput.addEventListener('change', e => {
           saveSettings(streamId, { stream_url: e.target.value });
-          applyModeState(card, getCurrentMediaMode(), modeSelect ? modeSelect.value : '', e.target.value);
+          applyModeState(card, getCurrentMediaMode(), getModeValue(card, getCurrentMediaMode()), e.target.value);
           // If not YouTube, force quality AUTO
           const qualitySelect = card.querySelector('.yt-quality-select');
           const t = detectUrlType(e.target.value);
@@ -5877,7 +5841,7 @@ function applyPicsumSettings(card, settings, opts = {}) {
       const initialMediaMode = (modeCategorySelect ? modeCategorySelect.value : (card.dataset.mediaMode || 'image')).toLowerCase();
       const initialModeValue = normalizeModeForSave(
         initialMediaMode,
-        String(card.dataset.mode || (modeSelect ? modeSelect.value : '') || (initialMediaMode === 'livestream' ? 'livestream' : (initialMediaMode === 'ai' ? 'generate' : 'random'))).toLowerCase()
+        String(card.dataset.mode || getModeValue(card, initialMediaMode) || (initialMediaMode === 'livestream' ? 'livestream' : (initialMediaMode === 'ai' ? 'generate' : 'random'))).toLowerCase()
       );
       applyModeState(card, initialMediaMode, initialModeValue, urlInput ? urlInput.value : '');
       refreshFoldersForCard(card, card.dataset.hideNsfw === 'true');
