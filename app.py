@@ -3570,21 +3570,31 @@ def _run_ai_generation(
     if conf:
         ensure_ai_defaults(conf)
         ensure_picsum_defaults(conf)
+        previous_media_mode = str(conf.get('media_mode') or '').strip().lower()
+        previous_mode = str(conf.get('mode') or '').strip().lower()
         conf[AI_SETTINGS_KEY] = _sanitize_ai_settings(options, conf[AI_SETTINGS_KEY])
         conf[AI_SETTINGS_KEY]['save_output'] = persist
         conf['_ai_customized'] = not _ai_settings_match_defaults(conf[AI_SETTINGS_KEY])
         conf[AI_STATE_KEY].update(updates)
         if images:
             conf['selected_image'] = images[0]['path']
-        conf['mode'] = AI_GENERATE_MODE
-        conf['media_mode'] = MEDIA_MODE_AI
+            conf['selected_media_kind'] = 'image'
+            _invalidate_media_cache(images[0]['path'], library=AI_MEDIA_LIBRARY)
+        if previous_media_mode == MEDIA_MODE_AI and previous_mode in {AI_GENERATE_MODE, AI_RANDOM_MODE, AI_SPECIFIC_MODE}:
+            conf['media_mode'] = MEDIA_MODE_AI
+            conf['mode'] = previous_mode
+        else:
+            conf['mode'] = AI_GENERATE_MODE
+            conf['media_mode'] = MEDIA_MODE_AI
         _update_stream_runtime_state(
             stream_id,
             path=conf.get('selected_image'),
             kind='image',
-            media_mode=MEDIA_MODE_AI,
+            media_mode=conf.get('media_mode'),
             source='ai_generation',
         )
+        if playback_manager is not None:
+            playback_manager.update_stream_config(stream_id, conf)
         save_settings_debounced()
         _emit_ai_update(stream_id, conf[AI_STATE_KEY])
         if job_manager.should_emit(stream_id):

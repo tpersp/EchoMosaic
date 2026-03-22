@@ -2886,6 +2886,10 @@
         renderAiResults(card, data.state.images);
       }
       renderAiStatus(card, data.state, data.job || aiActiveJobs.get(streamId) || null);
+      const status = String((data.job && data.job.status) || data.state.status || '').toLowerCase();
+      if (status === 'completed') {
+        refreshAiViewLibrary(card);
+      }
     } else if (data.job) {
       renderAiStatus(card, {}, data.job);
     }
@@ -3006,6 +3010,11 @@
         renderAiResults(card, conf.ai_state.images);
       }
       renderAiStatus(card, conf.ai_state, aiActiveJobs.get(streamId) || null);
+      const effectiveMode = normalizeModeForSave(nextMediaMode, nextMode);
+      const aiStatus = String(conf.ai_state.status || '').toLowerCase();
+      if (nextMediaMode === 'ai' && (effectiveMode === 'random' || effectiveMode === 'specific') && aiStatus === 'completed') {
+        refreshAiViewLibrary(card);
+      }
     }
   });
 
@@ -3519,6 +3528,29 @@
       }
     });
     updateAutoIndicators(card, info);
+  }
+
+  function refreshAiViewLibrary(card) {
+    if (!card) return;
+    const mediaMode = String(card.dataset.mediaMode || '').toLowerCase();
+    const mode = normalizeModeForSave(mediaMode, String(card.dataset.mode || getModeValue(card, mediaMode) || '').toLowerCase());
+    if (mediaMode !== 'ai' || (mode !== 'random' && mode !== 'specific')) {
+      return;
+    }
+    const streamId = card.dataset.stream;
+    if (!streamId) return;
+    const folderSelect = card.querySelector('.folder-select');
+    const currentFolder = folderSelect
+      ? (folderSelect.value === '__filtered__' ? (folderSelect.dataset.currentFolder || 'all') : (folderSelect.value || folderSelect.dataset.currentFolder || 'all'))
+      : 'all';
+    const refreshResult = refreshFoldersForCard(card, card.dataset.hideNsfw === 'true');
+    if (refreshResult && typeof refreshResult.then === 'function') {
+      refreshResult.then(folder => {
+        loadMediaFor(streamId, folder || currentFolder || 'all');
+      });
+      return;
+    }
+    loadMediaFor(streamId, currentFolder || 'all');
   }
 
   function gatherPostProcessing(card) {
