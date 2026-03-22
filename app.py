@@ -5759,6 +5759,8 @@ def update_stream_settings(stream_id):
     ensure_sync_defaults(conf)
     previous_mode = conf.get("mode")
     previous_sync = dict(conf.get(SYNC_CONFIG_KEY)) if isinstance(conf.get(SYNC_CONFIG_KEY), dict) else {}
+    requested_mode = data.get("mode")
+    requested_mode = requested_mode.strip().lower() if isinstance(requested_mode, str) else ""
 
     stream_url_changed = False
     media_mode_changed = False
@@ -5828,7 +5830,8 @@ def update_stream_settings(stream_id):
                 if media_mode in MEDIA_MODE_CHOICES:
                     conf["media_mode"] = media_mode
                     if media_mode == MEDIA_MODE_AI:
-                        conf["mode"] = AI_GENERATE_MODE
+                        if requested_mode not in {AI_GENERATE_MODE, AI_RANDOM_MODE, AI_SPECIFIC_MODE}:
+                            conf["mode"] = AI_GENERATE_MODE
                     elif media_mode == MEDIA_MODE_LIVESTREAM:
                         conf["mode"] = "livestream"
                     media_mode_changed = True
@@ -5913,7 +5916,7 @@ def update_stream_settings(stream_id):
     if needs_metadata_refresh:
         _refresh_embed_metadata(stream_id, conf, force=stream_url_changed or media_mode_changed)
 
-    mode_requested = data.get("mode")
+    mode_requested = requested_mode
     if (
         mode_requested in {AI_MODE, AI_GENERATE_MODE}
         and previous_mode not in {AI_MODE, AI_GENERATE_MODE}
