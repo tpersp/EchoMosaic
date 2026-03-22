@@ -3435,15 +3435,25 @@
       etaEl.classList.add('error');
     } else {
       const waitSeconds = typeof waitRaw === 'number' ? waitRaw : parseFloat(waitRaw);
-      if (!Number.isNaN(waitSeconds) && waitSeconds > 0) {
+      const numericQueue = typeof queuePos === 'number' ? queuePos : parseFloat(queuePos);
+      const unreliableEta =
+        !Number.isNaN(waitSeconds)
+        && waitSeconds > 0
+        && !Number.isNaN(numericQueue)
+        && numericQueue >= 10
+        && waitSeconds < numericQueue;
+      if (!Number.isNaN(waitSeconds) && waitSeconds > 0 && !unreliableEta) {
         const rounded = Math.max(0, Math.round(waitSeconds));
         const minutes = Math.floor(rounded / 60);
         const seconds = rounded % 60;
         const parts = [];
         if (minutes > 0) parts.push(`${minutes}m`);
         parts.push(`${seconds}s`);
-        etaEl.textContent = `ETA ~ ${parts.join(' ')}`;
+        etaEl.textContent = `Horde ETA ~ ${parts.join(' ')}`;
         etaEl.classList.add('waiting');
+      } else if (!Number.isNaN(numericQueue) && numericQueue > 0 && ['running', 'accepted', 'queued', 'cancelling'].includes(status)) {
+        etaEl.textContent = 'Waiting on Horde...';
+        etaEl.classList.add('processing');
       } else if (['running', 'accepted', 'queued', 'cancelling'].includes(status)) {
         etaEl.textContent = 'Processing...';
         etaEl.classList.add('processing');

@@ -42,6 +42,7 @@ DEFAULT_TIMEOUT_SECONDS = 900.0
 PAYLOAD_DONE_GRACE_SECONDS = 45.0
 QUEUE_WAIT_BUFFER_SECONDS = 30.0
 MAX_DYNAMIC_TIMEOUT_EXTENSION_SECONDS = 300.0
+REQUEST_NOT_FOUND_GRACE_SECONDS = 90.0
 MIN_DIMENSION = 64
 MAX_DIMENSION = 2048
 DIMENSION_STEP = 64
@@ -742,6 +743,8 @@ class StableHorde:
         cancel_notified = False
         done_seen_at: Optional[float] = None
         last_progress_signature: Optional[Tuple[Optional[int], Optional[float], Optional[int], bool]] = None
+        not_found_started_at: Optional[float] = None
+        last_known_status: Optional[Dict[str, Any]] = None
 
         def _check_cancelled() -> None:
             nonlocal cancel_notified
@@ -777,7 +780,27 @@ class StableHorde:
                     "Job %s check endpoint missing; falling back to full status",
                     job_id,
                 )
-                full_status = self.get_job_status(job_id)
+                try:
+                    full_status = self.get_job_status(job_id)
+                except StableHordeError as status_exc:
+                    if not _is_request_not_found_error(status_exc):
+                        raise
+                    if not_found_started_at is None:
+                        not_found_started_at = time.time()
+                    missing_for = time.time() - not_found_started_at
+                    self._log(
+                        logging.WARNING,
+                        "Job %s missing from both Horde endpoints for %.1fs; waiting for recovery",
+                        job_id,
+                        missing_for,
+                    )
+                    if deadline is not None:
+                        deadline = max(deadline, time.time() + REQUEST_NOT_FOUND_GRACE_SECONDS)
+                    if missing_for >= REQUEST_NOT_FOUND_GRACE_SECONDS:
+                        raise StableHordeError(f"Stable Horde lost track of job {job_id}")
+                    time.sleep(min(poll_value, 5.0))
+                    continue
+                not_found_started_at = None
                 generations = full_status.get("generations") or []
                 if generations:
                     self._log(logging.INFO, "Job %s complete — %d generation(s) ready", job_id, len(generations))
@@ -791,6 +814,9 @@ class StableHorde:
                     _fire_callback(status_callback, "fault", {"job_id": job_id, "status": full_status, "message": message})
                     raise StableHordeError(f"{message}: job {job_id}")
                 check_status = full_status
+            else:
+                not_found_started_at = None
+            last_known_status = dict(check_status)
             _fire_callback(status_callback, "status", {"job_id": job_id, "status": check_status})
             done_flag = bool(check_status.get("done"))
             faulted_flag = bool(check_status.get("faulted"))
