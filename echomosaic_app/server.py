@@ -2124,7 +2124,7 @@ def _sanitize_group_collection_for_import(raw_groups: Any, valid_streams: Set[st
                     candidate = entry.strip()
                     if candidate in valid_streams:
                         cleaned.append(candidate)
-            layout = _normalize_group_layout(payload.get('layout'))
+            layout = GROUP_SERVICE.normalize_group_layout(payload.get('layout'))
             entry: Dict[str, Any] = {'streams': cleaned}
             if layout:
                 entry['layout'] = layout
