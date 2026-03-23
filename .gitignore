@@ -1,5 +1,6 @@
 # Ignore user and local configuration
 config.json
+settings.json
 .env
 .env.*
 .venv/
@@ -17,6 +18,10 @@ htmlcov/
 .ruff_cache/
 .tox/
 .DS_Store
+media/_thumbnails/
+media/_thumbnails_cache/
+ai_media/_thumbnails/
+ai_media/_thumbnails_cache/
 
 # Local agent guidance and readiness notes
 AGENTS.md
