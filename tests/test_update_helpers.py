@@ -41,6 +41,7 @@ def test_backup_and_restore_preserves_user_files_and_repo_local_media(tmp_path: 
     )
     _write_json(repo / "settings.json", {"stream1": {"label": "Original"}})
     _write_json(repo / "update_history.json", [{"from": "abc1234", "to": "def5678"}])
+    (repo / ".env").write_text("STABLEHORDE_API_KEY=original\n", encoding="utf-8")
     _write_json(repo / "backups" / "keep.json", {"saved": True})
     _write_json(repo / "restorepoints" / "rp1" / "metadata.json", {"id": "rp1"})
 
@@ -54,6 +55,7 @@ def test_backup_and_restore_preserves_user_files_and_repo_local_media(tmp_path: 
     _write_json(repo / "config.json", {"SERVICE_NAME": "replacement.service"})
     _write_json(repo / "settings.json", {"stream1": {"label": "Changed"}})
     _write_json(repo / "update_history.json", [])
+    (repo / ".env").write_text("STABLEHORDE_API_KEY=changed\n", encoding="utf-8")
     _write_json(repo / "backups" / "changed.json", {"saved": False})
     (repo / "restorepoints" / "rp1" / "metadata.json").write_text("{}", encoding="utf-8")
     (media_dir / "photo.jpg").write_text("photo-v2", encoding="utf-8")
@@ -69,6 +71,7 @@ def test_backup_and_restore_preserves_user_files_and_repo_local_media(tmp_path: 
     assert restored_config["logging"]["level"] == "DEBUG"
     assert restored_settings["stream1"]["label"] == "Original"
     assert restored_history[0]["from"] == "abc1234"
+    assert (repo / ".env").read_text(encoding="utf-8") == "STABLEHORDE_API_KEY=original\n"
     assert json.loads((repo / "backups" / "keep.json").read_text(encoding="utf-8"))["saved"] is True
     assert json.loads((repo / "restorepoints" / "rp1" / "metadata.json").read_text(encoding="utf-8"))["id"] == "rp1"
     assert (media_dir / "photo.jpg").read_text(encoding="utf-8") == "photo-v1"

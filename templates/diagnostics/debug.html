@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8"/>
   <title>EchoMosaic Debug Logs</title>
-  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='shared/style.css') }}">
   <style>
     body {
       background: var(--bg);
@@ -129,7 +129,7 @@
 <body>
   <div class="debug-page">
     <nav class="debug-nav">
-      <a href="{{ url_for('dashboard') }}">Dashboard</a>
+      <a href="{{ url_for('dashboard_routes.dashboard') }}">Dashboard</a>
       <span aria-hidden="true">/</span>
       <span>Debug</span>
     </nav>
@@ -146,7 +146,7 @@
     <div class="debug-controls">
       <button type="button" id="pause-btn">Pause</button>
       <button type="button" id="resume-btn" disabled>Resume</button>
-      <a class="button-link" href="{{ url_for('debug_download') }}" download>Download Logs</a>
+      <a class="button-link" href="{{ url_for('diagnostics.debug_download') }}" download>Download Logs</a>
     </div>
     <pre id="log-output" class="log-output" aria-live="polite"></pre>
   </div>

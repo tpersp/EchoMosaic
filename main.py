@@ -8,7 +8,8 @@ UI to break when the wrong entry point was used.
 import os
 
 from app import app, socketio
+from echomosaic_app.bootstrap import run_dev_server
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", "5000"))
-    socketio.run(app, host="0.0.0.0", port=port, debug=True)
+    run_dev_server(app, socketio, port=port)

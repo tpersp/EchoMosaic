@@ -3,9 +3,9 @@
 <head>
   <meta charset="UTF-8"/>
   <title>Update Status</title>
-  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='shared/style.css') }}">
   <script>
-    setTimeout(function(){ window.location.href = '{{ url_for('dashboard') }}'; }, 10000);
+    setTimeout(function(){ window.location.href = '{{ url_for('dashboard_routes.dashboard') }}'; }, 10000);
   </script>
 </head>
 <body>

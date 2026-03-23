@@ -11,7 +11,7 @@ from typing import Any, Dict, Iterable, List, Optional
 
 logger = logging.getLogger(__name__)
 
-PERSISTENT_FILES = ("settings.json", "config.json", "update_history.json")
+PERSISTENT_FILES = ("settings.json", "config.json", "update_history.json", ".env")
 PERSISTENT_DIRS = ("backups", "restorepoints")
 MEDIA_BACKUP_ROOT = "repo_media"
 MEDIA_MANIFEST_NAME = "repo_media_manifest.json"
@@ -197,6 +197,15 @@ def _restore_update_history(repo: Path, backup: Path) -> None:
     shutil.copy2(source, dest)
 
 
+def _restore_env_file(repo: Path, backup: Path) -> None:
+    source = backup / ".env"
+    if not source.is_file():
+        return
+    dest = repo / ".env"
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(source, dest)
+
+
 def _restore_config(repo: Path, backup: Path) -> None:
     source = backup / "config.json"
     if not source.is_file():
@@ -296,6 +305,7 @@ def restore_user_state(repo_path: str, backup_dir: str, *, cleanup: bool = False
         _restore_repo_media_dirs(repo, backup)
         _restore_settings(repo, backup)
         _restore_update_history(repo, backup)
+        _restore_env_file(repo, backup)
         _restore_config(repo, backup)
     finally:
         if cleanup:
