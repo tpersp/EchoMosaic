@@ -3,16 +3,16 @@
 <head>
   <meta charset="UTF-8"/>
   <title>Media Manager • EchoMosaic</title>
-  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
-  <link rel="stylesheet" href="{{ url_for('static', filename='media_manage.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='shared/style.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='media/media_manage.css') }}">
 </head>
 <body>
 <header class="top-bar">
   <h1>Media Manager</h1>
   <nav>
-    <a href="{{ url_for('dashboard') }}">Dashboard</a>
-    <a href="{{ url_for('media_management_page') }}" aria-current="page">Media</a>
-    <a href="{{ url_for('app_settings') }}">Settings</a>
+    <a href="{{ url_for('dashboard_routes.dashboard') }}">Dashboard</a>
+    <a href="{{ url_for('media_routes.media_management_page') }}" aria-current="page">Media</a>
+    <a href="{{ url_for('settings_operations.app_settings') }}">Settings</a>
     <button id="theme-toggle" class="icon-btn" type="button" aria-label="Toggle theme" title="Toggle theme" style="margin-left:.5rem;"></button>
   </nav>
 </header>
@@ -80,6 +80,6 @@
     "previewMaxDuration": media_preview_max_duration
   } | tojson }};
 </script>
-<script src="{{ url_for('static', filename='media_manage.js') }}" defer></script>
+<script src="{{ url_for('static', filename='media/media_manage.js') }}" defer></script>
 </body>
 </html>

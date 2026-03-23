@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8"/>
   <title>EchoMosaic Settings</title>
-  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='shared/style.css') }}">
   <script>
   const SETTINGS_API_KEY = {{ config.get("API_KEY", "")|tojson }};
   let latestUpdateInfo = null;
@@ -355,8 +355,8 @@
   <header class="top-bar">
     <h1>Settings</h1>
     <nav>
-      <a href="{{ url_for('dashboard') }}">Dashboard</a>
-      <a href="{{ url_for('media_management_page') }}">Media</a>
+      <a href="{{ url_for('dashboard_routes.dashboard') }}">Dashboard</a>
+      <a href="{{ url_for('media_routes.media_management_page') }}">Media</a>
       <button id="theme-toggle" class="icon-btn" type="button" aria-label="Toggle theme" title="Toggle theme" style="margin-left:.5rem;"></button>
     </nav>
   </header>
