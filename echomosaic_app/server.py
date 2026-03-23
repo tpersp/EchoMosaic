@@ -2914,8 +2914,6 @@ if playback_manager is None:
         sync_switch_lead_seconds=SYNC_SWITCH_LEAD_SECONDS,
     )
     PLAYBACK_RUNTIME.playback_manager = playback_manager
-    playback_manager.bootstrap(settings)
-    atexit.register(playback_manager.stop)
 
 
 def _hls_url_fingerprint(original_url: str) -> str:
@@ -3866,6 +3864,10 @@ MEDIA_CATALOG_SERVICE = MediaCatalogService(
     ai_media_library=AI_MEDIA_LIBRARY,
 )
 initialize_image_cache()
+
+if PLAYBACK_RUNTIME.playback_manager is playback_manager:
+    playback_manager.bootstrap(settings)
+    atexit.register(playback_manager.stop)
 
 MEDIA_LIBRARY_SERVICE = MediaLibraryService(
     settings=settings,
