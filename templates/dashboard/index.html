@@ -1076,6 +1076,7 @@
   const tagFilterChips = document.getElementById('tag-filter-chips');
   const tagFilterInput = document.getElementById('tag-filter-input');
   const sortSelect = document.getElementById('sort-select');
+  const dashboardSortStorageKey = 'dashboardSortMode';
   const persistedCustomStreamOrder = {{ custom_stream_order|tojson }};
   const tagManagerList = document.getElementById('tag-manager-list');
   const newTagInput = document.getElementById('new-tag-input');
@@ -2180,8 +2181,8 @@
       return;
     }
     const viewportHeight = window.innerHeight || document.documentElement.clientHeight || 0;
-    const edgeThreshold = 160;
-    const maxStep = 30;
+    const edgeThreshold = 220;
+    const maxStep = 34;
     let delta = 0;
     if (dragPointerY < edgeThreshold) {
       delta = -Math.max(8, Math.round(((edgeThreshold - dragPointerY) / edgeThreshold) * maxStep));
@@ -2247,6 +2248,21 @@
     return true;
   }
 
+  function moveStreamCardToEnd(draggedCard) {
+    if (!draggedCard) {
+      return false;
+    }
+    const fromIndex = customCardOrder.indexOf(draggedCard);
+    if (fromIndex === -1 || fromIndex === customCardOrder.length - 1) {
+      return false;
+    }
+    const nextOrder = customCardOrder.slice();
+    nextOrder.splice(fromIndex, 1);
+    nextOrder.push(draggedCard);
+    customCardOrder = nextOrder;
+    return true;
+  }
+
   function initStreamCardReorder(card) {
     const handle = card.querySelector('.reorder-handle');
     const streamId = card.dataset.stream;
@@ -2285,7 +2301,10 @@
       dragPointerY = event.clientY;
       ensureDragAutoScroll();
       const rect = card.getBoundingClientRect();
-      const beforeTarget = event.clientY < (rect.top + rect.height / 2);
+      const sameRow = Math.abs(event.clientY - (rect.top + rect.height / 2)) <= (rect.height * 0.35);
+      const beforeTarget = sameRow
+        ? event.clientX < (rect.left + rect.width / 2)
+        : event.clientY < (rect.top + rect.height / 2);
       clearDragMarkers();
       draggingStreamCard.classList.add('is-dragging');
       card.classList.add(beforeTarget ? 'drag-over-top' : 'drag-over-bottom');
@@ -5509,6 +5528,26 @@ function applyPicsumSettings(card, settings, opts = {}) {
       dragPointerY = null;
     });
 
+    if (dashboardGrid) {
+      dashboardGrid.addEventListener('dragover', (event) => {
+        if (!draggingStreamCard || currentSortMode !== 'custom') {
+          return;
+        }
+        event.preventDefault();
+        dragPointerY = event.clientY;
+        ensureDragAutoScroll();
+        const targetCard = event.target instanceof Element ? event.target.closest('.stream-card') : null;
+        if (targetCard || !customCardOrder.length) {
+          return;
+        }
+        clearDragMarkers();
+        draggingStreamCard.classList.add('is-dragging');
+        if (moveStreamCardToEnd(draggingStreamCard)) {
+          applyFiltersAndSorting({ anchorCard: draggingStreamCard, preserveScroll: false });
+        }
+      });
+    }
+
     const allCards = Array.from(document.querySelectorAll('.stream-card'));
     const streamCards = allCards.filter(card => card.dataset.stream);
     const presentIds = new Set(streamCards.map(card => card.dataset.stream));
@@ -6102,7 +6141,19 @@ function applyPicsumSettings(card, settings, opts = {}) {
     });
     renderTagManager();
     renderFilterChips();
-    currentSortMode = (sortSelect && ['default', 'custom', 'group'].includes(sortSelect.value)) ? sortSelect.value : 'default';
+    const persistedSortMode = (() => {
+      try {
+        return localStorage.getItem(dashboardSortStorageKey) || '';
+      } catch (err) {
+        return '';
+      }
+    })();
+    currentSortMode = ['default', 'custom', 'group'].includes(persistedSortMode)
+      ? persistedSortMode
+      : ((sortSelect && ['default', 'custom', 'group'].includes(sortSelect.value)) ? sortSelect.value : 'default');
+    if (sortSelect) {
+      sortSelect.value = currentSortMode;
+    }
     applyFiltersAndSorting();
     if (tagFilterInput) {
       tagFilterInput.addEventListener('keydown', e => {
@@ -6118,6 +6169,9 @@ function applyPicsumSettings(card, settings, opts = {}) {
     if (sortSelect) {
       sortSelect.addEventListener('change', e => {
         currentSortMode = ['default', 'custom', 'group'].includes(e.target.value) ? e.target.value : 'default';
+        try {
+          localStorage.setItem(dashboardSortStorageKey, currentSortMode);
+        } catch (err) {}
         applyFiltersAndSorting();
       });
     }
