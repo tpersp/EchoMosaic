@@ -2180,8 +2180,8 @@
       return;
     }
     const viewportHeight = window.innerHeight || document.documentElement.clientHeight || 0;
-    const edgeThreshold = 96;
-    const maxStep = 22;
+    const edgeThreshold = 160;
+    const maxStep = 30;
     let delta = 0;
     if (dragPointerY < edgeThreshold) {
       delta = -Math.max(8, Math.round(((edgeThreshold - dragPointerY) / edgeThreshold) * maxStep));
@@ -5496,6 +5496,19 @@ function applyPicsumSettings(card, settings, opts = {}) {
   }
 
   document.addEventListener('DOMContentLoaded', () => {
+    document.addEventListener('dragover', (event) => {
+      if (!draggingStreamCard || currentSortMode !== 'custom') {
+        return;
+      }
+      dragPointerY = event.clientY;
+      ensureDragAutoScroll();
+    });
+
+    document.addEventListener('drop', () => {
+      stopDragAutoScroll();
+      dragPointerY = null;
+    });
+
     const allCards = Array.from(document.querySelectorAll('.stream-card'));
     const streamCards = allCards.filter(card => card.dataset.stream);
     const presentIds = new Set(streamCards.map(card => card.dataset.stream));
