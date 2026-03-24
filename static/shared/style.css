@@ -830,6 +830,9 @@ a {
   z-index: 2;
   pointer-events: none;
 }
+.custom-layout-overlay[hidden] {
+  display: none !important;
+}
 .stream-card.layout-editing .card-header {
   position: relative;
   z-index: 4;
@@ -840,10 +843,9 @@ a {
   transition: opacity 0.18s ease;
 }
 .custom-layout-slot-badge {
-  align-self: center;
-  min-width: 96px;
-  min-height: 96px;
-  display: inline-flex;
+  min-width: 110px;
+  min-height: 110px;
+  display: inline-grid;
   align-items: center;
   justify-content: center;
   border-radius: 22px;
@@ -851,36 +853,46 @@ a {
   background: color-mix(in srgb, var(--surface-alt) 56%, transparent);
   box-shadow: 0 12px 28px rgba(0, 0, 0, 0.24);
 }
-.custom-layout-slot-number {
-  font-size: clamp(2rem, 4vw, 3rem);
-  font-weight: 700;
-  line-height: 1;
-  color: var(--text);
-}
 .custom-layout-controls {
-  align-self: center;
+  margin: auto;
   display: inline-flex;
   align-items: center;
-  gap: 0.45rem;
-  padding: 0.5rem;
+  gap: 0.75rem;
+  padding: 0.6rem 0.8rem;
   border-radius: 999px;
-  border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--border));
-  background: color-mix(in srgb, var(--surface) 72%, transparent);
-  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.24);
+  background: color-mix(in srgb, var(--surface) 34%, transparent);
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.18);
   pointer-events: auto;
 }
 .custom-layout-controls button {
-  min-width: 34px;
-  min-height: 34px;
+  min-width: 42px;
+  min-height: 42px;
   border-radius: 999px;
-  font-size: 1rem;
+  font-size: 1.05rem;
   padding: 0;
+  flex: 0 0 auto;
 }
-.layout-slot-input {
-  width: 72px;
+.custom-layout-slot-input {
+  width: 100%;
+  min-width: 0;
+  border: 0;
+  background: transparent;
   text-align: center;
   font-weight: 700;
-  font-size: 1rem;
+  font-size: clamp(2rem, 4vw, 3rem);
+  line-height: 1;
+  color: var(--text);
+  padding: 0;
+  appearance: textfield;
+  -moz-appearance: textfield;
+}
+.custom-layout-slot-input::-webkit-outer-spin-button,
+.custom-layout-slot-input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+.custom-layout-slot-input:focus {
+  outline: none;
 }
 .minimize-button {
   background: var(--surface-alt);

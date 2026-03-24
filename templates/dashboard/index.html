@@ -154,12 +154,11 @@
       </div>
 
       <div class="custom-layout-overlay" hidden>
-        <div class="custom-layout-slot-badge">
-          <span class="custom-layout-slot-number">1</span>
-        </div>
         <div class="custom-layout-controls">
           <button type="button" class="layout-move-up" aria-label="Move up" title="Move up">&#8593;</button>
-          <input type="number" class="layout-slot-input" min="1" step="1" inputmode="numeric" aria-label="Layout slot">
+          <label class="custom-layout-slot-badge" aria-label="Layout slot">
+            <input type="number" class="custom-layout-slot-input" min="1" step="1" inputmode="numeric" aria-label="Layout slot">
+          </label>
           <button type="button" class="layout-move-down" aria-label="Move down" title="Move down">&#8595;</button>
         </div>
       </div>
@@ -2314,15 +2313,11 @@
     const slotMap = new Map(customCardOrder.map((card, index) => [card.dataset.stream, index + 1]));
     defaultCardOrder.forEach(card => {
       const overlay = card.querySelector('.custom-layout-overlay');
-      const numberEl = card.querySelector('.custom-layout-slot-number');
-      const inputEl = card.querySelector('.layout-slot-input');
+      const inputEl = card.querySelector('.custom-layout-slot-input');
       const upBtn = card.querySelector('.layout-move-up');
       const downBtn = card.querySelector('.layout-move-down');
       const streamId = card.dataset.stream;
       const slot = slotMap.get(streamId) || (defaultCardOrder.indexOf(card) + 1);
-      if (numberEl) {
-        numberEl.textContent = String(slot);
-      }
       if (inputEl) {
         inputEl.value = String(slot);
         inputEl.min = '1';
@@ -2350,7 +2345,7 @@
     }
     const upBtn = card.querySelector('.layout-move-up');
     const downBtn = card.querySelector('.layout-move-down');
-    const inputEl = card.querySelector('.layout-slot-input');
+    const inputEl = card.querySelector('.custom-layout-slot-input');
     if (upBtn) {
       upBtn.addEventListener('click', async () => {
         if (!layoutEditMode || currentSortMode !== 'custom') {
