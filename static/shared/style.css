@@ -829,13 +829,19 @@ a {
   cursor: grabbing;
 }
 .stream-card.is-dragging {
-  opacity: 0.88;
+  opacity: 0.96;
   pointer-events: none;
-  position: relative;
-  z-index: 12;
-  box-shadow: 0 0 0 2px var(--accent), 0 10px 24px rgba(0, 0, 0, 0.28);
-  transform: scale(1.01);
+  position: fixed;
+  z-index: 1000;
+  margin: 0;
+  box-shadow: 0 0 0 2px var(--accent), 0 16px 32px rgba(0, 0, 0, 0.34);
+  transform: rotate(1deg) scale(1.02);
   transition: box-shadow 0.12s ease, transform 0.12s ease, opacity 0.12s ease;
+}
+.stream-card-placeholder {
+  border: 1px dashed var(--accent);
+  background: color-mix(in srgb, var(--surface-alt) 72%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 45%, transparent);
 }
 .stream-card.is-reflowing {
   transition: transform 0.18s ease;

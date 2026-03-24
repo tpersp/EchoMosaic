@@ -2164,9 +2164,12 @@
   let defaultCardOrder = [];
   let customCardOrder = [];
   let draggingStreamCard = null;
+  let dragPlaceholderCard = null;
   let dragPointerId = null;
   let dragPointerX = null;
   let dragPointerY = null;
+  let dragPointerOffsetX = 0;
+  let dragPointerOffsetY = 0;
   let dragAutoScrollFrame = null;
   let lastDragIntentKey = '';
 
@@ -2204,8 +2207,21 @@
   }
 
   function clearDragMarkers() {
-    document.querySelectorAll('.stream-card.drag-over-top, .stream-card.drag-over-bottom, .stream-card.is-dragging')
-      .forEach(card => card.classList.remove('drag-over-top', 'drag-over-bottom', 'is-dragging'));
+    document.querySelectorAll('.stream-card.drag-over-top, .stream-card.drag-over-bottom')
+      .forEach(card => card.classList.remove('drag-over-top', 'drag-over-bottom'));
+  }
+
+  function clearDraggingState() {
+    document.querySelectorAll('.stream-card.is-dragging')
+      .forEach(card => card.classList.remove('is-dragging'));
+  }
+
+  function positionDraggedCard() {
+    if (!draggingStreamCard || typeof dragPointerX !== 'number' || typeof dragPointerY !== 'number') {
+      return;
+    }
+    draggingStreamCard.style.left = `${dragPointerX - dragPointerOffsetX}px`;
+    draggingStreamCard.style.top = `${dragPointerY - dragPointerOffsetY}px`;
   }
 
   function renderOrderedCardsInPlace(orderedCards) {
@@ -2216,14 +2232,21 @@
     orderedCards.forEach(card => {
       if (card && card.parentNode === dashboardGrid) {
         firstRects.set(card, card.getBoundingClientRect());
+      } else if (draggingStreamCard && dragPlaceholderCard && card === draggingStreamCard && dragPlaceholderCard.parentNode === dashboardGrid) {
+        firstRects.set(dragPlaceholderCard, dragPlaceholderCard.getBoundingClientRect());
       }
     });
     orderedCards.forEach(card => {
-      if (card && card.parentNode === dashboardGrid) {
+      if (draggingStreamCard && dragPlaceholderCard && card === draggingStreamCard) {
+        dashboardGrid.appendChild(dragPlaceholderCard);
+      } else if (card && card.parentNode === dashboardGrid) {
         dashboardGrid.appendChild(card);
       }
     });
-    orderedCards.forEach(card => {
+    const animatedCards = orderedCards.map(card => (
+      draggingStreamCard && dragPlaceholderCard && card === draggingStreamCard ? dragPlaceholderCard : card
+    ));
+    animatedCards.forEach(card => {
       if (!card || card.parentNode !== dashboardGrid) {
         return;
       }
@@ -2253,6 +2276,7 @@
       };
       card.addEventListener('transitionend', clearReflow);
     });
+    positionDraggedCard();
   }
 
   function currentOrderedStreamIds() {
@@ -2321,6 +2345,7 @@
     ensureDragAutoScroll();
     clearDragMarkers();
     draggingStreamCard.classList.add('is-dragging');
+    positionDraggedCard();
 
     const target = document.elementFromPoint(clientX, clientY);
     const targetCard = target instanceof Element ? target.closest('.stream-card') : null;
@@ -2362,12 +2387,19 @@
   async function finishStreamCardDrag() {
     if (!draggingStreamCard) {
       stopDragAutoScroll();
+      if (dragPlaceholderCard && dragPlaceholderCard.parentNode) {
+        dragPlaceholderCard.remove();
+      }
+      dragPlaceholderCard = null;
       dragPointerId = null;
       dragPointerX = null;
       dragPointerY = null;
+      dragPointerOffsetX = 0;
+      dragPointerOffsetY = 0;
       lastDragIntentKey = '';
       document.body.classList.remove('is-stream-reordering');
       clearDragMarkers();
+      clearDraggingState();
       return;
     }
     try {
@@ -2377,12 +2409,24 @@
       showNotification((err && err.message) ? err.message : 'Failed to save stream order');
     } finally {
       stopDragAutoScroll();
+      if (dragPlaceholderCard && dragPlaceholderCard.parentNode) {
+        dragPlaceholderCard.remove();
+      }
+      dragPlaceholderCard = null;
+      draggingStreamCard.style.left = '';
+      draggingStreamCard.style.top = '';
+      draggingStreamCard.style.width = '';
+      draggingStreamCard.style.height = '';
       dragPointerId = null;
       dragPointerX = null;
       dragPointerY = null;
+      dragPointerOffsetX = 0;
+      dragPointerOffsetY = 0;
       lastDragIntentKey = '';
       document.body.classList.remove('is-stream-reordering');
       clearDragMarkers();
+      clearDraggingState();
+      applyFiltersAndSorting({ preserveScroll: false });
       draggingStreamCard = null;
     }
   }
@@ -2401,14 +2445,25 @@
       try {
         handle.setPointerCapture(event.pointerId);
       } catch (err) {}
+      const cardRect = card.getBoundingClientRect();
       draggingStreamCard = card;
+      dragPlaceholderCard = document.createElement('div');
+      dragPlaceholderCard.className = 'stream-card stream-card-placeholder';
+      dragPlaceholderCard.style.width = `${cardRect.width}px`;
+      dragPlaceholderCard.style.height = `${cardRect.height}px`;
       dragPointerId = event.pointerId;
       dragPointerX = event.clientX;
       dragPointerY = event.clientY;
+      dragPointerOffsetX = event.clientX - cardRect.left;
+      dragPointerOffsetY = event.clientY - cardRect.top;
       lastDragIntentKey = '';
       document.body.classList.add('is-stream-reordering');
+      card.insertAdjacentElement('afterend', dragPlaceholderCard);
       clearDragMarkers();
       draggingStreamCard.classList.add('is-dragging');
+      draggingStreamCard.style.width = `${cardRect.width}px`;
+      draggingStreamCard.style.height = `${cardRect.height}px`;
+      positionDraggedCard();
       ensureDragAutoScroll();
       const onPointerMove = (moveEvent) => {
         if (!draggingStreamCard || moveEvent.pointerId !== dragPointerId) {
