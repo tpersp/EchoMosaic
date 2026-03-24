@@ -1313,6 +1313,16 @@ a {
   padding: 0.3rem 0.5rem;
 }
 
+.stream-card .custom-layout-controls .custom-layout-slot-input {
+  font-size: 3.6rem;
+  padding: 0;
+}
+
+.stream-card .custom-layout-controls button {
+  font-size: 1.9rem;
+  padding: 0;
+}
+
 .group-tile input,
 .group-tile select,
 .group-tile button {
