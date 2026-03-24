@@ -842,16 +842,25 @@ a {
   opacity: 0.32;
   transition: opacity 0.18s ease;
 }
+.custom-layout-center {
+  --layout-slot-size: 132px;
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.7rem;
+}
 .custom-layout-slot-badge {
-  min-width: 132px;
-  min-height: 132px;
-  display: inline-grid;
+  width: var(--layout-slot-size);
+  height: var(--layout-slot-size);
+  display: inline-flex;
   align-items: center;
   justify-content: center;
   border-radius: 26px;
   border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--border));
   background: color-mix(in srgb, var(--surface-alt) 56%, transparent);
   box-shadow: 0 12px 28px rgba(0, 0, 0, 0.24);
+  box-sizing: border-box;
+  overflow: hidden;
 }
 .custom-layout-controls {
   margin: auto;
@@ -863,12 +872,6 @@ a {
   background: color-mix(in srgb, var(--surface) 34%, transparent);
   box-shadow: 0 10px 24px rgba(0, 0, 0, 0.18);
   pointer-events: auto;
-}
-.custom-layout-center {
-  display: inline-flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 0.7rem;
 }
 .custom-layout-controls button {
   min-width: 64px;
@@ -887,15 +890,19 @@ a {
   border: 0;
   background: transparent;
   display: block;
+  box-sizing: border-box;
   text-align: center;
   font-weight: 700;
   font-size: clamp(4.25rem, 9vw, 6rem);
-  line-height: 1;
+  line-height: var(--layout-slot-size);
   color: var(--text);
-  padding: 0 0 0.12em;
+  padding: 0;
+  margin: 0;
   appearance: textfield;
   -moz-appearance: textfield;
   text-shadow: 0 1px 0 rgba(0, 0, 0, 0.18);
+  caret-color: var(--accent);
+  vertical-align: middle;
 }
 .custom-layout-slot-input::-webkit-outer-spin-button,
 .custom-layout-slot-input::-webkit-inner-spin-button {
