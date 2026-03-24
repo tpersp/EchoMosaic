@@ -67,29 +67,6 @@
     </div>
   </div>
 
-  <div class="filter-bar" id="filter-bar">
-    <div class="filter-group">
-      <label for="tag-filter-input">Filter Tags</label>
-      <div class="tag-filter-input">
-        <div class="tag-chip-list" id="tag-filter-chips">
-          <input type="text" id="tag-filter-input" placeholder="Add tag filter" list="global-tag-options" autocomplete="off" />
-        </div>
-      </div>
-    </div>
-    <div class="filter-group">
-      <label for="sort-select">Sort</label>
-      <select id="sort-select">
-        <option value="default" selected>Default</option>
-        <option value="custom">Custom</option>
-        <option value="group">Group by Tag</option>
-      </select>
-    </div>
-    <div class="filter-group filter-group-layout">
-      <label for="layout-edit-toggle">Layout</label>
-      <button id="layout-edit-toggle" type="button" disabled aria-pressed="false">Edit Layout</button>
-    </div>
-  </div>
-
   <div class="stream-card" id="tag-manager">
     <div class="card-header">
       <h2>Tags</h2>
@@ -116,6 +93,34 @@
         <button type="button" id="sync-timer-add-btn">Add</button>
       </div>
       <p class="sync-manager-hint">Timers drive synchronized changes across random image/GIF streams. Assign one per stream and use the offset to stagger.</p>
+    </div>
+  </div>
+
+  <div class="stream-card" id="ui-controls">
+    <div class="card-header">
+      <h2>UI</h2>
+    </div>
+    <div class="filter-bar" id="filter-bar">
+      <div class="filter-group">
+        <label for="tag-filter-input">Filter Tags</label>
+        <div class="tag-filter-input">
+          <div class="tag-chip-list" id="tag-filter-chips">
+            <input type="text" id="tag-filter-input" placeholder="Add tag filter" list="global-tag-options" autocomplete="off" />
+          </div>
+        </div>
+      </div>
+      <div class="filter-group">
+        <label for="sort-select">Sort</label>
+        <select id="sort-select">
+          <option value="default" selected>Default</option>
+          <option value="custom">Custom</option>
+          <option value="group">Group by Tag</option>
+        </select>
+      </div>
+      <div class="filter-group filter-group-layout">
+        <label for="layout-edit-toggle">Layout</label>
+        <button id="layout-edit-toggle" type="button" disabled aria-pressed="false">Edit Layout</button>
+      </div>
     </div>
   </div>
 
