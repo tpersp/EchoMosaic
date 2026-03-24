@@ -829,8 +829,13 @@ a {
   cursor: grabbing;
 }
 .stream-card.is-dragging {
-  opacity: 0.6;
+  opacity: 0.88;
   pointer-events: none;
+  position: relative;
+  z-index: 12;
+  box-shadow: 0 0 0 2px var(--accent), 0 10px 24px rgba(0, 0, 0, 0.28);
+  transform: scale(1.01);
+  transition: box-shadow 0.12s ease, transform 0.12s ease, opacity 0.12s ease;
 }
 .stream-card.drag-over-top {
   border-top: 2px solid var(--accent);

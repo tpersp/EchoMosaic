@@ -2207,6 +2207,17 @@
       .forEach(card => card.classList.remove('drag-over-top', 'drag-over-bottom', 'is-dragging'));
   }
 
+  function renderOrderedCardsInPlace(orderedCards) {
+    if (!dashboardGrid) {
+      return;
+    }
+    orderedCards.forEach(card => {
+      if (card && card.parentNode === dashboardGrid) {
+        dashboardGrid.appendChild(card);
+      }
+    });
+  }
+
   function currentOrderedStreamIds() {
     return customCardOrder
       .map(card => card && card.dataset ? (card.dataset.stream || '') : '')
@@ -2409,16 +2420,14 @@
       card.dataset.matchesFilter = matches ? 'true' : 'false';
       card.style.display = matches ? '' : 'none';
     });
-    while (dashboardGrid.firstChild) {
-      dashboardGrid.removeChild(dashboardGrid.firstChild);
-    }
     if (currentSortMode === 'group') {
+      while (dashboardGrid.firstChild) {
+        dashboardGrid.removeChild(dashboardGrid.firstChild);
+      }
       renderGroupedCards();
     } else {
       const orderedCards = currentSortMode === 'custom' ? customCardOrder : defaultCardOrder;
-      orderedCards.forEach(card => {
-        dashboardGrid.appendChild(card);
-      });
+      renderOrderedCardsInPlace(orderedCards);
     }
     if (anchorCard && anchorRect && preserveScroll) {
       requestAnimationFrame(() => {
