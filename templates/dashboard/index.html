@@ -10,7 +10,7 @@
   <h1>EchoMosaic</h1>
   <nav>
     <a href="{{ url_for('media_routes.media_management_page') }}">Media</a>
-    <a href="{{ url_for('settings_operations.app_settings') }}">Settings</a>
+    <a id="settings-nav-link" href="{{ url_for('settings_operations.app_settings') }}">Settings<span id="settings-update-badge" class="nav-update-badge" hidden aria-label="Update available"></span></a>
     <button id="theme-toggle" class="icon-btn" type="button" aria-label="Toggle theme" title="Toggle theme" style="margin-left:.5rem;"></button>
   </nav>
 </header>
@@ -67,24 +67,6 @@
     </div>
   </div>
 
-  <div class="filter-bar" id="filter-bar">
-    <div class="filter-group">
-      <label for="tag-filter-input">Filter Tags</label>
-      <div class="tag-filter-input">
-        <div class="tag-chip-list" id="tag-filter-chips">
-          <input type="text" id="tag-filter-input" placeholder="Add tag filter" list="global-tag-options" autocomplete="off" />
-        </div>
-      </div>
-    </div>
-    <div class="filter-group">
-      <label for="sort-select">Sort</label>
-      <select id="sort-select">
-        <option value="default" selected>Default</option>
-        <option value="group">Group by Tag</option>
-      </select>
-    </div>
-  </div>
-
   <div class="stream-card" id="tag-manager">
     <div class="card-header">
       <h2>Tags</h2>
@@ -111,6 +93,34 @@
         <button type="button" id="sync-timer-add-btn">Add</button>
       </div>
       <p class="sync-manager-hint">Timers drive synchronized changes across random image/GIF streams. Assign one per stream and use the offset to stagger.</p>
+    </div>
+  </div>
+
+  <div class="stream-card" id="ui-controls">
+    <div class="card-header">
+      <h2>UI</h2>
+    </div>
+    <div class="filter-bar" id="filter-bar">
+      <div class="filter-group">
+        <label for="tag-filter-input">Filter Tags</label>
+        <div class="tag-filter-input">
+          <div class="tag-chip-list" id="tag-filter-chips">
+            <input type="text" id="tag-filter-input" placeholder="Add tag filter" list="global-tag-options" autocomplete="off" />
+          </div>
+        </div>
+      </div>
+      <div class="filter-group">
+        <label for="sort-select">Sort</label>
+        <select id="sort-select">
+          <option value="default" selected>Default</option>
+          <option value="custom">Custom</option>
+          <option value="group">Group by Tag</option>
+        </select>
+      </div>
+      <div class="filter-group filter-group-layout">
+        <label for="layout-edit-toggle">Layout</label>
+        <button id="layout-edit-toggle" type="button" disabled aria-pressed="false">Edit Layout</button>
+      </div>
     </div>
   </div>
 
@@ -145,6 +155,22 @@
               <button class="menu-remove" data-stream="{{ stream_id }}">Remove</button>
             </div>
           </div>
+        </div>
+      </div>
+
+      <div class="custom-layout-overlay" hidden>
+        <div class="custom-layout-controls">
+          <button type="button" class="layout-move-up" aria-label="Move left" title="Move left">&#8592;</button>
+          <div class="custom-layout-center">
+            <label class="custom-layout-slot-badge" aria-label="Layout slot">
+            <input type="number" class="custom-layout-slot-input" min="1" step="1" inputmode="numeric" aria-label="Layout slot">
+            </label>
+            <div class="custom-layout-origin-badge" hidden>
+              <span class="custom-layout-origin-label">Was</span>
+              <span class="custom-layout-origin-number">1</span>
+            </div>
+          </div>
+          <button type="button" class="layout-move-down" aria-label="Move right" title="Move right">&#8594;</button>
         </div>
       </div>
 
@@ -1064,6 +1090,8 @@
   const addStreamBtn = document.getElementById('add-stream');
   const openMosaicBtn = document.getElementById('open-mosaic');
   const toggleMinimizeAllBtn = document.getElementById('toggle-minimize-all');
+  const settingsNavLink = document.getElementById('settings-nav-link');
+  const settingsUpdateBadge = document.getElementById('settings-update-badge');
   
   // Group Manager elements
   const groupTiles = document.getElementById('group-tiles');
@@ -1072,6 +1100,9 @@
   const tagFilterChips = document.getElementById('tag-filter-chips');
   const tagFilterInput = document.getElementById('tag-filter-input');
   const sortSelect = document.getElementById('sort-select');
+  const layoutEditToggle = document.getElementById('layout-edit-toggle');
+  const dashboardSortStorageKey = 'dashboardSortMode';
+  const persistedCustomStreamOrder = {{ custom_stream_order|tojson }};
   const tagManagerList = document.getElementById('tag-manager-list');
   const newTagInput = document.getElementById('new-tag-input');
   const createTagBtn = document.getElementById('create-tag-btn');
@@ -1088,7 +1119,9 @@
     disk: systemMonitor.querySelector('[data-monitor="disk"]'),
   } : null;
   const SYSTEM_MONITOR_POLL_MS = 10000;
+  const UPDATE_STATUS_POLL_MS = 30 * 60 * 1000;
   let systemMonitorIntervalId = null;
+  let updateStatusIntervalId = null;
   const NOW_PLAYING_LABELS = {
     video: 'Video',
     playlist: 'Playlist',
@@ -1106,6 +1139,32 @@
     toggleMinimizeAllBtn.disabled = false;
     const allMinimized = Array.from(cards).every(card => card.classList.contains('is-minimized'));
     toggleMinimizeAllBtn.textContent = allMinimized ? 'Expand All' : 'Minimize All';
+  }
+
+  async function refreshDashboardUpdateBadge() {
+    if (!settingsUpdateBadge) {
+      return;
+    }
+    try {
+      const res = await fetch('/api/update_status', { cache: 'no-store' });
+      if (!res.ok) {
+        throw new Error(`status ${res.status}`);
+      }
+      const info = await res.json();
+      const hasUpdate = Boolean(info && info.update_available);
+      settingsUpdateBadge.hidden = !hasUpdate;
+      if (settingsNavLink) {
+        const title = hasUpdate
+          ? `Update available${info.latest_version ? `: ${info.latest_version}` : ''}`
+          : 'Settings';
+        settingsNavLink.title = title;
+      }
+    } catch (err) {
+      settingsUpdateBadge.hidden = true;
+      if (settingsNavLink) {
+        settingsNavLink.title = 'Settings';
+      }
+    }
   }
 
   function syncMinimizedGridState() {
@@ -2155,7 +2214,238 @@
     addFilterTag(normalized);
   }
 
-  let originalCardOrder = [];
+  let defaultCardOrder = [];
+  let customCardOrder = [];
+  let layoutEditMode = false;
+  let layoutEditOriginalOrder = [];
+
+  function renderOrderedCardsInPlace(orderedCards) {
+    if (!dashboardGrid) {
+      return;
+    }
+    const firstRects = new Map();
+    orderedCards.forEach(card => {
+      if (card && card.parentNode === dashboardGrid) {
+        firstRects.set(card, card.getBoundingClientRect());
+      }
+    });
+    orderedCards.forEach(card => {
+      if (card && card.parentNode === dashboardGrid) {
+        dashboardGrid.appendChild(card);
+      }
+    });
+    orderedCards.forEach(card => {
+      if (!card || card.parentNode !== dashboardGrid) {
+        return;
+      }
+      const firstRect = firstRects.get(card);
+      if (!firstRect) {
+        return;
+      }
+      const lastRect = card.getBoundingClientRect();
+      const deltaX = firstRect.left - lastRect.left;
+      const deltaY = firstRect.top - lastRect.top;
+      if (Math.abs(deltaX) <= 1 && Math.abs(deltaY) <= 1) {
+        return;
+      }
+      card.style.transition = 'none';
+      card.style.transform = `translate(${deltaX}px, ${deltaY}px)`;
+      requestAnimationFrame(() => {
+        card.classList.add('is-reflowing');
+        card.style.transition = '';
+        card.style.transform = '';
+      });
+      const clearReflow = () => {
+        card.classList.remove('is-reflowing');
+        card.style.transform = '';
+        card.removeEventListener('transitionend', clearReflow);
+      };
+      card.addEventListener('transitionend', clearReflow);
+    });
+  }
+
+  function currentOrderedStreamIds() {
+    return customCardOrder
+      .map(card => card && card.dataset ? (card.dataset.stream || '') : '')
+      .filter(Boolean);
+  }
+
+  async function persistDashboardStreamOrder() {
+    const streamOrder = currentOrderedStreamIds();
+    const res = await fetch('/streams/reorder', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ stream_order: streamOrder })
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !data || data.status !== 'ok') {
+      throw new Error((data && data.error) ? data.error : 'Failed to save stream order');
+    }
+    return data.stream_order || streamOrder;
+  }
+
+  function reorderCustomCards(nextOrder) {
+    if (!Array.isArray(nextOrder) || nextOrder.length !== customCardOrder.length) {
+      return false;
+    }
+    const changed = nextOrder.some((card, idx) => card !== customCardOrder[idx]);
+    if (!changed) {
+      return false;
+    }
+    customCardOrder = nextOrder.slice();
+    return true;
+  }
+
+  function moveCustomCardByDelta(card, delta) {
+    const index = customCardOrder.indexOf(card);
+    if (index === -1) {
+      return false;
+    }
+    const nextIndex = Math.max(0, Math.min(customCardOrder.length - 1, index + delta));
+    if (nextIndex === index) {
+      return false;
+    }
+    const nextOrder = customCardOrder.slice();
+    nextOrder.splice(index, 1);
+    nextOrder.splice(nextIndex, 0, card);
+    return reorderCustomCards(nextOrder);
+  }
+
+  function moveCustomCardToPosition(card, requestedPosition) {
+    const index = customCardOrder.indexOf(card);
+    if (index === -1) {
+      return false;
+    }
+    const nextIndex = Math.max(0, Math.min(customCardOrder.length - 1, requestedPosition - 1));
+    if (nextIndex === index) {
+      return false;
+    }
+    const nextOrder = customCardOrder.slice();
+    nextOrder.splice(index, 1);
+    nextOrder.splice(nextIndex, 0, card);
+    return reorderCustomCards(nextOrder);
+  }
+
+  async function persistAndRenderCustomOrder(cardToFocus = null) {
+    applyFiltersAndSorting({ anchorCard: cardToFocus, preserveScroll: false });
+    try {
+      const savedOrder = await persistDashboardStreamOrder();
+      const cardById = new Map(customCardOrder.map(card => [card.dataset.stream, card]));
+      if (Array.isArray(savedOrder) && savedOrder.length) {
+        customCardOrder = savedOrder.map(id => cardById.get(id)).filter(Boolean);
+      }
+      applyFiltersAndSorting({ anchorCard: cardToFocus, preserveScroll: false });
+    } catch (err) {
+      console.error('Failed to persist stream order', err);
+      showNotification((err && err.message) ? err.message : 'Failed to save stream order');
+    }
+  }
+
+  function updateLayoutEditorState() {
+    const customModeActive = currentSortMode === 'custom';
+    if (layoutEditToggle) {
+      layoutEditToggle.disabled = !customModeActive;
+      layoutEditToggle.hidden = false;
+      layoutEditToggle.setAttribute('aria-pressed', String(customModeActive && layoutEditMode));
+      layoutEditToggle.textContent = customModeActive && layoutEditMode ? 'Done Editing' : 'Edit Layout';
+    }
+    if (!customModeActive) {
+      layoutEditMode = false;
+    }
+    const slotMap = new Map(customCardOrder.map((card, index) => [card.dataset.stream, index + 1]));
+    const originalSlotMap = new Map(layoutEditOriginalOrder.map((streamId, index) => [streamId, index + 1]));
+    defaultCardOrder.forEach(card => {
+      const overlay = card.querySelector('.custom-layout-overlay');
+      const inputEl = card.querySelector('.custom-layout-slot-input');
+      const upBtn = card.querySelector('.layout-move-up');
+      const downBtn = card.querySelector('.layout-move-down');
+      const originBadge = card.querySelector('.custom-layout-origin-badge');
+      const originNumber = card.querySelector('.custom-layout-origin-number');
+      const streamId = card.dataset.stream;
+      const slot = slotMap.get(streamId) || (defaultCardOrder.indexOf(card) + 1);
+      const originalSlot = originalSlotMap.get(streamId) || slot;
+      if (inputEl) {
+        inputEl.value = String(slot);
+        inputEl.min = '1';
+        inputEl.max = String(customCardOrder.length || defaultCardOrder.length || 1);
+        inputEl.disabled = !(customModeActive && layoutEditMode);
+      }
+      if (originNumber) {
+        originNumber.textContent = String(originalSlot);
+      }
+      if (originBadge) {
+        originBadge.hidden = !(customModeActive && layoutEditMode);
+      }
+      if (upBtn) {
+        upBtn.disabled = !(customModeActive && layoutEditMode) || slot <= 1;
+      }
+      if (downBtn) {
+        downBtn.disabled = !(customModeActive && layoutEditMode) || slot >= customCardOrder.length;
+      }
+      if (overlay) {
+        overlay.hidden = !(customModeActive && layoutEditMode);
+      }
+      card.classList.toggle('layout-editing', customModeActive && layoutEditMode);
+      card.dataset.customSlot = String(slot);
+    });
+  }
+
+  function initStreamCardLayoutControls(card) {
+    const streamId = card.dataset.stream;
+    if (!streamId) {
+      return;
+    }
+    const upBtn = card.querySelector('.layout-move-up');
+    const downBtn = card.querySelector('.layout-move-down');
+    const inputEl = card.querySelector('.custom-layout-slot-input');
+    if (upBtn) {
+      upBtn.addEventListener('click', async () => {
+        if (!layoutEditMode || currentSortMode !== 'custom') {
+          return;
+        }
+        if (moveCustomCardByDelta(card, -1)) {
+          await persistAndRenderCustomOrder(card);
+        }
+      });
+    }
+    if (downBtn) {
+      downBtn.addEventListener('click', async () => {
+        if (!layoutEditMode || currentSortMode !== 'custom') {
+          return;
+        }
+        if (moveCustomCardByDelta(card, 1)) {
+          await persistAndRenderCustomOrder(card);
+        }
+      });
+    }
+    if (inputEl) {
+      const commitSlotInput = async () => {
+        if (!layoutEditMode || currentSortMode !== 'custom') {
+          return;
+        }
+        const requested = Number(inputEl.value);
+        const current = Number(card.dataset.customSlot || '0');
+        if (!Number.isFinite(requested)) {
+          inputEl.value = String(current || 1);
+          return;
+        }
+        if (moveCustomCardToPosition(card, requested)) {
+          await persistAndRenderCustomOrder(card);
+        } else {
+          inputEl.value = String(current || 1);
+          updateLayoutEditorState();
+        }
+      };
+      inputEl.addEventListener('change', commitSlotInput);
+      inputEl.addEventListener('blur', commitSlotInput);
+      inputEl.addEventListener('keydown', e => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          inputEl.blur();
+        }
+      });
+    }
+  }
 
   function applyFiltersAndSorting(options) {
     if (!dashboardGrid) {
@@ -2163,11 +2453,12 @@
     }
     const opts = (options && typeof options === 'object') ? options : {};
     const candidate = opts.anchorCard;
+    const preserveScroll = opts.preserveScroll !== false;
     const anchorCard = (candidate && candidate.nodeType === 1 && dashboardGrid.contains(candidate)) ? candidate : null;
     let anchorRect = null;
     let prevScrollY = 0;
     let prevScrollX = 0;
-    if (anchorCard) {
+    if (anchorCard && preserveScroll) {
       try {
         anchorRect = anchorCard.getBoundingClientRect();
       } catch (err) {
@@ -2184,17 +2475,17 @@
       card.dataset.matchesFilter = matches ? 'true' : 'false';
       card.style.display = matches ? '' : 'none';
     });
-    while (dashboardGrid.firstChild) {
-      dashboardGrid.removeChild(dashboardGrid.firstChild);
-    }
     if (currentSortMode === 'group') {
+      while (dashboardGrid.firstChild) {
+        dashboardGrid.removeChild(dashboardGrid.firstChild);
+      }
       renderGroupedCards();
     } else {
-      originalCardOrder.forEach(card => {
-        dashboardGrid.appendChild(card);
-      });
+      const orderedCards = currentSortMode === 'custom' ? customCardOrder : defaultCardOrder;
+      renderOrderedCardsInPlace(orderedCards);
     }
-    if (anchorCard && anchorRect) {
+    updateLayoutEditorState();
+    if (anchorCard && anchorRect && preserveScroll) {
       requestAnimationFrame(() => {
         if (!anchorCard.isConnected) {
           return;
@@ -2232,7 +2523,8 @@
     }
     const tagBuckets = new Map();
     const untagged = [];
-    originalCardOrder.forEach(card => {
+    const sourceOrder = customCardOrder.length ? customCardOrder : defaultCardOrder;
+    sourceOrder.forEach(card => {
       const tags = cardTagsMap.get(card) || [];
       if (tags.length) {
         const primary = tags[0];
@@ -5334,6 +5626,7 @@ function applyPicsumSettings(card, settings, opts = {}) {
       const streamId = card.dataset.stream;
       if (streamId) {
         applyMinimizedState(card, minimizedStreamSet.has(streamId));
+        initStreamCardLayoutControls(card);
       }
       initThumbnail(card);
       if (streamId) {
@@ -5889,10 +6182,39 @@ function applyPicsumSettings(card, settings, opts = {}) {
       }
     });
     syncMinimizedGridState();
-    originalCardOrder = Array.from(cardTagsMap.keys());
+    defaultCardOrder = Array.from(cardTagsMap.keys());
+    const cardById = new Map(defaultCardOrder.map(card => [card.dataset.stream, card]));
+    const customIds = Array.isArray(persistedCustomStreamOrder) ? persistedCustomStreamOrder : [];
+    const seenCustomIds = new Set();
+    customCardOrder = [];
+    customIds.forEach(streamId => {
+      if (!cardById.has(streamId) || seenCustomIds.has(streamId)) {
+        return;
+      }
+      seenCustomIds.add(streamId);
+      customCardOrder.push(cardById.get(streamId));
+    });
+    defaultCardOrder.forEach(card => {
+      const streamId = card.dataset.stream;
+      if (streamId && !seenCustomIds.has(streamId)) {
+        customCardOrder.push(card);
+      }
+    });
     renderTagManager();
     renderFilterChips();
-    currentSortMode = (sortSelect && sortSelect.value === 'group') ? 'group' : 'default';
+    const persistedSortMode = (() => {
+      try {
+        return localStorage.getItem(dashboardSortStorageKey) || '';
+      } catch (err) {
+        return '';
+      }
+    })();
+    currentSortMode = ['default', 'custom', 'group'].includes(persistedSortMode)
+      ? persistedSortMode
+      : ((sortSelect && ['default', 'custom', 'group'].includes(sortSelect.value)) ? sortSelect.value : 'default');
+    if (sortSelect) {
+      sortSelect.value = currentSortMode;
+    }
     applyFiltersAndSorting();
     if (tagFilterInput) {
       tagFilterInput.addEventListener('keydown', e => {
@@ -5907,8 +6229,29 @@ function applyPicsumSettings(card, settings, opts = {}) {
     }
     if (sortSelect) {
       sortSelect.addEventListener('change', e => {
-        currentSortMode = e.target.value === 'group' ? 'group' : 'default';
+        currentSortMode = ['default', 'custom', 'group'].includes(e.target.value) ? e.target.value : 'default';
+        try {
+          localStorage.setItem(dashboardSortStorageKey, currentSortMode);
+        } catch (err) {}
+        if (currentSortMode !== 'custom') {
+          layoutEditMode = false;
+        }
         applyFiltersAndSorting();
+      });
+    }
+    if (layoutEditToggle) {
+      layoutEditToggle.addEventListener('click', () => {
+        if (currentSortMode !== 'custom') {
+          return;
+        }
+        if (!layoutEditMode) {
+          layoutEditOriginalOrder = customCardOrder.map(card => card.dataset.stream);
+        }
+        layoutEditMode = !layoutEditMode;
+        if (!layoutEditMode) {
+          layoutEditOriginalOrder = [];
+        }
+        updateLayoutEditorState();
       });
     }
     if (createTagBtn) {
@@ -5922,6 +6265,11 @@ function applyPicsumSettings(card, settings, opts = {}) {
         }
       });
     }
+    refreshDashboardUpdateBadge();
+    if (updateStatusIntervalId) {
+      clearInterval(updateStatusIntervalId);
+    }
+    updateStatusIntervalId = window.setInterval(refreshDashboardUpdateBadge, UPDATE_STATUS_POLL_MS);
     renderSyncManager();
     updateSyncTimerSelects();
     if (syncTimerAddBtn) {

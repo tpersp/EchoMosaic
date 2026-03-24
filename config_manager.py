@@ -20,7 +20,12 @@ DEFAULT_ENV_PLACEHOLDERS: Dict[str, str] = {
 DEFAULT_CONFIG_FALLBACK: Dict[str, Any] = {
     "INSTALL_DIR": "/opt/echomosaic",
     "SERVICE_NAME": "echomosaic.service",
+    "UPDATE_CHANNEL": "release",
     "UPDATE_BRANCH": "main",
+    "REPO_SLUG": "tpersp/EchoMosaic",
+    "INSTALLED_VERSION": "",
+    "INSTALLED_COMMIT": "",
+    "RELEASE_CHECK_INTERVAL_SECS": 3600,
     "API_KEY": "",
     "AI_DEFAULT_MODEL": "stable_diffusion",
     "AI_DEFAULT_SAMPLER": "k_euler",
@@ -64,6 +69,40 @@ DEFAULT_CONFIG_FALLBACK: Dict[str, Any] = {
         "retention_days": 7,
     },
 }
+
+
+def normalize_update_configuration(data: Dict[str, Any]) -> Tuple[Dict[str, Any], bool]:
+    """Normalize update channel metadata and self-heal obvious dev installs."""
+
+    normalized = dict(data)
+    changed = False
+
+    branch = str(normalized.get("UPDATE_BRANCH") or "main").strip() or "main"
+    channel = str(normalized.get("UPDATE_CHANNEL") or "").strip().lower()
+    service_name = str(normalized.get("SERVICE_NAME") or "").strip().lower()
+    install_dir = str(normalized.get("INSTALL_DIR") or "").strip().lower()
+    install_basename = Path(install_dir).name.lower() if install_dir else ""
+
+    is_dev_install = (
+        branch == "dev"
+        or "echomosaic-dev" in service_name
+        or "echomosaic-dev" in install_basename
+    )
+
+    if channel not in {"branch", "release"}:
+        channel = "branch" if is_dev_install else "release"
+
+    effective_channel = "branch" if is_dev_install else channel
+
+    if normalized.get("UPDATE_BRANCH") != branch:
+        normalized["UPDATE_BRANCH"] = branch
+        changed = True
+
+    if normalized.get("UPDATE_CHANNEL") != effective_channel:
+        normalized["UPDATE_CHANNEL"] = effective_channel
+        changed = True
+
+    return normalized, changed
 
 
 @dataclass
@@ -179,6 +218,7 @@ def load_config(
     config_data = _load_json(config_path) or {}
 
     merged = _deep_merge(default_data, config_data)
+    merged, normalized_changed = normalize_update_configuration(merged)
     merged["MEDIA_PATHS"] = _normalize_media_paths(merged.get("MEDIA_PATHS"))
     merged["AI_MEDIA_PATHS"] = _normalize_media_paths(merged.get("AI_MEDIA_PATHS"), default="./ai_media")
 
@@ -186,8 +226,16 @@ def load_config(
     for key, value in env_overrides.items():
         merged[key] = value
 
+    merged, env_normalized_changed = normalize_update_configuration(merged)
     merged["MEDIA_PATHS"] = _normalize_media_paths(merged.get("MEDIA_PATHS"))
     merged["AI_MEDIA_PATHS"] = _normalize_media_paths(merged.get("AI_MEDIA_PATHS"), default="./ai_media")
+
+    if normalized_changed or env_normalized_changed:
+        persisted = dict(config_data)
+        persisted, persisted_changed = normalize_update_configuration(persisted)
+        if persisted_changed:
+            _write_json(Path(config_path), persisted)
+
     return merged
 
 

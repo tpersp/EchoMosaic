@@ -266,7 +266,7 @@ class YouTubeEmbedService:
         if not url_candidates:
             return None
         headers = {
-            "User-Agent": "EchoMosaic/1.0 (+https://github.com/dodenbear/EchoMosaic)",
+            "User-Agent": "EchoMosaic/1.0 (+https://github.com/tpersp/EchoMosaic)",
             "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
         }
         result: Optional[bool] = None

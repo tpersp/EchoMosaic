@@ -10,6 +10,7 @@ from flask import Blueprint
 def create_dashboard_blueprint(
     *,
     dashboard_handler: Callable[[], object],
+    update_status_handler: Callable[[], object],
     mosaic_streams_handler: Callable[[], object],
     render_stream_handler: Callable[[str], object],
     add_stream_handler: Callable[[], object],
@@ -19,12 +20,17 @@ def create_dashboard_blueprint(
     update_stream_settings_handler: Callable[[str], object],
     update_stream_timer_handler: Callable[[str], object],
     refresh_picsum_image_handler: Callable[[], object],
+    reorder_streams_handler: Callable[[], object],
 ) -> Blueprint:
     blueprint = Blueprint("dashboard_routes", __name__)
 
     @blueprint.route("/")
     def dashboard():
         return dashboard_handler()
+
+    @blueprint.route("/api/update_status", methods=["GET"])
+    def update_status():
+        return update_status_handler()
 
     @blueprint.route("/stream")
     def mosaic_streams():
@@ -61,5 +67,9 @@ def create_dashboard_blueprint(
     @blueprint.route("/picsum/refresh", methods=["POST"])
     def refresh_picsum_image():
         return refresh_picsum_image_handler()
+
+    @blueprint.route("/streams/reorder", methods=["POST"])
+    def reorder_streams():
+        return reorder_streams_handler()
 
     return blueprint

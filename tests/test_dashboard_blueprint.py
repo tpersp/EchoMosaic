@@ -10,6 +10,7 @@ def test_dashboard_blueprint_registers_expected_routes() -> None:
     app.register_blueprint(
         create_dashboard_blueprint(
             dashboard_handler=lambda: ("ok", 200),
+            update_status_handler=lambda: ("ok", 200),
             mosaic_streams_handler=lambda: ("ok", 200),
             render_stream_handler=lambda name: ("ok", 200),
             add_stream_handler=lambda: ("ok", 200),
@@ -19,11 +20,13 @@ def test_dashboard_blueprint_registers_expected_routes() -> None:
             update_stream_settings_handler=lambda stream_id: ("ok", 200),
             update_stream_timer_handler=lambda stream_id: ("ok", 200),
             refresh_picsum_image_handler=lambda: ("ok", 200),
+            reorder_streams_handler=lambda: ("ok", 200),
         )
     )
 
     endpoints = {rule.rule for rule in app.url_map.iter_rules()}
     assert "/" in endpoints
+    assert "/api/update_status" in endpoints
     assert "/stream" in endpoints
     assert "/stream/<name>" in endpoints
     assert "/streams" in endpoints
@@ -33,3 +36,4 @@ def test_dashboard_blueprint_registers_expected_routes() -> None:
     assert "/settings/<stream_id>" in endpoints
     assert "/api/timer/update/<stream_id>" in endpoints
     assert "/picsum/refresh" in endpoints
+    assert "/streams/reorder" in endpoints

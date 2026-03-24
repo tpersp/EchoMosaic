@@ -59,6 +59,7 @@ class StreamConfigService:
         sync_timers_key,
         ai_settings_key,
         ai_state_key,
+        stream_order_key,
         stream_runtime_lock,
         stream_runtime_state,
     ) -> None:
@@ -112,16 +113,42 @@ class StreamConfigService:
         self.sync_timers_key = sync_timers_key
         self.ai_settings_key = ai_settings_key
         self.ai_state_key = ai_state_key
+        self.stream_order_key = stream_order_key
         self.stream_runtime_lock = stream_runtime_lock
         self.stream_runtime_state = stream_runtime_state
+
+    def _get_stream_order(self) -> list[str]:
+        available = [key for key in self.settings.keys() if isinstance(key, str) and not key.startswith("_")]
+        available_set = set(available)
+        raw = self.settings.get(self.stream_order_key)
+        ordered: list[str] = []
+        seen: set[str] = set()
+        if isinstance(raw, list):
+            for entry in raw:
+                if not isinstance(entry, str):
+                    continue
+                stream_id = entry.strip()
+                if stream_id in available_set and stream_id not in seen:
+                    ordered.append(stream_id)
+                    seen.add(stream_id)
+        for stream_id in available:
+            if stream_id not in seen:
+                ordered.append(stream_id)
+        return ordered
+
+    def _set_stream_order(self, ordered_ids: list[str]) -> None:
+        self.settings[self.stream_order_key] = ordered_ids
 
     def create_stream(self) -> str:
         idx = 1
         while True:
             new_id = f"stream{idx}"
             if new_id not in self.settings:
+                ordered_ids = self._get_stream_order()
                 self.settings[new_id] = self.default_stream_config()
                 self.settings[new_id]["label"] = new_id.capitalize()
+                ordered_ids.append(new_id)
+                self._set_stream_order(ordered_ids)
                 self.update_stream_runtime_state(
                     new_id,
                     path=self.settings[new_id].get("selected_image"),
@@ -147,6 +174,7 @@ class StreamConfigService:
             self.ai_job_controls.pop(stream_id, None)
         self.cleanup_temp_outputs(stream_id)
         self.settings.pop(stream_id)
+        self._set_stream_order([item for item in self._get_stream_order() if item != stream_id])
         with self.stream_runtime_lock:
             self.stream_runtime_state.pop(stream_id, None)
         if self.playback_manager is not None:
@@ -158,6 +186,24 @@ class StreamConfigService:
             self.picsum_scheduler.remove(stream_id)
         self.safe_emit("streams_changed", {"action": "deleted", "stream_id": stream_id})
         return True
+
+    def reorder_streams(self, ordered_ids: list[str]) -> list[str]:
+        current = self._get_stream_order()
+        current_set = set(current)
+        requested: list[str] = []
+        seen: set[str] = set()
+        for entry in ordered_ids:
+            if not isinstance(entry, str):
+                continue
+            stream_id = entry.strip()
+            if stream_id in current_set and stream_id not in seen:
+                requested.append(stream_id)
+                seen.add(stream_id)
+        requested.extend([stream_id for stream_id in current if stream_id not in seen])
+        self._set_stream_order(requested)
+        self.save_settings_debounced()
+        self.safe_emit("streams_changed", {"action": "reordered", "stream_order": requested})
+        return requested
 
     def get_stream_settings_payload(self, stream_id: str) -> Dict[str, Any]:
         if stream_id not in self.settings:
