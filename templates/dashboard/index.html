@@ -84,6 +84,10 @@
         <option value="group">Group by Tag</option>
       </select>
     </div>
+    <div class="filter-group filter-group-layout">
+      <label for="layout-edit-toggle">Layout</label>
+      <button id="layout-edit-toggle" type="button" disabled aria-pressed="false">Edit Layout</button>
+    </div>
   </div>
 
   <div class="stream-card" id="tag-manager">
@@ -136,9 +140,6 @@
           </div>
         </div>
         <div class="card-actions">
-          <button class="reorder-handle" type="button" aria-label="Reorder stream" title="Drag to reorder">
-            <span aria-hidden="true">&#8645;</span>
-          </button>
           <button class="minimize-button" type="button" aria-pressed="false" aria-label="Minimize" title="Minimize">
             <span class="minimize-icon" aria-hidden="true"></span>
           </button>
@@ -149,6 +150,17 @@
               <button class="menu-remove" data-stream="{{ stream_id }}">Remove</button>
             </div>
           </div>
+        </div>
+      </div>
+
+      <div class="custom-layout-overlay" hidden>
+        <div class="custom-layout-slot-badge">
+          <span class="custom-layout-slot-number">1</span>
+        </div>
+        <div class="custom-layout-controls">
+          <button type="button" class="layout-move-up" aria-label="Move up" title="Move up">&#8593;</button>
+          <input type="number" class="layout-slot-input" min="1" step="1" inputmode="numeric" aria-label="Layout slot">
+          <button type="button" class="layout-move-down" aria-label="Move down" title="Move down">&#8595;</button>
         </div>
       </div>
 
@@ -1076,6 +1088,7 @@
   const tagFilterChips = document.getElementById('tag-filter-chips');
   const tagFilterInput = document.getElementById('tag-filter-input');
   const sortSelect = document.getElementById('sort-select');
+  const layoutEditToggle = document.getElementById('layout-edit-toggle');
   const dashboardSortStorageKey = 'dashboardSortMode';
   const persistedCustomStreamOrder = {{ custom_stream_order|tojson }};
   const tagManagerList = document.getElementById('tag-manager-list');
@@ -2163,79 +2176,7 @@
 
   let defaultCardOrder = [];
   let customCardOrder = [];
-  let draggingStreamCard = null;
-  let dragGhostCard = null;
-  let dragPlaceholderCard = null;
-  let dragPointerId = null;
-  let dragPointerX = null;
-  let dragPointerY = null;
-  let dragPointerOffsetX = 0;
-  let dragPointerOffsetY = 0;
-  let dragAutoScrollFrame = null;
-  let lastDragIntentKey = '';
-  let dragUpdateQueued = false;
-
-  function stopDragAutoScroll() {
-    if (dragAutoScrollFrame !== null) {
-      cancelAnimationFrame(dragAutoScrollFrame);
-      dragAutoScrollFrame = null;
-    }
-  }
-
-  function runDragAutoScroll() {
-    if (!draggingStreamCard || currentSortMode !== 'custom' || typeof dragPointerY !== 'number') {
-      dragAutoScrollFrame = null;
-      return;
-    }
-    const viewportHeight = window.innerHeight || document.documentElement.clientHeight || 0;
-    const edgeThreshold = Math.max(320, Math.round(viewportHeight * 0.32));
-    const maxStep = 40;
-    let delta = 0;
-    if (dragPointerY < edgeThreshold) {
-      delta = -Math.max(8, Math.round(((edgeThreshold - dragPointerY) / edgeThreshold) * maxStep));
-    } else if (dragPointerY > (viewportHeight - edgeThreshold)) {
-      delta = Math.max(8, Math.round(((dragPointerY - (viewportHeight - edgeThreshold)) / edgeThreshold) * maxStep));
-    }
-    if (delta !== 0) {
-      window.scrollBy(0, delta);
-    }
-    dragAutoScrollFrame = requestAnimationFrame(runDragAutoScroll);
-  }
-
-  function ensureDragAutoScroll() {
-    if (dragAutoScrollFrame === null) {
-      dragAutoScrollFrame = requestAnimationFrame(runDragAutoScroll);
-    }
-  }
-
-  function clearDragMarkers() {
-    document.querySelectorAll('.stream-card.drag-over-top, .stream-card.drag-over-bottom')
-      .forEach(card => card.classList.remove('drag-over-top', 'drag-over-bottom'));
-  }
-
-  function clearDraggingState() {
-    document.querySelectorAll('.stream-card.is-dragging, .stream-card.is-drag-source')
-      .forEach(card => card.classList.remove('is-dragging', 'is-drag-source'));
-  }
-
-  function positionDraggedCard() {
-    if (!dragGhostCard || typeof dragPointerX !== 'number' || typeof dragPointerY !== 'number') {
-      return;
-    }
-    dragGhostCard.style.left = `${dragPointerX - dragPointerOffsetX}px`;
-    dragGhostCard.style.top = `${dragPointerY - dragPointerOffsetY}px`;
-  }
-
-  function queueDragPositionUpdate() {
-    if (dragUpdateQueued) {
-      return;
-    }
-    dragUpdateQueued = true;
-    requestAnimationFrame(() => {
-      dragUpdateQueued = false;
-      positionDraggedCard();
-    });
-  }
+  let layoutEditMode = false;
 
   function renderOrderedCardsInPlace(orderedCards) {
     if (!dashboardGrid) {
@@ -2245,21 +2186,14 @@
     orderedCards.forEach(card => {
       if (card && card.parentNode === dashboardGrid) {
         firstRects.set(card, card.getBoundingClientRect());
-      } else if (draggingStreamCard && dragPlaceholderCard && card === draggingStreamCard && dragPlaceholderCard.parentNode === dashboardGrid) {
-        firstRects.set(dragPlaceholderCard, dragPlaceholderCard.getBoundingClientRect());
       }
     });
     orderedCards.forEach(card => {
-      if (draggingStreamCard && dragPlaceholderCard && card === draggingStreamCard) {
-        dashboardGrid.appendChild(dragPlaceholderCard);
-      } else if (card && card.parentNode === dashboardGrid) {
+      if (card && card.parentNode === dashboardGrid) {
         dashboardGrid.appendChild(card);
       }
     });
-    const animatedCards = orderedCards.map(card => (
-      draggingStreamCard && dragPlaceholderCard && card === draggingStreamCard ? dragPlaceholderCard : card
-    ));
-    animatedCards.forEach(card => {
+    orderedCards.forEach(card => {
       if (!card || card.parentNode !== dashboardGrid) {
         return;
       }
@@ -2282,14 +2216,11 @@
       });
       const clearReflow = () => {
         card.classList.remove('is-reflowing');
-        if (!card.classList.contains('is-dragging')) {
-          card.style.transform = '';
-        }
+        card.style.transform = '';
         card.removeEventListener('transitionend', clearReflow);
       };
       card.addEventListener('transitionend', clearReflow);
     });
-    queueDragPositionUpdate();
   }
 
   function currentOrderedStreamIds() {
@@ -2312,243 +2243,161 @@
     return data.stream_order || streamOrder;
   }
 
-  function moveStreamCardBeforeTarget(draggedCard, targetCard, beforeTarget) {
-    if (!draggedCard || !targetCard || draggedCard === targetCard) {
+  function reorderCustomCards(nextOrder) {
+    if (!Array.isArray(nextOrder) || nextOrder.length !== customCardOrder.length) {
       return false;
     }
-    const fromIndex = customCardOrder.indexOf(draggedCard);
-    const targetIndex = customCardOrder.indexOf(targetCard);
-    if (fromIndex === -1 || targetIndex === -1) {
-      return false;
-    }
-    const nextOrder = customCardOrder.slice();
-    nextOrder.splice(fromIndex, 1);
-    const adjustedTargetIndex = nextOrder.indexOf(targetCard);
-    const insertIndex = beforeTarget ? adjustedTargetIndex : adjustedTargetIndex + 1;
-    nextOrder.splice(insertIndex, 0, draggedCard);
     const changed = nextOrder.some((card, idx) => card !== customCardOrder[idx]);
     if (!changed) {
       return false;
     }
-    customCardOrder = nextOrder;
+    customCardOrder = nextOrder.slice();
     return true;
   }
 
-  function moveStreamCardToEnd(draggedCard) {
-    if (!draggedCard) {
+  function moveCustomCardByDelta(card, delta) {
+    const index = customCardOrder.indexOf(card);
+    if (index === -1) {
       return false;
     }
-    const fromIndex = customCardOrder.indexOf(draggedCard);
-    if (fromIndex === -1 || fromIndex === customCardOrder.length - 1) {
+    const nextIndex = Math.max(0, Math.min(customCardOrder.length - 1, index + delta));
+    if (nextIndex === index) {
       return false;
     }
     const nextOrder = customCardOrder.slice();
-    nextOrder.splice(fromIndex, 1);
-    nextOrder.push(draggedCard);
-    customCardOrder = nextOrder;
-    return true;
+    nextOrder.splice(index, 1);
+    nextOrder.splice(nextIndex, 0, card);
+    return reorderCustomCards(nextOrder);
   }
 
-  function updateDragPosition(clientX, clientY) {
-    if (!draggingStreamCard || currentSortMode !== 'custom') {
-      return;
+  function moveCustomCardToPosition(card, requestedPosition) {
+    const index = customCardOrder.indexOf(card);
+    if (index === -1) {
+      return false;
     }
-    dragPointerX = clientX;
-    dragPointerY = clientY;
-    ensureDragAutoScroll();
-    clearDragMarkers();
-    if (dragGhostCard) {
-      dragGhostCard.classList.add('is-dragging');
+    const nextIndex = Math.max(0, Math.min(customCardOrder.length - 1, requestedPosition - 1));
+    if (nextIndex === index) {
+      return false;
     }
-    queueDragPositionUpdate();
-
-    const target = document.elementFromPoint(clientX, clientY);
-    const targetCard = target instanceof Element ? target.closest('.stream-card') : null;
-    if (targetCard && targetCard !== draggingStreamCard) {
-      const rect = targetCard.getBoundingClientRect();
-      const sameRow = Math.abs(clientY - (rect.top + rect.height / 2)) <= (rect.height * 0.45);
-      let beforeTarget = null;
-      if (sameRow) {
-        if (clientX <= rect.left + rect.width * 0.35) {
-          beforeTarget = true;
-        } else if (clientX >= rect.left + rect.width * 0.65) {
-          beforeTarget = false;
-        }
-      } else {
-        if (clientY <= rect.top + rect.height * 0.35) {
-          beforeTarget = true;
-        } else if (clientY >= rect.top + rect.height * 0.65) {
-          beforeTarget = false;
-        }
-      }
-      if (beforeTarget === null) {
-        lastDragIntentKey = '';
-        return;
-      }
-      const intentKey = `${targetCard.dataset.stream || 'unknown'}:${beforeTarget ? 'before' : 'after'}`;
-      if (intentKey === lastDragIntentKey) {
-        clearDragMarkers();
-        if (dragGhostCard) {
-          dragGhostCard.classList.add('is-dragging');
-        }
-        targetCard.classList.add(beforeTarget ? 'drag-over-top' : 'drag-over-bottom');
-        return;
-      }
-      lastDragIntentKey = intentKey;
-      targetCard.classList.add(beforeTarget ? 'drag-over-top' : 'drag-over-bottom');
-      if (moveStreamCardBeforeTarget(draggingStreamCard, targetCard, beforeTarget)) {
-        applyFiltersAndSorting({ anchorCard: draggingStreamCard, preserveScroll: false });
-      }
-      return;
-    }
-
-    if (dashboardGrid && target instanceof Element && dashboardGrid.contains(target)) {
-      if (lastDragIntentKey === '__end__') {
-        return;
-      }
-      lastDragIntentKey = '__end__';
-      if (moveStreamCardToEnd(draggingStreamCard)) {
-        applyFiltersAndSorting({ anchorCard: draggingStreamCard, preserveScroll: false });
-      }
-      return;
-    }
-
-    lastDragIntentKey = '';
+    const nextOrder = customCardOrder.slice();
+    nextOrder.splice(index, 1);
+    nextOrder.splice(nextIndex, 0, card);
+    return reorderCustomCards(nextOrder);
   }
 
-  async function finishStreamCardDrag() {
-    if (!draggingStreamCard) {
-      stopDragAutoScroll();
-      if (dragGhostCard && dragGhostCard.parentNode) {
-        dragGhostCard.remove();
-      }
-      dragGhostCard = null;
-      if (dragPlaceholderCard && dragPlaceholderCard.parentNode) {
-        dragPlaceholderCard.remove();
-      }
-      dragPlaceholderCard = null;
-      dragPointerId = null;
-      dragPointerX = null;
-      dragPointerY = null;
-      dragPointerOffsetX = 0;
-      dragPointerOffsetY = 0;
-      lastDragIntentKey = '';
-      dragUpdateQueued = false;
-      document.body.classList.remove('is-stream-reordering');
-      clearDragMarkers();
-      clearDraggingState();
-      return;
-    }
+  async function persistAndRenderCustomOrder(cardToFocus = null) {
+    applyFiltersAndSorting({ anchorCard: cardToFocus, preserveScroll: false });
     try {
-      await persistDashboardStreamOrder();
+      const savedOrder = await persistDashboardStreamOrder();
+      const cardById = new Map(customCardOrder.map(card => [card.dataset.stream, card]));
+      if (Array.isArray(savedOrder) && savedOrder.length) {
+        customCardOrder = savedOrder.map(id => cardById.get(id)).filter(Boolean);
+      }
+      applyFiltersAndSorting({ anchorCard: cardToFocus, preserveScroll: false });
     } catch (err) {
       console.error('Failed to persist stream order', err);
       showNotification((err && err.message) ? err.message : 'Failed to save stream order');
-    } finally {
-      stopDragAutoScroll();
-      if (dragGhostCard && dragGhostCard.parentNode) {
-        dragGhostCard.remove();
-      }
-      dragGhostCard = null;
-      if (dragPlaceholderCard && dragPlaceholderCard.parentNode) {
-        dragPlaceholderCard.remove();
-      }
-      dragPlaceholderCard = null;
-      if (dashboardGrid && draggingStreamCard.parentNode !== dashboardGrid) {
-        dashboardGrid.appendChild(draggingStreamCard);
-      }
-      draggingStreamCard.style.display = '';
-      dragPointerId = null;
-      dragPointerX = null;
-      dragPointerY = null;
-      dragPointerOffsetX = 0;
-      dragPointerOffsetY = 0;
-      lastDragIntentKey = '';
-      dragUpdateQueued = false;
-      document.body.classList.remove('is-stream-reordering');
-      clearDragMarkers();
-      clearDraggingState();
-      applyFiltersAndSorting({ preserveScroll: false });
-      draggingStreamCard = null;
     }
   }
 
-  function initStreamCardReorder(card) {
-    const handle = card.querySelector('.reorder-handle');
+  function updateLayoutEditorState() {
+    const customModeActive = currentSortMode === 'custom';
+    if (layoutEditToggle) {
+      layoutEditToggle.disabled = !customModeActive;
+      layoutEditToggle.hidden = false;
+      layoutEditToggle.setAttribute('aria-pressed', String(customModeActive && layoutEditMode));
+      layoutEditToggle.textContent = customModeActive && layoutEditMode ? 'Done Editing' : 'Edit Layout';
+    }
+    if (!customModeActive) {
+      layoutEditMode = false;
+    }
+    const slotMap = new Map(customCardOrder.map((card, index) => [card.dataset.stream, index + 1]));
+    defaultCardOrder.forEach(card => {
+      const overlay = card.querySelector('.custom-layout-overlay');
+      const numberEl = card.querySelector('.custom-layout-slot-number');
+      const inputEl = card.querySelector('.layout-slot-input');
+      const upBtn = card.querySelector('.layout-move-up');
+      const downBtn = card.querySelector('.layout-move-down');
+      const streamId = card.dataset.stream;
+      const slot = slotMap.get(streamId) || (defaultCardOrder.indexOf(card) + 1);
+      if (numberEl) {
+        numberEl.textContent = String(slot);
+      }
+      if (inputEl) {
+        inputEl.value = String(slot);
+        inputEl.min = '1';
+        inputEl.max = String(customCardOrder.length || defaultCardOrder.length || 1);
+        inputEl.disabled = !(customModeActive && layoutEditMode);
+      }
+      if (upBtn) {
+        upBtn.disabled = !(customModeActive && layoutEditMode) || slot <= 1;
+      }
+      if (downBtn) {
+        downBtn.disabled = !(customModeActive && layoutEditMode) || slot >= customCardOrder.length;
+      }
+      if (overlay) {
+        overlay.hidden = !(customModeActive && layoutEditMode);
+      }
+      card.classList.toggle('layout-editing', customModeActive && layoutEditMode);
+      card.dataset.customSlot = String(slot);
+    });
+  }
+
+  function initStreamCardLayoutControls(card) {
     const streamId = card.dataset.stream;
-    if (!handle || !streamId) {
+    if (!streamId) {
       return;
     }
-    handle.addEventListener('pointerdown', (event) => {
-      if (currentSortMode !== 'custom' || event.button !== 0) {
-        return;
-      }
-      event.preventDefault();
-      try {
-        handle.setPointerCapture(event.pointerId);
-      } catch (err) {}
-      const cardRect = card.getBoundingClientRect();
-      draggingStreamCard = card;
-      dragGhostCard = card.cloneNode(true);
-      dragGhostCard.classList.add('is-dragging');
-      dragGhostCard.style.width = `${cardRect.width}px`;
-      dragGhostCard.style.height = `${cardRect.height}px`;
-      document.body.appendChild(dragGhostCard);
-      dragPlaceholderCard = document.createElement('div');
-      dragPlaceholderCard.className = 'stream-card stream-card-placeholder';
-      dragPlaceholderCard.style.width = `${cardRect.width}px`;
-      dragPlaceholderCard.style.height = `${cardRect.height}px`;
-      dragPointerId = event.pointerId;
-      dragPointerX = event.clientX;
-      dragPointerY = event.clientY;
-      dragPointerOffsetX = event.clientX - cardRect.left;
-      dragPointerOffsetY = event.clientY - cardRect.top;
-      lastDragIntentKey = '';
-      document.body.classList.add('is-stream-reordering');
-      card.insertAdjacentElement('afterend', dragPlaceholderCard);
-      draggingStreamCard.classList.add('is-drag-source');
-      draggingStreamCard.style.display = 'none';
-      if (draggingStreamCard.parentNode === dashboardGrid) {
-        dashboardGrid.removeChild(draggingStreamCard);
-      }
-      clearDragMarkers();
-      queueDragPositionUpdate();
-      ensureDragAutoScroll();
-      const onPointerMove = (moveEvent) => {
-        if (!draggingStreamCard || moveEvent.pointerId !== dragPointerId) {
+    const upBtn = card.querySelector('.layout-move-up');
+    const downBtn = card.querySelector('.layout-move-down');
+    const inputEl = card.querySelector('.layout-slot-input');
+    if (upBtn) {
+      upBtn.addEventListener('click', async () => {
+        if (!layoutEditMode || currentSortMode !== 'custom') {
           return;
         }
-        moveEvent.preventDefault();
-        updateDragPosition(moveEvent.clientX, moveEvent.clientY);
-      };
-      const onPointerUp = async (upEvent) => {
-        if (upEvent.pointerId !== dragPointerId) {
+        if (moveCustomCardByDelta(card, -1)) {
+          await persistAndRenderCustomOrder(card);
+        }
+      });
+    }
+    if (downBtn) {
+      downBtn.addEventListener('click', async () => {
+        if (!layoutEditMode || currentSortMode !== 'custom') {
           return;
         }
-        cleanupPointerListeners();
-        await finishStreamCardDrag();
-      };
-      const onPointerCancel = async (cancelEvent) => {
-        if (cancelEvent.pointerId !== dragPointerId) {
+        if (moveCustomCardByDelta(card, 1)) {
+          await persistAndRenderCustomOrder(card);
+        }
+      });
+    }
+    if (inputEl) {
+      const commitSlotInput = async () => {
+        if (!layoutEditMode || currentSortMode !== 'custom') {
           return;
         }
-        cleanupPointerListeners();
-        await finishStreamCardDrag();
+        const requested = Number(inputEl.value);
+        const current = Number(card.dataset.customSlot || '0');
+        if (!Number.isFinite(requested)) {
+          inputEl.value = String(current || 1);
+          return;
+        }
+        if (moveCustomCardToPosition(card, requested)) {
+          await persistAndRenderCustomOrder(card);
+        } else {
+          inputEl.value = String(current || 1);
+          updateLayoutEditorState();
+        }
       };
-      const cleanupPointerListeners = () => {
-        try {
-          if (dragPointerId !== null && handle.hasPointerCapture && handle.hasPointerCapture(dragPointerId)) {
-            handle.releasePointerCapture(dragPointerId);
-          }
-        } catch (err) {}
-        document.removeEventListener('pointermove', onPointerMove, true);
-        document.removeEventListener('pointerup', onPointerUp, true);
-        document.removeEventListener('pointercancel', onPointerCancel, true);
-      };
-      document.addEventListener('pointermove', onPointerMove, true);
-      document.addEventListener('pointerup', onPointerUp, true);
-      document.addEventListener('pointercancel', onPointerCancel, true);
-    });
+      inputEl.addEventListener('change', commitSlotInput);
+      inputEl.addEventListener('blur', commitSlotInput);
+      inputEl.addEventListener('keydown', e => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          inputEl.blur();
+        }
+      });
+    }
   }
 
   function applyFiltersAndSorting(options) {
@@ -2588,6 +2437,7 @@
       const orderedCards = currentSortMode === 'custom' ? customCardOrder : defaultCardOrder;
       renderOrderedCardsInPlace(orderedCards);
     }
+    updateLayoutEditorState();
     if (anchorCard && anchorRect && preserveScroll) {
       requestAnimationFrame(() => {
         if (!anchorCard.isConnected) {
@@ -5729,7 +5579,7 @@ function applyPicsumSettings(card, settings, opts = {}) {
       const streamId = card.dataset.stream;
       if (streamId) {
         applyMinimizedState(card, minimizedStreamSet.has(streamId));
-        initStreamCardReorder(card);
+        initStreamCardLayoutControls(card);
       }
       initThumbnail(card);
       if (streamId) {
@@ -6336,7 +6186,19 @@ function applyPicsumSettings(card, settings, opts = {}) {
         try {
           localStorage.setItem(dashboardSortStorageKey, currentSortMode);
         } catch (err) {}
+        if (currentSortMode !== 'custom') {
+          layoutEditMode = false;
+        }
         applyFiltersAndSorting();
+      });
+    }
+    if (layoutEditToggle) {
+      layoutEditToggle.addEventListener('click', () => {
+        if (currentSortMode !== 'custom') {
+          return;
+        }
+        layoutEditMode = !layoutEditMode;
+        updateLayoutEditorState();
       });
     }
     if (createTagBtn) {

@@ -228,6 +228,14 @@ a {
   --card-min: 220px;
 }
 
+.filter-group-layout {
+  align-self: end;
+}
+
+.filter-group-layout button {
+  min-width: 112px;
+}
+
 .dashboard-grid.compact-grid .stream-card:not(.is-minimized) {
   grid-column: span 2;
 }
@@ -806,59 +814,73 @@ a {
   gap: 0.4rem;
   margin-left: auto;
 }
-.reorder-handle {
-  background: var(--surface-alt);
-  border: 1px solid var(--border);
-  color: var(--text);
-  border-radius: 6px;
-  width: 28px;
-  height: 28px;
-  padding: 0;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  cursor: grab;
-  touch-action: none;
-  user-select: none;
-}
-.reorder-handle:hover {
-  border-color: var(--accent);
-  color: var(--accent);
-}
-.reorder-handle:active {
-  cursor: grabbing;
-}
-.stream-card.is-dragging {
-  opacity: 0.96;
-  pointer-events: none;
-  position: fixed;
-  z-index: 1000;
-  margin: 0;
-  box-shadow: 0 0 0 2px var(--accent), 0 16px 32px rgba(0, 0, 0, 0.34);
-  transform: rotate(1deg) scale(1.02);
-  transition: box-shadow 0.12s ease, transform 0.12s ease, opacity 0.12s ease;
-}
-.stream-card.is-drag-source {
-  visibility: hidden;
-}
-.stream-card-placeholder {
-  border: 1px dashed var(--accent);
-  background: color-mix(in srgb, var(--surface-alt) 72%, transparent);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 45%, transparent);
-}
 .stream-card.is-reflowing {
   transition: transform 0.18s ease;
 }
-.stream-card.drag-over-top {
-  border-top: 2px solid var(--accent);
+.custom-layout-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  padding: 0.8rem;
+  background: color-mix(in srgb, var(--surface) 38%, transparent);
+  backdrop-filter: blur(10px) saturate(1.1);
+  -webkit-backdrop-filter: blur(10px) saturate(1.1);
+  z-index: 2;
+  pointer-events: none;
 }
-.stream-card.drag-over-bottom {
-  border-bottom: 2px solid var(--accent);
+.stream-card.layout-editing .card-header {
+  position: relative;
+  z-index: 4;
 }
-body.is-stream-reordering,
-body.is-stream-reordering * {
-  user-select: none;
-  cursor: grabbing !important;
+.stream-card.layout-editing .thumbnail-wrapper,
+.stream-card.layout-editing .form-grid {
+  opacity: 0.32;
+  transition: opacity 0.18s ease;
+}
+.custom-layout-slot-badge {
+  align-self: center;
+  min-width: 96px;
+  min-height: 96px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 22px;
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--border));
+  background: color-mix(in srgb, var(--surface-alt) 56%, transparent);
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.24);
+}
+.custom-layout-slot-number {
+  font-size: clamp(2rem, 4vw, 3rem);
+  font-weight: 700;
+  line-height: 1;
+  color: var(--text);
+}
+.custom-layout-controls {
+  align-self: center;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.5rem;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--border));
+  background: color-mix(in srgb, var(--surface) 72%, transparent);
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.24);
+  pointer-events: auto;
+}
+.custom-layout-controls button {
+  min-width: 34px;
+  min-height: 34px;
+  border-radius: 999px;
+  font-size: 1rem;
+  padding: 0;
+}
+.layout-slot-input {
+  width: 72px;
+  text-align: center;
+  font-weight: 700;
+  font-size: 1rem;
 }
 .minimize-button {
   background: var(--surface-alt);
