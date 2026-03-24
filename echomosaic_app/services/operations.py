@@ -429,7 +429,10 @@ class OperationsService:
                     info["previous_commit"] = last.get("from")
                     previous = last.get("from")
                     if previous:
-                        prev_desc = safe(["git", "log", "-1", previous, "--pretty=%h %s (%cr)"]) or previous[:7]
+                        prev_desc = self._git_safe(
+                            repo_path,
+                            ["git", "log", "-1", previous, "--pretty=%h %s (%cr)"],
+                        ) or previous[:7]
                     else:
                         prev_desc = None
                     info["previous_desc"] = prev_desc
