@@ -805,6 +805,16 @@ a {
   font-size: 0.75rem;
   padding: 0.15rem 0.4rem;
 }
+.nav-update-badge {
+  display: inline-block;
+  width: 0.55rem;
+  height: 0.55rem;
+  margin-left: 0.38rem;
+  border-radius: 999px;
+  background: #ff5a4f;
+  box-shadow: 0 0 0 2px color-mix(in srgb, #ff5a4f 24%, transparent);
+  vertical-align: middle;
+}
 .stream-card h2 { margin: 0; font-size: 1.05rem; }
 .stream-card h2 a { color: var(--text); text-decoration: none; }
 /* Card menu (burger) */

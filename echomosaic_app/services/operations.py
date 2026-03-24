@@ -9,6 +9,9 @@ import secrets
 import shutil
 import subprocess
 import threading
+import time
+import urllib.error
+import urllib.request
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
@@ -32,6 +35,8 @@ class OperationsService:
         set_update_job_active: Callable[[bool], bool],
         run_update_job: Callable[[str, str, str, Optional[str]], None],
         logger,
+        fetch_json: Optional[Callable[[str], Any]] = None,
+        time_fn: Optional[Callable[[], float]] = None,
     ) -> None:
         self.load_config = load_config
         self.backup_dirname = backup_dirname
@@ -43,6 +48,87 @@ class OperationsService:
         self.set_update_job_active = set_update_job_active
         self.run_update_job = run_update_job
         self.logger = logger
+        self.fetch_json = fetch_json or self._fetch_json
+        self.time_fn = time_fn or time.time
+        self._release_status_cache: Dict[str, Dict[str, Any]] = {}
+
+    def _fetch_json(self, url: str) -> Any:
+        request = urllib.request.Request(
+            url,
+            headers={
+                "Accept": "application/vnd.github+json",
+                "User-Agent": "EchoMosaic-UpdateChecker/1.0",
+            },
+        )
+        with urllib.request.urlopen(request, timeout=8) as response:
+            payload = response.read().decode("utf-8")
+        return json.loads(payload)
+
+    def _git_safe(self, repo_path: str, cmd: List[str]) -> Optional[str]:
+        try:
+            return subprocess.check_output(cmd, cwd=repo_path, stderr=subprocess.STDOUT).decode().strip()
+        except Exception:
+            return None
+
+    @staticmethod
+    def _normalize_version(value: Any) -> str:
+        return str(value or "").strip()
+
+    @staticmethod
+    def _version_key(value: str) -> Tuple[int, ...]:
+        matches = re.findall(r"\d+", value or "")
+        if not matches:
+            return tuple()
+        return tuple(int(part) for part in matches)
+
+    def _read_release_status(self, cfg: Dict[str, Any], repo_path: str) -> Dict[str, Any]:
+        repo_slug = str(cfg.get("REPO_SLUG") or "tpersp/EchoMosaic").strip()
+        cache_ttl = max(60, int(cfg.get("RELEASE_CHECK_INTERVAL_SECS") or 3600))
+        cached = self._release_status_cache.get(repo_slug)
+        now = float(self.time_fn())
+        if cached and (now - cached.get("fetched_at", 0.0)) < cache_ttl:
+            return dict(cached["payload"])
+
+        installed_version = self._normalize_version(
+            cfg.get("INSTALLED_VERSION")
+            or self._git_safe(repo_path, ["git", "describe", "--tags", "--exact-match", "HEAD"])
+            or self._git_safe(repo_path, ["git", "describe", "--tags", "--abbrev=0"])
+        )
+        installed_commit = self._normalize_version(
+            cfg.get("INSTALLED_COMMIT")
+            or self._git_safe(repo_path, ["git", "rev-parse", "HEAD"])
+        )
+        payload: Dict[str, Any] = {
+            "channel": "release",
+            "repo_slug": repo_slug,
+            "installed_version": installed_version,
+            "installed_commit": installed_commit,
+            "current_desc": installed_version or (installed_commit[:7] if installed_commit else ""),
+            "update_available": False,
+            "latest_version": "",
+            "latest_release_url": "",
+            "release_check_ok": False,
+        }
+        api_url = f"https://api.github.com/repos/{repo_slug}/releases/latest"
+        try:
+            release = self.fetch_json(api_url) or {}
+            latest_version = self._normalize_version(release.get("tag_name"))
+            payload["latest_version"] = latest_version
+            payload["latest_release_url"] = self._normalize_version(release.get("html_url"))
+            payload["release_name"] = self._normalize_version(release.get("name")) or latest_version
+            payload["remote_desc"] = payload["release_name"]
+            payload["release_check_ok"] = True
+            if latest_version:
+                if installed_version:
+                    payload["update_available"] = self._version_key(latest_version) > self._version_key(installed_version)
+                else:
+                    payload["update_available"] = True
+        except Exception as exc:
+            self.logger.warning("Unable to query latest release for %s: %s", repo_slug, exc)
+            payload["release_error"] = str(exc)
+
+        self._release_status_cache[repo_slug] = {"fetched_at": now, "payload": dict(payload)}
+        return payload
 
     def repo_path_from_config(self, cfg: Optional[Dict[str, Any]] = None) -> str:
         cfg = cfg or self.load_config()
@@ -303,31 +389,32 @@ class OperationsService:
     def read_update_info(self, cfg: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         cfg = cfg or self.load_config()
         repo_path = self.repo_path_from_config(cfg)
+        update_channel = str(cfg.get("UPDATE_CHANNEL") or "branch").strip().lower()
         branch = cfg.get("UPDATE_BRANCH", "main")
-        info = {"branch": branch}
+        info = {"branch": branch, "channel": update_channel}
 
-        def safe(cmd):
-            try:
-                return subprocess.check_output(cmd, cwd=repo_path, stderr=subprocess.STDOUT).decode().strip()
-            except Exception:
-                return None
-
-        current = safe(["git", "rev-parse", "HEAD"]) or ""
-        current_short = safe(["git", "rev-parse", "--short", "HEAD"]) or ""
-        current_desc = safe(["git", "log", "-1", "--pretty=%h %s (%cr)"]) or current_short
-        _ = safe(["git", "fetch", "--quiet"])
-        remote = safe(["git", "rev-parse", f"origin/{branch}"]) or ""
-        remote_short = remote[:7] if remote else ""
-        remote_desc = safe(["git", "log", "-1", f"origin/{branch}", "--pretty=%h %s (%cr)"]) or remote_short
-        info.update(
-            {
-                "current_commit": current,
-                "current_desc": current_desc,
-                "remote_commit": remote,
-                "remote_desc": remote_desc,
-                "update_available": bool(current and remote and current != remote),
-            }
-        )
+        if update_channel == "release":
+            info.update(self._read_release_status(cfg, repo_path))
+        else:
+            current = self._git_safe(repo_path, ["git", "rev-parse", "HEAD"]) or ""
+            current_short = self._git_safe(repo_path, ["git", "rev-parse", "--short", "HEAD"]) or ""
+            current_desc = self._git_safe(repo_path, ["git", "log", "-1", "--pretty=%h %s (%cr)"]) or current_short
+            _ = self._git_safe(repo_path, ["git", "fetch", "--quiet"])
+            remote = self._git_safe(repo_path, ["git", "rev-parse", f"origin/{branch}"]) or ""
+            remote_short = remote[:7] if remote else ""
+            remote_desc = self._git_safe(repo_path, ["git", "log", "-1", f"origin/{branch}", "--pretty=%h %s (%cr)"]) or remote_short
+            info.update(
+                {
+                    "current_commit": current,
+                    "current_desc": current_desc,
+                    "remote_commit": remote,
+                    "remote_desc": remote_desc,
+                    "installed_commit": self._normalize_version(cfg.get("INSTALLED_COMMIT") or current),
+                    "installed_version": self._normalize_version(cfg.get("INSTALLED_VERSION") or branch),
+                    "latest_version": self._normalize_version(cfg.get("INSTALLED_VERSION") or branch),
+                    "update_available": bool(current and remote and current != remote),
+                }
+            )
 
         history_path = os.path.join(repo_path, "update_history.json")
         if os.path.exists(history_path):

@@ -44,12 +44,16 @@ def get_value(key: str, default: str) -> str:
 
 print(get_value("INSTALL_DIR", "/opt/echomosaic"))
 print(get_value("SERVICE_NAME", "echomosaic.service"))
+print(get_value("UPDATE_CHANNEL", "branch"))
 print(get_value("UPDATE_BRANCH", "main"))
+print(get_value("REPO_SLUG", "tpersp/EchoMosaic"))
 PY
 )
   INSTALL_DIR="${CONFIG_VALUES[0]:-/opt/echomosaic}"
   SERVICE_NAME="${CONFIG_VALUES[1]:-echomosaic.service}"
-  BRANCH="${CONFIG_VALUES[2]:-main}"
+  UPDATE_CHANNEL="${CONFIG_VALUES[2]:-branch}"
+  BRANCH="${CONFIG_VALUES[3]:-main}"
+  REPO_SLUG="${CONFIG_VALUES[4]:-tpersp/EchoMosaic}"
 else
   if ! command -v jq >/dev/null 2>&1; then
     echo "Error: python or jq is required to read $CONFIG_FILE."
@@ -57,7 +61,9 @@ else
   fi
   INSTALL_DIR=$(jq -r '.INSTALL_DIR' "$CONFIG_FILE")
   SERVICE_NAME=$(jq -r '.SERVICE_NAME' "$CONFIG_FILE")
+  UPDATE_CHANNEL=$(jq -r '.UPDATE_CHANNEL // "branch"' "$CONFIG_FILE")
   BRANCH=$(jq -r '.UPDATE_BRANCH' "$CONFIG_FILE")
+  REPO_SLUG=$(jq -r '.REPO_SLUG // "tpersp/EchoMosaic"' "$CONFIG_FILE")
 fi
 
 if ! git -C "$INSTALL_DIR" rev-parse --is-inside-work-tree &>/dev/null; then
@@ -169,11 +175,44 @@ PY
 
 trap restore_and_cleanup EXIT
 
+if [ "$UPDATE_CHANNEL" = "release" ]; then
+  echo -e "\nResolving latest release from GitHub..."
+  TARGET_REF="$("$PYTHON_BIN" - "$REPO_SLUG" <<'PY'
+import json
+import sys
+import urllib.request
+
+repo_slug = sys.argv[1]
+request = urllib.request.Request(
+    f"https://api.github.com/repos/{repo_slug}/releases/latest",
+    headers={
+        "Accept": "application/vnd.github+json",
+        "User-Agent": "EchoMosaic-Updater/1.0",
+    },
+)
+with urllib.request.urlopen(request, timeout=8) as response:
+    payload = json.loads(response.read().decode("utf-8"))
+print(str(payload.get("tag_name") or "").strip(), end="")
+PY
+)"
+  if [ -z "$TARGET_REF" ]; then
+    echo "Error: unable to determine latest release tag for $REPO_SLUG."
+    exit 1
+  fi
+else
+  TARGET_REF="origin/${BRANCH}"
+fi
+
 echo -e "\nFetching latest changes from origin..."
 # Reset any local changes and sync with the remote branch
-git fetch origin
-git checkout "$BRANCH"
-git reset --hard "origin/${BRANCH}"
+git fetch origin --tags
+if [ "$UPDATE_CHANNEL" = "release" ]; then
+  git checkout "$TARGET_REF"
+  git reset --hard "$TARGET_REF"
+else
+  git checkout "$BRANCH"
+  git reset --hard "$TARGET_REF"
+fi
 GIT_CLEAN_CMD=(git clean -fd)
 for exclude in "${CLEAN_EXCLUDES[@]:-}"; do
   [ -n "$exclude" ] || continue
@@ -186,6 +225,52 @@ trap - EXIT
 
 echo -e "\nUpdating Python dependencies..."
 "$INSTALL_DIR/venv/bin/pip" install --upgrade -r requirements.txt
+
+echo -e "\nRecording installed version metadata..."
+"$PYTHON_BIN" - "$INSTALL_DIR" "$UPDATE_CHANNEL" "$BRANCH" "$REPO_SLUG" "$TARGET_REF" <<'PY'
+import json
+import subprocess
+import sys
+from pathlib import Path
+
+repo = Path(sys.argv[1]).resolve()
+update_channel = sys.argv[2]
+branch = sys.argv[3]
+repo_slug = sys.argv[4]
+target_ref = sys.argv[5]
+config_path = repo / "config.json"
+default_path = repo / "config.default.json"
+
+data = {}
+for candidate in (default_path, config_path):
+    if candidate.is_file():
+        try:
+            loaded = json.loads(candidate.read_text(encoding="utf-8"))
+        except Exception:
+            loaded = {}
+        if isinstance(loaded, dict):
+            data.update(loaded)
+
+def git_safe(cmd):
+    try:
+        return subprocess.check_output(cmd, cwd=repo, stderr=subprocess.STDOUT).decode().strip()
+    except Exception:
+        return ""
+
+installed_commit = git_safe(["git", "rev-parse", "HEAD"])
+installed_version = ""
+if update_channel == "release":
+    installed_version = git_safe(["git", "describe", "--tags", "--exact-match", "HEAD"]) or target_ref
+if not installed_version:
+    installed_version = branch
+
+data["UPDATE_CHANNEL"] = update_channel
+data["UPDATE_BRANCH"] = branch
+data["REPO_SLUG"] = repo_slug
+data["INSTALLED_VERSION"] = installed_version
+data["INSTALLED_COMMIT"] = installed_commit
+config_path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+PY
 
 echo -e "\nRestarting $SERVICE_NAME..."
 systemctl --user restart "$SERVICE_NAME"

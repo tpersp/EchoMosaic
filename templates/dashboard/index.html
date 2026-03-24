@@ -10,7 +10,7 @@
   <h1>EchoMosaic</h1>
   <nav>
     <a href="{{ url_for('media_routes.media_management_page') }}">Media</a>
-    <a href="{{ url_for('settings_operations.app_settings') }}">Settings</a>
+    <a id="settings-nav-link" href="{{ url_for('settings_operations.app_settings') }}">Settings<span id="settings-update-badge" class="nav-update-badge" hidden aria-label="Update available"></span></a>
     <button id="theme-toggle" class="icon-btn" type="button" aria-label="Toggle theme" title="Toggle theme" style="margin-left:.5rem;"></button>
   </nav>
 </header>
@@ -1090,6 +1090,8 @@
   const addStreamBtn = document.getElementById('add-stream');
   const openMosaicBtn = document.getElementById('open-mosaic');
   const toggleMinimizeAllBtn = document.getElementById('toggle-minimize-all');
+  const settingsNavLink = document.getElementById('settings-nav-link');
+  const settingsUpdateBadge = document.getElementById('settings-update-badge');
   
   // Group Manager elements
   const groupTiles = document.getElementById('group-tiles');
@@ -1117,7 +1119,9 @@
     disk: systemMonitor.querySelector('[data-monitor="disk"]'),
   } : null;
   const SYSTEM_MONITOR_POLL_MS = 10000;
+  const UPDATE_STATUS_POLL_MS = 30 * 60 * 1000;
   let systemMonitorIntervalId = null;
+  let updateStatusIntervalId = null;
   const NOW_PLAYING_LABELS = {
     video: 'Video',
     playlist: 'Playlist',
@@ -1135,6 +1139,32 @@
     toggleMinimizeAllBtn.disabled = false;
     const allMinimized = Array.from(cards).every(card => card.classList.contains('is-minimized'));
     toggleMinimizeAllBtn.textContent = allMinimized ? 'Expand All' : 'Minimize All';
+  }
+
+  async function refreshDashboardUpdateBadge() {
+    if (!settingsUpdateBadge) {
+      return;
+    }
+    try {
+      const res = await fetch('/api/update_status', { cache: 'no-store' });
+      if (!res.ok) {
+        throw new Error(`status ${res.status}`);
+      }
+      const info = await res.json();
+      const hasUpdate = Boolean(info && info.update_available);
+      settingsUpdateBadge.hidden = !hasUpdate;
+      if (settingsNavLink) {
+        const title = hasUpdate
+          ? `Update available${info.latest_version ? `: ${info.latest_version}` : ''}`
+          : 'Settings';
+        settingsNavLink.title = title;
+      }
+    } catch (err) {
+      settingsUpdateBadge.hidden = true;
+      if (settingsNavLink) {
+        settingsNavLink.title = 'Settings';
+      }
+    }
   }
 
   function syncMinimizedGridState() {
@@ -6235,6 +6265,11 @@ function applyPicsumSettings(card, settings, opts = {}) {
         }
       });
     }
+    refreshDashboardUpdateBadge();
+    if (updateStatusIntervalId) {
+      clearInterval(updateStatusIntervalId);
+    }
+    updateStatusIntervalId = window.setInterval(refreshDashboardUpdateBadge, UPDATE_STATUS_POLL_MS);
     renderSyncManager();
     updateSyncTimerSelects();
     if (syncTimerAddBtn) {

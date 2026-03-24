@@ -3434,8 +3434,38 @@ def refresh_picsum_image():
     return jsonify(response)
 
 
+OPERATIONS_SERVICE = OperationsService(
+    load_config=load_config,
+    backup_dirname=BACKUP_DIRNAME,
+    restore_point_dirname=RESTORE_POINT_DIRNAME,
+    restore_point_metadata_file=RESTORE_POINT_METADATA_FILE,
+    max_restore_points=MAX_RESTORE_POINTS,
+    settings_file=SETTINGS_FILE,
+    config_file=CONFIG_FILE,
+    set_update_job_active=_set_update_job_active,
+    run_update_job=_run_update_job,
+    logger=logger,
+)
+
+
+def dashboard_update_status():
+    cfg = load_config()
+    info = OPERATIONS_SERVICE.read_update_info(cfg)
+    return jsonify(
+        {
+            "channel": info.get("channel"),
+            "branch": info.get("branch"),
+            "installed_version": info.get("installed_version"),
+            "latest_version": info.get("latest_version"),
+            "update_available": bool(info.get("update_available")),
+            "release_check_ok": info.get("release_check_ok", True),
+        }
+    )
+
+
 _dashboard_blueprint = create_dashboard_blueprint(
     dashboard_handler=dashboard,
+    update_status_handler=dashboard_update_status,
     mosaic_streams_handler=mosaic_streams,
     render_stream_handler=render_stream,
     add_stream_handler=add_stream,
@@ -3505,18 +3535,7 @@ _settings_operations_blueprint = create_settings_operations_blueprint(
     settings_export_payload=build_settings_export_payload,
     import_settings_handler=import_settings,
     update_ai_defaults_handler=update_ai_defaults,
-    operations_service=OperationsService(
-        load_config=load_config,
-        backup_dirname=BACKUP_DIRNAME,
-        restore_point_dirname=RESTORE_POINT_DIRNAME,
-        restore_point_metadata_file=RESTORE_POINT_METADATA_FILE,
-        max_restore_points=MAX_RESTORE_POINTS,
-        settings_file=SETTINGS_FILE,
-        config_file=CONFIG_FILE,
-        set_update_job_active=_set_update_job_active,
-        run_update_job=_run_update_job,
-        logger=logger,
-    ),
+    operations_service=OPERATIONS_SERVICE,
     logger=logger,
 )
 register_blueprint_with_legacy_aliases(app, _settings_operations_blueprint, {

@@ -20,7 +20,12 @@ DEFAULT_ENV_PLACEHOLDERS: Dict[str, str] = {
 DEFAULT_CONFIG_FALLBACK: Dict[str, Any] = {
     "INSTALL_DIR": "/opt/echomosaic",
     "SERVICE_NAME": "echomosaic.service",
+    "UPDATE_CHANNEL": "release",
     "UPDATE_BRANCH": "main",
+    "REPO_SLUG": "tpersp/EchoMosaic",
+    "INSTALLED_VERSION": "",
+    "INSTALLED_COMMIT": "",
+    "RELEASE_CHECK_INTERVAL_SECS": 3600,
     "API_KEY": "",
     "AI_DEFAULT_MODEL": "stable_diffusion",
     "AI_DEFAULT_SAMPLER": "k_euler",

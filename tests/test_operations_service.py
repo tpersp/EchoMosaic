@@ -67,3 +67,29 @@ def test_operations_service_start_update_detects_conflict(tmp_path: Path) -> Non
         assert "already in progress" in str(exc)
     else:
         raise AssertionError("expected UpdateAlreadyRunningError")
+
+
+def test_operations_service_reads_release_update_info(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / ".git").mkdir()
+    service = _service(
+        load_config=lambda: {
+            "INSTALL_DIR": str(repo),
+            "UPDATE_CHANNEL": "release",
+            "REPO_SLUG": "tpersp/EchoMosaic",
+            "INSTALLED_VERSION": "v1.0.0",
+            "INSTALLED_COMMIT": "abc1234",
+            "RELEASE_CHECK_INTERVAL_SECS": 3600,
+        },
+        fetch_json=lambda url: {"tag_name": "v1.1.0", "html_url": "https://example.com/release/v1.1.0", "name": "v1.1.0"},
+        time_fn=lambda: 1000.0,
+    )
+
+    info = service.read_update_info()
+
+    assert info["channel"] == "release"
+    assert info["installed_version"] == "v1.0.0"
+    assert info["latest_version"] == "v1.1.0"
+    assert info["latest_release_url"] == "https://example.com/release/v1.1.0"
+    assert info["update_available"] is True

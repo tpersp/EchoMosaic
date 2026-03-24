@@ -37,9 +37,10 @@
       .then(info => {
         latestUpdateInfo = info || {};
         const el = (id, v) => document.getElementById(id).textContent = v || '-';
+        el('channel', info.channel);
         el('branch', info.branch);
-        el('current', info.current_desc || info.current_commit);
-        el('remote', info.remote_desc || info.remote_commit);
+        el('current', info.current_desc || info.installed_version || info.current_commit);
+        el('remote', info.remote_desc || info.latest_version || info.remote_commit);
         el('previous', info.previous_desc || info.previous_commit || 'None');
         const btn = document.getElementById('update-btn');
         const note = document.getElementById('update-note');
@@ -363,9 +364,11 @@
   <div class="container">
     <p><strong>Install Dir:</strong> {{ config.INSTALL_DIR }}</p>
     <p><strong>Service Name:</strong> {{ config.SERVICE_NAME }}</p>
+    <p><strong>Update Channel:</strong> {{ config.UPDATE_CHANNEL or 'branch' }}</p>
     <p><strong>Update Branch:</strong> {{ config.UPDATE_BRANCH }}</p>
     <div style="margin: 1rem 0; padding: 0.75rem; border:1px solid var(--border); border-radius:4px; background: var(--surface-alt);">
       <h3 style="margin-top:0;">Update Status</h3>
+      <p><strong>Channel:</strong> <span id="channel">-</span></p>
       <p><strong>Branch:</strong> <span id="branch">-</span></p>
       <p><strong>Current:</strong> <span id="current">-</span></p>
       <p><strong>Latest:</strong> <span id="remote">-</span></p>

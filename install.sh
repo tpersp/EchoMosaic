@@ -21,12 +21,15 @@ if [ "$IS_DEV" = true ]; then
   default_port="5001"
   default_service="echomosaic-dev.service"
   BRANCH="dev"
+  UPDATE_CHANNEL="branch"
 else
   default_install_dir="$HOME/.local/share/echomosaic"
   default_port="5000"
   default_service="echomosaic.service"
   BRANCH="main"
+  UPDATE_CHANNEL="release"
 fi
+REPO_SLUG="tpersp/EchoMosaic"
 
 # The installer manages a systemd --user service, so it always runs as the
 # invoking user. Keep that explicit to avoid mismatched ownership/runtime state.
@@ -47,23 +50,19 @@ SERVICE_NAME="${SERVICE_NAME:-$default_service}"
 
 echo -e "\nInstalling system packages…"
 sudo apt-get update
-sudo apt-get install < /dev/null -y python3 python3-venv python3-pip ffmpeg
+sudo apt-get install < /dev/null -y python3 python3-venv python3-pip ffmpeg git
 echo -e "\nCopying files to ${INSTALL_DIR}…"
 mkdir -p "$INSTALL_DIR"
 # Copy everything in this repository into the installation directory.  We avoid
 # copying any pre‑existing virtual environment directory.
 cp -r "$SCRIPT_DIR/." "$INSTALL_DIR/"
-echo -e "\nCreating virtual environment…"
-python3 -m venv "$INSTALL_DIR/venv"
-"$INSTALL_DIR/venv/bin/pip" install --upgrade pip
-"$INSTALL_DIR/venv/bin/pip" install -r "$INSTALL_DIR/requirements.txt"
 # == Step: Configure MEDIA_PATHS and AI_MEDIA_PATHS independently ==
 # Normal media and AI media are configured separately on purpose.
 # AI media defaults to a local path unless the user explicitly chooses otherwise.
 update_config_path() {
   local config_key="$1"
   local target_path="$2"
-  python3 - "$INSTALL_DIR" "$config_key" "$target_path" "$SERVICE_NAME" "$BRANCH" <<'PY'
+  python3 - "$INSTALL_DIR" "$config_key" "$target_path" "$SERVICE_NAME" "$BRANCH" "$UPDATE_CHANNEL" "$REPO_SLUG" <<'PY'
 import json
 import sys
 from pathlib import Path
@@ -73,6 +72,8 @@ config_key = sys.argv[2]
 target_path = sys.argv[3]
 service_name = sys.argv[4]
 branch = sys.argv[5]
+update_channel = sys.argv[6]
+repo_slug = sys.argv[7]
 config_path = install_dir / "config.json"
 default_path = install_dir / "config.default.json"
 
@@ -92,9 +93,93 @@ if not isinstance(data, dict):
 data[config_key] = [target_path]
 data["INSTALL_DIR"] = str(install_dir)
 data["SERVICE_NAME"] = service_name
+data["UPDATE_CHANNEL"] = update_channel
 data["UPDATE_BRANCH"] = branch
+data["REPO_SLUG"] = repo_slug
 config_path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
 PY
+}
+
+write_install_metadata() {
+  python3 - "$INSTALL_DIR" "$BRANCH" "$UPDATE_CHANNEL" "$REPO_SLUG" <<'PY'
+import json
+import subprocess
+import sys
+from pathlib import Path
+
+install_dir = Path(sys.argv[1]).expanduser().resolve()
+branch = sys.argv[2]
+update_channel = sys.argv[3]
+repo_slug = sys.argv[4]
+config_path = install_dir / "config.json"
+default_path = install_dir / "config.default.json"
+
+data = {}
+for candidate in (default_path, config_path):
+    if candidate.is_file():
+        try:
+            loaded = json.loads(candidate.read_text(encoding="utf-8"))
+        except Exception:
+            loaded = {}
+        if isinstance(loaded, dict):
+            data.update(loaded)
+
+def git_safe(cmd):
+    try:
+        return subprocess.check_output(cmd, cwd=install_dir, stderr=subprocess.STDOUT).decode().strip()
+    except Exception:
+        return ""
+
+installed_commit = git_safe(["git", "rev-parse", "HEAD"])
+installed_version = ""
+if update_channel == "release":
+    installed_version = git_safe(["git", "describe", "--tags", "--exact-match", "HEAD"]) or git_safe(["git", "describe", "--tags", "--abbrev=0"])
+if not installed_version:
+    installed_version = branch
+
+data["INSTALL_DIR"] = str(install_dir)
+data["UPDATE_BRANCH"] = branch
+data["UPDATE_CHANNEL"] = update_channel
+data["REPO_SLUG"] = repo_slug
+data["INSTALLED_VERSION"] = installed_version
+data["INSTALLED_COMMIT"] = installed_commit
+config_path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+PY
+}
+
+checkout_latest_release() {
+  if [ "$UPDATE_CHANNEL" != "release" ]; then
+    return
+  fi
+  if ! git -C "$INSTALL_DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    echo "Skipping release checkout because $INSTALL_DIR is not a git repository."
+    return
+  fi
+  echo -e "\nResolving latest stable release…"
+  RELEASE_TAG="$(python3 - "$REPO_SLUG" <<'PY'
+import json
+import sys
+import urllib.request
+
+repo_slug = sys.argv[1]
+request = urllib.request.Request(
+    f"https://api.github.com/repos/{repo_slug}/releases/latest",
+    headers={
+        "Accept": "application/vnd.github+json",
+        "User-Agent": "EchoMosaic-Installer/1.0",
+    },
+)
+with urllib.request.urlopen(request, timeout=8) as response:
+    payload = json.loads(response.read().decode("utf-8"))
+print(str(payload.get("tag_name") or "").strip(), end="")
+PY
+)"
+  if [ -z "$RELEASE_TAG" ]; then
+    echo "Unable to determine latest release tag; leaving copied version as-is."
+    return
+  fi
+  git -C "$INSTALL_DIR" fetch origin --tags
+  git -C "$INSTALL_DIR" checkout "$RELEASE_TAG"
 }
 
 ensure_cifs_utils() {
@@ -173,8 +258,15 @@ configure_library_path() {
   fi
 }
 
+checkout_latest_release
+echo -e "\nCreating virtual environment…"
+python3 -m venv "$INSTALL_DIR/venv"
+"$INSTALL_DIR/venv/bin/pip" install --upgrade pip
+"$INSTALL_DIR/venv/bin/pip" install -r "$INSTALL_DIR/requirements.txt"
+
 configure_library_path "MEDIA_PATHS" "main media" "$INSTALL_DIR/media" "//192.168.1.0/images" "/mnt/viewers"
 configure_library_path "AI_MEDIA_PATHS" "AI media" "$INSTALL_DIR/ai_media" "//192.168.1.0/ai-images" "/mnt/echomosaic-ai"
+write_install_metadata
 
 echo -e "\nCreating systemd user service…"
 SERVICE_DIR="$HOME/.config/systemd/user"

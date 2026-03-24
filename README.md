@@ -53,6 +53,7 @@ EchoMosaic is a self-hosted Flask + Flask-SocketIO dashboard for building image,
 - Settings import/export from the browser.
 - Restore point creation, deletion, and restore flows.
 - In-app update, update info, rollback, and update history views.
+- Dashboard update badge when a newer release or branch update is available.
 - Debug page with live log streaming and downloadable diagnostics.
 - Health and system stats endpoints.
 - Dashboard system monitor for CPU, RAM, GPU (when available), and storage.
@@ -82,6 +83,7 @@ Defaults:
 - install dir: `~/.local/share/echomosaic`
 - port: `5000`
 - service: `echomosaic.service`
+- update channel: GitHub releases
 
 For a development install:
 
@@ -94,6 +96,7 @@ Development defaults:
 - install dir: `~/.local/share/echomosaic-dev`
 - port: `5001`
 - service: `echomosaic-dev.service`
+- update channel: `dev` branch
 
 The installer will:
 - install required system packages
@@ -134,7 +137,10 @@ Important config keys:
 - `AI_MEDIA_PATHS`: AI media roots
 - `INSTALL_DIR`: install target used by `update.sh`
 - `SERVICE_NAME`: `systemd --user` service name used by `update.sh`
+- `UPDATE_CHANNEL`: `release` for stable installs, `branch` for branch-tracking installs
 - `UPDATE_BRANCH`: branch pulled by the update flow
+- `REPO_SLUG`: GitHub repository used for release checks
+- `INSTALLED_VERSION` / `INSTALLED_COMMIT`: tracked install metadata used by update status checks
 
 Notes:
 - Gunicorn should stay on a single worker unless you redesign the shared runtime state and add a proper Socket.IO message queue.
@@ -164,8 +170,9 @@ chmod +x update.sh
 
 `update.sh`:
 - reads `INSTALL_DIR`, `SERVICE_NAME`, and `UPDATE_BRANCH` from `config.json`
+- uses `UPDATE_CHANNEL` to decide whether to follow GitHub releases or a branch head
 - backs up user state
-- pulls the configured branch
+- checks out the latest configured release or branch target
 - reinstalls Python dependencies
 - restarts the configured `systemd --user` service
 
