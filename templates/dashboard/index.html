@@ -2173,6 +2173,7 @@
   let dragPointerOffsetY = 0;
   let dragAutoScrollFrame = null;
   let lastDragIntentKey = '';
+  let dragUpdateQueued = false;
 
   function stopDragAutoScroll() {
     if (dragAutoScrollFrame !== null) {
@@ -2223,6 +2224,17 @@
     }
     dragGhostCard.style.left = `${dragPointerX - dragPointerOffsetX}px`;
     dragGhostCard.style.top = `${dragPointerY - dragPointerOffsetY}px`;
+  }
+
+  function queueDragPositionUpdate() {
+    if (dragUpdateQueued) {
+      return;
+    }
+    dragUpdateQueued = true;
+    requestAnimationFrame(() => {
+      dragUpdateQueued = false;
+      positionDraggedCard();
+    });
   }
 
   function renderOrderedCardsInPlace(orderedCards) {
@@ -2277,7 +2289,7 @@
       };
       card.addEventListener('transitionend', clearReflow);
     });
-    positionDraggedCard();
+    queueDragPositionUpdate();
   }
 
   function currentOrderedStreamIds() {
@@ -2348,7 +2360,7 @@
     if (dragGhostCard) {
       dragGhostCard.classList.add('is-dragging');
     }
-    positionDraggedCard();
+    queueDragPositionUpdate();
 
     const target = document.elementFromPoint(clientX, clientY);
     const targetCard = target instanceof Element ? target.closest('.stream-card') : null;
@@ -2406,6 +2418,7 @@
       dragPointerOffsetX = 0;
       dragPointerOffsetY = 0;
       lastDragIntentKey = '';
+      dragUpdateQueued = false;
       document.body.classList.remove('is-stream-reordering');
       clearDragMarkers();
       clearDraggingState();
@@ -2426,13 +2439,14 @@
         dragPlaceholderCard.remove();
       }
       dragPlaceholderCard = null;
-      draggingStreamCard.style.visibility = '';
+      draggingStreamCard.style.display = '';
       dragPointerId = null;
       dragPointerX = null;
       dragPointerY = null;
       dragPointerOffsetX = 0;
       dragPointerOffsetY = 0;
       lastDragIntentKey = '';
+      dragUpdateQueued = false;
       document.body.classList.remove('is-stream-reordering');
       clearDragMarkers();
       clearDraggingState();
@@ -2475,9 +2489,9 @@
       document.body.classList.add('is-stream-reordering');
       card.insertAdjacentElement('afterend', dragPlaceholderCard);
       draggingStreamCard.classList.add('is-drag-source');
-      draggingStreamCard.style.visibility = 'hidden';
+      draggingStreamCard.style.display = 'none';
       clearDragMarkers();
-      positionDraggedCard();
+      queueDragPositionUpdate();
       ensureDragAutoScroll();
       const onPointerMove = (moveEvent) => {
         if (!draggingStreamCard || moveEvent.pointerId !== dragPointerId) {
