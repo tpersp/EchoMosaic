@@ -2367,9 +2367,24 @@
     if (targetCard && targetCard !== draggingStreamCard) {
       const rect = targetCard.getBoundingClientRect();
       const sameRow = Math.abs(clientY - (rect.top + rect.height / 2)) <= (rect.height * 0.45);
-      const beforeTarget = sameRow
-        ? clientX < (rect.left + rect.width / 2)
-        : clientY < (rect.top + rect.height / 2);
+      let beforeTarget = null;
+      if (sameRow) {
+        if (clientX <= rect.left + rect.width * 0.35) {
+          beforeTarget = true;
+        } else if (clientX >= rect.left + rect.width * 0.65) {
+          beforeTarget = false;
+        }
+      } else {
+        if (clientY <= rect.top + rect.height * 0.35) {
+          beforeTarget = true;
+        } else if (clientY >= rect.top + rect.height * 0.65) {
+          beforeTarget = false;
+        }
+      }
+      if (beforeTarget === null) {
+        lastDragIntentKey = '';
+        return;
+      }
       const intentKey = `${targetCard.dataset.stream || 'unknown'}:${beforeTarget ? 'before' : 'after'}`;
       if (intentKey === lastDragIntentKey) {
         clearDragMarkers();
@@ -2439,6 +2454,9 @@
         dragPlaceholderCard.remove();
       }
       dragPlaceholderCard = null;
+      if (dashboardGrid && draggingStreamCard.parentNode !== dashboardGrid) {
+        dashboardGrid.appendChild(draggingStreamCard);
+      }
       draggingStreamCard.style.display = '';
       dragPointerId = null;
       dragPointerX = null;
@@ -2490,6 +2508,9 @@
       card.insertAdjacentElement('afterend', dragPlaceholderCard);
       draggingStreamCard.classList.add('is-drag-source');
       draggingStreamCard.style.display = 'none';
+      if (draggingStreamCard.parentNode === dashboardGrid) {
+        dashboardGrid.removeChild(draggingStreamCard);
+      }
       clearDragMarkers();
       queueDragPositionUpdate();
       ensureDragAutoScroll();
