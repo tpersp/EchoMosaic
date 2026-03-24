@@ -838,6 +838,9 @@ a {
   transform: rotate(1deg) scale(1.02);
   transition: box-shadow 0.12s ease, transform 0.12s ease, opacity 0.12s ease;
 }
+.stream-card.is-drag-source {
+  visibility: hidden;
+}
 .stream-card-placeholder {
   border: 1px dashed var(--accent);
   background: color-mix(in srgb, var(--surface-alt) 72%, transparent);
