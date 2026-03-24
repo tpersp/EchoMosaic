@@ -2168,6 +2168,7 @@
   let dragPointerX = null;
   let dragPointerY = null;
   let dragAutoScrollFrame = null;
+  let lastDragIntentKey = '';
 
   function stopDragAutoScroll() {
     if (dragAutoScrollFrame !== null) {
@@ -2211,10 +2212,46 @@
     if (!dashboardGrid) {
       return;
     }
+    const firstRects = new Map();
+    orderedCards.forEach(card => {
+      if (card && card.parentNode === dashboardGrid) {
+        firstRects.set(card, card.getBoundingClientRect());
+      }
+    });
     orderedCards.forEach(card => {
       if (card && card.parentNode === dashboardGrid) {
         dashboardGrid.appendChild(card);
       }
+    });
+    orderedCards.forEach(card => {
+      if (!card || card.parentNode !== dashboardGrid) {
+        return;
+      }
+      const firstRect = firstRects.get(card);
+      if (!firstRect) {
+        return;
+      }
+      const lastRect = card.getBoundingClientRect();
+      const deltaX = firstRect.left - lastRect.left;
+      const deltaY = firstRect.top - lastRect.top;
+      if (Math.abs(deltaX) <= 1 && Math.abs(deltaY) <= 1) {
+        return;
+      }
+      card.style.transition = 'none';
+      card.style.transform = `translate(${deltaX}px, ${deltaY}px)`;
+      requestAnimationFrame(() => {
+        card.classList.add('is-reflowing');
+        card.style.transition = '';
+        card.style.transform = '';
+      });
+      const clearReflow = () => {
+        card.classList.remove('is-reflowing');
+        if (!card.classList.contains('is-dragging')) {
+          card.style.transform = '';
+        }
+        card.removeEventListener('transitionend', clearReflow);
+      };
+      card.addEventListener('transitionend', clearReflow);
     });
   }
 
@@ -2293,6 +2330,14 @@
       const beforeTarget = sameRow
         ? clientX < (rect.left + rect.width / 2)
         : clientY < (rect.top + rect.height / 2);
+      const intentKey = `${targetCard.dataset.stream || 'unknown'}:${beforeTarget ? 'before' : 'after'}`;
+      if (intentKey === lastDragIntentKey) {
+        clearDragMarkers();
+        draggingStreamCard.classList.add('is-dragging');
+        targetCard.classList.add(beforeTarget ? 'drag-over-top' : 'drag-over-bottom');
+        return;
+      }
+      lastDragIntentKey = intentKey;
       targetCard.classList.add(beforeTarget ? 'drag-over-top' : 'drag-over-bottom');
       if (moveStreamCardBeforeTarget(draggingStreamCard, targetCard, beforeTarget)) {
         applyFiltersAndSorting({ anchorCard: draggingStreamCard, preserveScroll: false });
@@ -2301,10 +2346,17 @@
     }
 
     if (dashboardGrid && target instanceof Element && dashboardGrid.contains(target)) {
+      if (lastDragIntentKey === '__end__') {
+        return;
+      }
+      lastDragIntentKey = '__end__';
       if (moveStreamCardToEnd(draggingStreamCard)) {
         applyFiltersAndSorting({ anchorCard: draggingStreamCard, preserveScroll: false });
       }
+      return;
     }
+
+    lastDragIntentKey = '';
   }
 
   async function finishStreamCardDrag() {
@@ -2313,6 +2365,7 @@
       dragPointerId = null;
       dragPointerX = null;
       dragPointerY = null;
+      lastDragIntentKey = '';
       document.body.classList.remove('is-stream-reordering');
       clearDragMarkers();
       return;
@@ -2327,6 +2380,7 @@
       dragPointerId = null;
       dragPointerX = null;
       dragPointerY = null;
+      lastDragIntentKey = '';
       document.body.classList.remove('is-stream-reordering');
       clearDragMarkers();
       draggingStreamCard = null;
@@ -2351,6 +2405,7 @@
       dragPointerId = event.pointerId;
       dragPointerX = event.clientX;
       dragPointerY = event.clientY;
+      lastDragIntentKey = '';
       document.body.classList.add('is-stream-reordering');
       clearDragMarkers();
       draggingStreamCard.classList.add('is-dragging');

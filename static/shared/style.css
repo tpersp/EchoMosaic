@@ -837,6 +837,9 @@ a {
   transform: scale(1.01);
   transition: box-shadow 0.12s ease, transform 0.12s ease, opacity 0.12s ease;
 }
+.stream-card.is-reflowing {
+  transition: transform 0.18s ease;
+}
 .stream-card.drag-over-top {
   border-top: 2px solid var(--accent);
 }
