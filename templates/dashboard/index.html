@@ -2164,6 +2164,41 @@
   let customCardOrder = [];
   let draggingStreamCard = null;
   let dragReadyStreamCard = null;
+  let dragPointerY = null;
+  let dragAutoScrollFrame = null;
+
+  function stopDragAutoScroll() {
+    if (dragAutoScrollFrame !== null) {
+      cancelAnimationFrame(dragAutoScrollFrame);
+      dragAutoScrollFrame = null;
+    }
+  }
+
+  function runDragAutoScroll() {
+    if (!draggingStreamCard || currentSortMode !== 'custom' || typeof dragPointerY !== 'number') {
+      dragAutoScrollFrame = null;
+      return;
+    }
+    const viewportHeight = window.innerHeight || document.documentElement.clientHeight || 0;
+    const edgeThreshold = 96;
+    const maxStep = 22;
+    let delta = 0;
+    if (dragPointerY < edgeThreshold) {
+      delta = -Math.max(8, Math.round(((edgeThreshold - dragPointerY) / edgeThreshold) * maxStep));
+    } else if (dragPointerY > (viewportHeight - edgeThreshold)) {
+      delta = Math.max(8, Math.round(((dragPointerY - (viewportHeight - edgeThreshold)) / edgeThreshold) * maxStep));
+    }
+    if (delta !== 0) {
+      window.scrollBy(0, delta);
+    }
+    dragAutoScrollFrame = requestAnimationFrame(runDragAutoScroll);
+  }
+
+  function ensureDragAutoScroll() {
+    if (dragAutoScrollFrame === null) {
+      dragAutoScrollFrame = requestAnimationFrame(runDragAutoScroll);
+    }
+  }
 
   function clearDragMarkers() {
     document.querySelectorAll('.stream-card.drag-over-top, .stream-card.drag-over-bottom, .stream-card.is-dragging')
@@ -2234,24 +2269,28 @@
       }
       draggingStreamCard = card;
       dragReadyStreamCard = null;
+      dragPointerY = event.clientY;
       card.classList.add('is-dragging');
       if (event.dataTransfer) {
         event.dataTransfer.effectAllowed = 'move';
         event.dataTransfer.setData('text/plain', streamId);
       }
+      ensureDragAutoScroll();
     });
     card.addEventListener('dragover', (event) => {
       if (!draggingStreamCard || draggingStreamCard === card || currentSortMode !== 'custom') {
         return;
       }
       event.preventDefault();
+      dragPointerY = event.clientY;
+      ensureDragAutoScroll();
       const rect = card.getBoundingClientRect();
       const beforeTarget = event.clientY < (rect.top + rect.height / 2);
       clearDragMarkers();
       draggingStreamCard.classList.add('is-dragging');
       card.classList.add(beforeTarget ? 'drag-over-top' : 'drag-over-bottom');
       if (moveStreamCardBeforeTarget(draggingStreamCard, card, beforeTarget)) {
-        applyFiltersAndSorting({ anchorCard: draggingStreamCard });
+        applyFiltersAndSorting({ anchorCard: draggingStreamCard, preserveScroll: false });
       }
     });
     card.addEventListener('drop', async (event) => {
@@ -2259,18 +2298,23 @@
         return;
       }
       event.preventDefault();
+      dragPointerY = event.clientY;
       try {
         await persistDashboardStreamOrder();
       } catch (err) {
         console.error('Failed to persist stream order', err);
         showNotification((err && err.message) ? err.message : 'Failed to save stream order');
       } finally {
+        stopDragAutoScroll();
+        dragPointerY = null;
         clearDragMarkers();
         draggingStreamCard = null;
       }
     });
     card.addEventListener('dragend', async () => {
       if (!draggingStreamCard) {
+        stopDragAutoScroll();
+        dragPointerY = null;
         clearDragMarkers();
         return;
       }
@@ -2280,6 +2324,8 @@
         console.error('Failed to persist stream order', err);
         showNotification((err && err.message) ? err.message : 'Failed to save stream order');
       } finally {
+        stopDragAutoScroll();
+        dragPointerY = null;
         clearDragMarkers();
         draggingStreamCard = null;
         dragReadyStreamCard = null;
@@ -2293,11 +2339,12 @@
     }
     const opts = (options && typeof options === 'object') ? options : {};
     const candidate = opts.anchorCard;
+    const preserveScroll = opts.preserveScroll !== false;
     const anchorCard = (candidate && candidate.nodeType === 1 && dashboardGrid.contains(candidate)) ? candidate : null;
     let anchorRect = null;
     let prevScrollY = 0;
     let prevScrollX = 0;
-    if (anchorCard) {
+    if (anchorCard && preserveScroll) {
       try {
         anchorRect = anchorCard.getBoundingClientRect();
       } catch (err) {
@@ -2325,7 +2372,7 @@
         dashboardGrid.appendChild(card);
       });
     }
-    if (anchorCard && anchorRect) {
+    if (anchorCard && anchorRect && preserveScroll) {
       requestAnimationFrame(() => {
         if (!anchorCard.isConnected) {
           return;
