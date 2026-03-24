@@ -815,6 +815,9 @@ a {
   box-shadow: 0 0 0 2px color-mix(in srgb, #ff5a4f 24%, transparent);
   vertical-align: middle;
 }
+.nav-update-badge[hidden] {
+  display: none !important;
+}
 .stream-card h2 { margin: 0; font-size: 1.05rem; }
 .stream-card h2 a { color: var(--text); text-decoration: none; }
 /* Card menu (burger) */
