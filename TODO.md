@@ -1,20 +1,23 @@
-# List of Ideas
+# TODO
 
-A running list of ideas and future improvements. Add new items anywhere below.
+A running list of bugs, active ideas, and future improvements. Add new items anywhere below.
 
 ## Bugs: 
 - [x] Folders are shown twice. they shouldn't be.
 - [x] Images uploaded with capital "JPG" doesn't show up in media, and is not used in show rotation..
 - [x] Folders created isn't always shown in the dashboard.
 - [x] It created a folder via UI, it uploaded images to the folder via UI, but the dashboard does not show images or folders created. 
-- [ ] [2026-03-23] Importing settings from an exported settings JSON does not preserve the original stream order on the dashboard. After import, streams fall back to string-like ordering such as `stream1`, `stream10`, `stream12`, `stream2`, which is annoying and should preserve the previous/user-visible order.
+- [x] [2026-03-23] Importing settings from an exported settings JSON does not preserve the original stream order on the dashboard. After import, streams fall back to string-like ordering such as `stream1`, `stream10`, `stream12`, `stream2`, which is annoying and should preserve the previous/user-visible order.
 
 ## Active Ideas
 - [ ] Stream real-time update logs via Socket.IO instead of the current client-side animation.
-- [ ] Enable minimizing of streams in dashboard, so only streamname and menu button is visible, for better overview.
-- [ ] Add drag-and-drop stream reordering on the dashboard and persist the chosen order so imports/exports and normal dashboard rendering keep the same stream layout.
-- [x] [2026-01-27] Sync timers for random image/GIF streams so multiple streams change at the exact same time. Includes a global Sync Timers manager (create/edit/delete timers with interval + base offset), per-stream timer selection, and per-stream stagger offset in seconds to create cascading transitions instead of fully random timing.
 - [ ] Reduce RAM usage without limiting useability or performance.
+- [ ] Add a page and function similar to `stablehorde.py` that can pull images from the https://www.pexels.com/api/ with the available options exposed in the UI.
+
+## Discarded / Replaced Ideas
+- [x] Add drag-and-drop stream reordering on the dashboard and persist the chosen order so imports/exports and normal dashboard rendering keep the same stream layout.
+  Replaced with the current `Custom` layout mode and `Edit Layout` controls, because the drag-and-drop implementation was too unstable and unpleasant to use in the dashboard grid.
+- [x] [2026-01-27] Sync timers for random image/GIF streams so multiple streams change at the exact same time. Includes a global Sync Timers manager (create/edit/delete timers with interval + base offset), per-stream timer selection, and per-stream stagger offset in seconds to create cascading transitions instead of fully random timing.
 
 ## Suggestions from a friend
 - [ ] [2025-09-08] Add optional authentication or simple login with a session cache so casual users are not blocked but the dashboard and update endpoints are protected from anyone on the network. - Note: I'm not sure this is necessary for a local only service that i built for myself.
@@ -24,8 +27,6 @@ A running list of ideas and future improvements. Add new items anywhere below.
 - [ ] [2025-09-08] Improve error handling and user feedback. When an image or stream URL is missing, surface clear messages in the UI instead of generic JSON errors.
 
 - [x] [2025-09-08] Add configurable logging and monitoring. Operations like `yt-dlp` calls and update scripts either fail silently or log to the console; configurable log levels and rotating file logs would help.
-
-- [ ] Add a page and function similar to `stablehorde.py` that can pull images from the https://www.pexels.com/api/ with the available options exposed in the UI.
 
 ## Expanded Idea Notes
 
@@ -90,6 +91,10 @@ A running list of ideas and future improvements. Add new items anywhere below.
 - [x] Implement a better rollback feature that lets admins mark a restore point so the server can always roll back to a known good state on demand.
 
 - [x] [2025-09-08] Make paths and constants configurable via `config.json` or environment variables. Today users still edit `app.py` to change where images are stored. Additionally an option to handle multiple locations, in case the user wants to store media in multiple locations, then the app should be able to see those too.
+
+- [x] Enable minimizing of streams in dashboard, so only streamname and menu button is visible, for better overview.
+
+- [x] Add a custom stream layout mode with persistent manual ordering and an `Edit Layout` dashboard UI for moving streams by slot number.
 
 Notes
 - Use checkboxes to track status (unchecked = planned, checked = done).
