@@ -2181,8 +2181,8 @@
       return;
     }
     const viewportHeight = window.innerHeight || document.documentElement.clientHeight || 0;
-    const edgeThreshold = 220;
-    const maxStep = 34;
+    const edgeThreshold = Math.max(260, Math.round(viewportHeight * 0.24));
+    const maxStep = 36;
     let delta = 0;
     if (dragPointerY < edgeThreshold) {
       delta = -Math.max(8, Math.round(((edgeThreshold - dragPointerY) / edgeThreshold) * maxStep));
