@@ -93,3 +93,24 @@ def test_operations_service_reads_release_update_info(tmp_path: Path) -> None:
     assert info["latest_version"] == "v1.1.0"
     assert info["latest_release_url"] == "https://example.com/release/v1.1.0"
     assert info["update_available"] is True
+
+
+def test_operations_service_normalizes_stale_dev_release_channel_to_branch(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / ".git").mkdir()
+    service = _service(
+        fetch_json=lambda url: {"tag_name": "v9.9.9"},
+    )
+    service._git_safe = lambda repo_path, cmd: None  # type: ignore[method-assign]
+
+    info = service.read_update_info(
+        {
+            "INSTALL_DIR": "/home/doden/.local/share/echomosaic-dev",
+            "SERVICE_NAME": "echomosaic-dev.service",
+            "UPDATE_CHANNEL": "release",
+            "UPDATE_BRANCH": "dev",
+        }
+    )
+
+    assert info["channel"] == "branch"

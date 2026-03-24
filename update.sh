@@ -42,10 +42,25 @@ def get_value(key: str, default: str) -> str:
         value = default
     return str(value)
 
+branch = get_value("UPDATE_BRANCH", "main").strip() or "main"
+channel = get_value("UPDATE_CHANNEL", "").strip().lower()
+service_name = get_value("SERVICE_NAME", "echomosaic.service").strip().lower()
+install_dir = get_value("INSTALL_DIR", "/opt/echomosaic").strip().lower()
+install_basename = Path(install_dir).name.lower() if install_dir else ""
+is_dev_install = (
+    branch == "dev"
+    or "echomosaic-dev" in service_name
+    or "echomosaic-dev" in install_basename
+)
+if channel not in {"branch", "release"}:
+    channel = "branch" if is_dev_install else "release"
+if is_dev_install:
+    channel = "branch"
+
 print(get_value("INSTALL_DIR", "/opt/echomosaic"))
 print(get_value("SERVICE_NAME", "echomosaic.service"))
-print(get_value("UPDATE_CHANNEL", "branch"))
-print(get_value("UPDATE_BRANCH", "main"))
+print(channel)
+print(branch)
 print(get_value("REPO_SLUG", "tpersp/EchoMosaic"))
 PY
 )
@@ -64,6 +79,12 @@ else
   UPDATE_CHANNEL=$(jq -r '.UPDATE_CHANNEL // "branch"' "$CONFIG_FILE")
   BRANCH=$(jq -r '.UPDATE_BRANCH' "$CONFIG_FILE")
   REPO_SLUG=$(jq -r '.REPO_SLUG // "tpersp/EchoMosaic"' "$CONFIG_FILE")
+fi
+
+INSTALL_BASENAME="$(basename "$INSTALL_DIR" | tr '[:upper:]' '[:lower:]')"
+SERVICE_NAME_LOWER="$(printf '%s' "$SERVICE_NAME" | tr '[:upper:]' '[:lower:]')"
+if [ "$BRANCH" = "dev" ] || [[ "$SERVICE_NAME_LOWER" == *"echomosaic-dev"* ]] || [[ "$INSTALL_BASENAME" == *"echomosaic-dev"* ]]; then
+  UPDATE_CHANNEL="branch"
 fi
 
 if ! git -C "$INSTALL_DIR" rev-parse --is-inside-work-tree &>/dev/null; then

@@ -98,3 +98,59 @@ def test_build_media_roots_generates_unique_aliases_for_duplicate_folder_names(t
     assert roots[1].alias == "photos-2"
     assert roots[0].display_name == "photos"
     assert roots[1].display_name == "photos"
+
+
+def test_load_config_normalizes_dev_branch_installs_to_branch_channel(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.json"
+    default_path = tmp_path / "config.default.json"
+    env_path = tmp_path / ".env"
+
+    default_path.write_text(
+        json.dumps(
+            {
+                "INSTALL_DIR": "/opt/echomosaic",
+                "SERVICE_NAME": "echomosaic.service",
+                "UPDATE_CHANNEL": "release",
+                "UPDATE_BRANCH": "main",
+                "MEDIA_PATHS": ["./media"],
+                "AI_MEDIA_PATHS": ["./ai_media"],
+            }
+        ),
+        encoding="utf-8",
+    )
+    config_path.write_text(
+        json.dumps(
+            {
+                "INSTALL_DIR": "/home/doden/.local/share/echomosaic-dev",
+                "SERVICE_NAME": "echomosaic-dev.service",
+                "UPDATE_CHANNEL": "release",
+                "UPDATE_BRANCH": "dev",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    config = config_manager.load_config(
+        config_path=config_path,
+        default_path=default_path,
+        env_path=env_path,
+    )
+    saved = json.loads(config_path.read_text(encoding="utf-8"))
+
+    assert config["UPDATE_CHANNEL"] == "branch"
+    assert saved["UPDATE_CHANNEL"] == "branch"
+    assert config["UPDATE_BRANCH"] == "dev"
+
+
+def test_normalize_update_configuration_detects_dev_install_from_path_or_service() -> None:
+    normalized, changed = config_manager.normalize_update_configuration(
+        {
+            "INSTALL_DIR": "/srv/apps/echomosaic-dev",
+            "SERVICE_NAME": "custom-dev.service",
+            "UPDATE_CHANNEL": "release",
+            "UPDATE_BRANCH": "main",
+        }
+    )
+
+    assert changed is True
+    assert normalized["UPDATE_CHANNEL"] == "branch"

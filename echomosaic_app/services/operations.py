@@ -16,6 +16,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
+import config_manager
+
 
 class UpdateAlreadyRunningError(RuntimeError):
     """Raised when an update is already active."""
@@ -388,6 +390,7 @@ class OperationsService:
 
     def read_update_info(self, cfg: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         cfg = cfg or self.load_config()
+        cfg, _ = config_manager.normalize_update_configuration(cfg)
         repo_path = self.repo_path_from_config(cfg)
         update_channel = str(cfg.get("UPDATE_CHANNEL") or "branch").strip().lower()
         branch = cfg.get("UPDATE_BRANCH", "main")
