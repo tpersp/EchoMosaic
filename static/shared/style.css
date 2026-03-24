@@ -818,6 +818,8 @@ a {
   align-items: center;
   justify-content: center;
   cursor: grab;
+  touch-action: none;
+  user-select: none;
 }
 .reorder-handle:hover {
   border-color: var(--accent);
@@ -828,12 +830,18 @@ a {
 }
 .stream-card.is-dragging {
   opacity: 0.6;
+  pointer-events: none;
 }
 .stream-card.drag-over-top {
   border-top: 2px solid var(--accent);
 }
 .stream-card.drag-over-bottom {
   border-bottom: 2px solid var(--accent);
+}
+body.is-stream-reordering,
+body.is-stream-reordering * {
+  user-select: none;
+  cursor: grabbing !important;
 }
 .minimize-button {
   background: var(--surface-alt);
