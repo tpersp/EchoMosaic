@@ -843,12 +843,12 @@ a {
   transition: opacity 0.18s ease;
 }
 .custom-layout-slot-badge {
-  min-width: 110px;
-  min-height: 110px;
+  min-width: 132px;
+  min-height: 132px;
   display: inline-grid;
   align-items: center;
   justify-content: center;
-  border-radius: 22px;
+  border-radius: 26px;
   border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--border));
   background: color-mix(in srgb, var(--surface-alt) 56%, transparent);
   box-shadow: 0 12px 28px rgba(0, 0, 0, 0.24);
@@ -857,18 +857,19 @@ a {
   margin: auto;
   display: inline-flex;
   align-items: center;
-  gap: 0.75rem;
-  padding: 0.6rem 0.8rem;
+  gap: 1rem;
+  padding: 0.75rem 1rem;
   border-radius: 999px;
   background: color-mix(in srgb, var(--surface) 34%, transparent);
   box-shadow: 0 10px 24px rgba(0, 0, 0, 0.18);
   pointer-events: auto;
 }
 .custom-layout-controls button {
-  min-width: 42px;
-  min-height: 42px;
+  min-width: 52px;
+  min-height: 52px;
   border-radius: 999px;
-  font-size: 1.05rem;
+  font-size: 1.35rem;
+  font-weight: 700;
   padding: 0;
   flex: 0 0 auto;
 }
@@ -879,12 +880,13 @@ a {
   background: transparent;
   text-align: center;
   font-weight: 700;
-  font-size: clamp(2rem, 4vw, 3rem);
+  font-size: clamp(3rem, 7vw, 4.5rem);
   line-height: 1;
   color: var(--text);
   padding: 0;
   appearance: textfield;
   -moz-appearance: textfield;
+  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.18);
 }
 .custom-layout-slot-input::-webkit-outer-spin-button,
 .custom-layout-slot-input::-webkit-inner-spin-button {
@@ -893,6 +895,12 @@ a {
 }
 .custom-layout-slot-input:focus {
   outline: none;
+}
+.custom-layout-controls button:hover:not(:disabled),
+.custom-layout-controls button:focus-visible:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: color-mix(in srgb, var(--surface-alt) 82%, transparent);
 }
 .minimize-button {
   background: var(--surface-alt);
