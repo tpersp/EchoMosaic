@@ -62,6 +62,7 @@ def _build_service(settings):
         sync_timers_key="_sync_timers",
         ai_settings_key="_ai_settings",
         ai_state_key="_ai_state",
+        stream_order_key="_stream_order",
         stream_runtime_lock=lock,
         stream_runtime_state={},
     )
@@ -101,3 +102,27 @@ def test_stream_config_service_returns_settings_payload() -> None:
 
     assert payload["label"] == "One"
     assert "_ai_settings" in payload
+
+
+def test_stream_config_service_tracks_stream_order_for_create_delete_and_reorder() -> None:
+    settings = {
+        "stream1": {"label": "One"},
+        "stream2": {"label": "Two"},
+        "stream10": {"label": "Ten"},
+    }
+    service, events = _build_service(settings)
+
+    assert service._get_stream_order() == ["stream1", "stream2", "stream10"]
+
+    reordered = service.reorder_streams(["stream10", "stream1", "stream2"])
+    assert reordered == ["stream10", "stream1", "stream2"]
+    assert settings["_stream_order"] == ["stream10", "stream1", "stream2"]
+    assert ("streams_changed", {"action": "reordered", "stream_order": ["stream10", "stream1", "stream2"]}) in events
+
+    new_stream_id = service.create_stream()
+    assert new_stream_id == "stream3"
+    assert settings["_stream_order"] == ["stream10", "stream1", "stream2", "stream3"]
+
+    deleted = service.delete_stream("stream1")
+    assert deleted is True
+    assert settings["_stream_order"] == ["stream10", "stream2", "stream3"]

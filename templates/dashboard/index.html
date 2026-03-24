@@ -80,6 +80,7 @@
       <label for="sort-select">Sort</label>
       <select id="sort-select">
         <option value="default" selected>Default</option>
+        <option value="custom">Custom</option>
         <option value="group">Group by Tag</option>
       </select>
     </div>
@@ -135,6 +136,9 @@
           </div>
         </div>
         <div class="card-actions">
+          <button class="reorder-handle" type="button" aria-label="Reorder stream" title="Drag to reorder">
+            <span aria-hidden="true">&#8645;</span>
+          </button>
           <button class="minimize-button" type="button" aria-pressed="false" aria-label="Minimize" title="Minimize">
             <span class="minimize-icon" aria-hidden="true"></span>
           </button>
@@ -1072,6 +1076,7 @@
   const tagFilterChips = document.getElementById('tag-filter-chips');
   const tagFilterInput = document.getElementById('tag-filter-input');
   const sortSelect = document.getElementById('sort-select');
+  const persistedCustomStreamOrder = {{ custom_stream_order|tojson }};
   const tagManagerList = document.getElementById('tag-manager-list');
   const newTagInput = document.getElementById('new-tag-input');
   const createTagBtn = document.getElementById('create-tag-btn');
@@ -2155,7 +2160,132 @@
     addFilterTag(normalized);
   }
 
-  let originalCardOrder = [];
+  let defaultCardOrder = [];
+  let customCardOrder = [];
+  let draggingStreamCard = null;
+  let dragReadyStreamCard = null;
+
+  function clearDragMarkers() {
+    document.querySelectorAll('.stream-card.drag-over-top, .stream-card.drag-over-bottom, .stream-card.is-dragging')
+      .forEach(card => card.classList.remove('drag-over-top', 'drag-over-bottom', 'is-dragging'));
+  }
+
+  function currentOrderedStreamIds() {
+    return customCardOrder
+      .map(card => card && card.dataset ? (card.dataset.stream || '') : '')
+      .filter(Boolean);
+  }
+
+  async function persistDashboardStreamOrder() {
+    const streamOrder = currentOrderedStreamIds();
+    const res = await fetch('/streams/reorder', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ stream_order: streamOrder })
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !data || data.status !== 'ok') {
+      throw new Error((data && data.error) ? data.error : 'Failed to save stream order');
+    }
+    return data.stream_order || streamOrder;
+  }
+
+  function moveStreamCardBeforeTarget(draggedCard, targetCard, beforeTarget) {
+    if (!draggedCard || !targetCard || draggedCard === targetCard) {
+      return false;
+    }
+    const fromIndex = customCardOrder.indexOf(draggedCard);
+    const targetIndex = customCardOrder.indexOf(targetCard);
+    if (fromIndex === -1 || targetIndex === -1) {
+      return false;
+    }
+    const nextOrder = customCardOrder.slice();
+    nextOrder.splice(fromIndex, 1);
+    const adjustedTargetIndex = nextOrder.indexOf(targetCard);
+    const insertIndex = beforeTarget ? adjustedTargetIndex : adjustedTargetIndex + 1;
+    nextOrder.splice(insertIndex, 0, draggedCard);
+    const changed = nextOrder.some((card, idx) => card !== customCardOrder[idx]);
+    if (!changed) {
+      return false;
+    }
+    customCardOrder = nextOrder;
+    return true;
+  }
+
+  function initStreamCardReorder(card) {
+    const handle = card.querySelector('.reorder-handle');
+    const streamId = card.dataset.stream;
+    if (!handle || !streamId) {
+      return;
+    }
+    card.draggable = true;
+    handle.addEventListener('mousedown', () => {
+      dragReadyStreamCard = card;
+    });
+    handle.addEventListener('mouseup', () => {
+      if (dragReadyStreamCard === card) {
+        dragReadyStreamCard = null;
+      }
+    });
+    card.addEventListener('dragstart', (event) => {
+      if (currentSortMode !== 'custom' || dragReadyStreamCard !== card) {
+        event.preventDefault();
+        return;
+      }
+      draggingStreamCard = card;
+      dragReadyStreamCard = null;
+      card.classList.add('is-dragging');
+      if (event.dataTransfer) {
+        event.dataTransfer.effectAllowed = 'move';
+        event.dataTransfer.setData('text/plain', streamId);
+      }
+    });
+    card.addEventListener('dragover', (event) => {
+      if (!draggingStreamCard || draggingStreamCard === card || currentSortMode !== 'custom') {
+        return;
+      }
+      event.preventDefault();
+      const rect = card.getBoundingClientRect();
+      const beforeTarget = event.clientY < (rect.top + rect.height / 2);
+      clearDragMarkers();
+      draggingStreamCard.classList.add('is-dragging');
+      card.classList.add(beforeTarget ? 'drag-over-top' : 'drag-over-bottom');
+      if (moveStreamCardBeforeTarget(draggingStreamCard, card, beforeTarget)) {
+        applyFiltersAndSorting({ anchorCard: draggingStreamCard });
+      }
+    });
+    card.addEventListener('drop', async (event) => {
+      if (!draggingStreamCard || currentSortMode !== 'custom') {
+        return;
+      }
+      event.preventDefault();
+      try {
+        await persistDashboardStreamOrder();
+      } catch (err) {
+        console.error('Failed to persist stream order', err);
+        showNotification((err && err.message) ? err.message : 'Failed to save stream order');
+      } finally {
+        clearDragMarkers();
+        draggingStreamCard = null;
+      }
+    });
+    card.addEventListener('dragend', async () => {
+      if (!draggingStreamCard) {
+        clearDragMarkers();
+        return;
+      }
+      try {
+        await persistDashboardStreamOrder();
+      } catch (err) {
+        console.error('Failed to persist stream order', err);
+        showNotification((err && err.message) ? err.message : 'Failed to save stream order');
+      } finally {
+        clearDragMarkers();
+        draggingStreamCard = null;
+        dragReadyStreamCard = null;
+      }
+    });
+  }
 
   function applyFiltersAndSorting(options) {
     if (!dashboardGrid) {
@@ -2190,7 +2320,8 @@
     if (currentSortMode === 'group') {
       renderGroupedCards();
     } else {
-      originalCardOrder.forEach(card => {
+      const orderedCards = currentSortMode === 'custom' ? customCardOrder : defaultCardOrder;
+      orderedCards.forEach(card => {
         dashboardGrid.appendChild(card);
       });
     }
@@ -2232,7 +2363,8 @@
     }
     const tagBuckets = new Map();
     const untagged = [];
-    originalCardOrder.forEach(card => {
+    const sourceOrder = customCardOrder.length ? customCardOrder : defaultCardOrder;
+    sourceOrder.forEach(card => {
       const tags = cardTagsMap.get(card) || [];
       if (tags.length) {
         const primary = tags[0];
@@ -5334,6 +5466,7 @@ function applyPicsumSettings(card, settings, opts = {}) {
       const streamId = card.dataset.stream;
       if (streamId) {
         applyMinimizedState(card, minimizedStreamSet.has(streamId));
+        initStreamCardReorder(card);
       }
       initThumbnail(card);
       if (streamId) {
@@ -5889,10 +6022,27 @@ function applyPicsumSettings(card, settings, opts = {}) {
       }
     });
     syncMinimizedGridState();
-    originalCardOrder = Array.from(cardTagsMap.keys());
+    defaultCardOrder = Array.from(cardTagsMap.keys());
+    const cardById = new Map(defaultCardOrder.map(card => [card.dataset.stream, card]));
+    const customIds = Array.isArray(persistedCustomStreamOrder) ? persistedCustomStreamOrder : [];
+    const seenCustomIds = new Set();
+    customCardOrder = [];
+    customIds.forEach(streamId => {
+      if (!cardById.has(streamId) || seenCustomIds.has(streamId)) {
+        return;
+      }
+      seenCustomIds.add(streamId);
+      customCardOrder.push(cardById.get(streamId));
+    });
+    defaultCardOrder.forEach(card => {
+      const streamId = card.dataset.stream;
+      if (streamId && !seenCustomIds.has(streamId)) {
+        customCardOrder.push(card);
+      }
+    });
     renderTagManager();
     renderFilterChips();
-    currentSortMode = (sortSelect && sortSelect.value === 'group') ? 'group' : 'default';
+    currentSortMode = (sortSelect && ['default', 'custom', 'group'].includes(sortSelect.value)) ? sortSelect.value : 'default';
     applyFiltersAndSorting();
     if (tagFilterInput) {
       tagFilterInput.addEventListener('keydown', e => {
@@ -5907,7 +6057,7 @@ function applyPicsumSettings(card, settings, opts = {}) {
     }
     if (sortSelect) {
       sortSelect.addEventListener('change', e => {
-        currentSortMode = e.target.value === 'group' ? 'group' : 'default';
+        currentSortMode = ['default', 'custom', 'group'].includes(e.target.value) ? e.target.value : 'default';
         applyFiltersAndSorting();
       });
     }

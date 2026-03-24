@@ -514,6 +514,7 @@ AI_SPECIFIC_MODE = "specific"
 AI_SETTINGS_KEY = "ai_settings"
 AI_STATE_KEY = "ai_state"
 AI_PRESETS_KEY = "_ai_presets"
+STREAM_ORDER_KEY = "_stream_order"
 
 TAG_KEY = "tags"
 GLOBAL_TAGS_KEY = "_tags"
@@ -2141,12 +2142,23 @@ def _sanitize_group_collection_for_import(raw_groups: Any, valid_streams: Set[st
     return sanitized
 
 
+def _natural_stream_order_key(value: str) -> Tuple[Any, ...]:
+    parts = re.split(r"(\d+)", value.strip().lower())
+    normalized: List[Any] = []
+    for part in parts:
+        if not part:
+            continue
+        normalized.append(int(part) if part.isdigit() else part)
+    return tuple(normalized)
+
+
 def _prepare_settings_import(data: Dict[str, Any]) -> Tuple[Dict[str, Any], List[str]]:
     if not isinstance(data, dict):
         raise ValueError('Import payload must be a JSON object.')
     sanitized: Dict[str, Any] = {}
     warnings: List[str] = []
     stream_ids: List[str] = []
+    stream_payloads: Dict[str, Dict[str, Any]] = {}
     for key, value in data.items():
         if not isinstance(key, str) or key.startswith('_'):
             continue
@@ -2154,8 +2166,27 @@ def _prepare_settings_import(data: Dict[str, Any]) -> Tuple[Dict[str, Any], List
         if not stream_id:
             warnings.append('Skipped stream with empty identifier.')
             continue
-        sanitized[stream_id] = _sanitize_imported_stream_config(stream_id, value)
+        stream_payloads[stream_id] = _sanitize_imported_stream_config(stream_id, value)
         stream_ids.append(stream_id)
+    ordered_stream_ids: List[str] = []
+    seen_stream_ids: Set[str] = set()
+    order_raw = data.get(STREAM_ORDER_KEY)
+    if isinstance(order_raw, (list, tuple)):
+        for entry in order_raw:
+            if not isinstance(entry, str):
+                continue
+            stream_id = entry.strip()
+            if stream_id in stream_payloads and stream_id not in seen_stream_ids:
+                ordered_stream_ids.append(stream_id)
+                seen_stream_ids.add(stream_id)
+    remaining_stream_ids = [stream_id for stream_id in stream_ids if stream_id not in seen_stream_ids]
+    if ordered_stream_ids:
+        ordered_stream_ids.extend(remaining_stream_ids)
+    else:
+        ordered_stream_ids = sorted(remaining_stream_ids, key=_natural_stream_order_key)
+    for stream_id in ordered_stream_ids:
+        sanitized[stream_id] = stream_payloads[stream_id]
+    sanitized[STREAM_ORDER_KEY] = list(ordered_stream_ids)
     valid_streams = set(stream_ids)
     tags_raw = data.get(GLOBAL_TAGS_KEY)
     sanitized[GLOBAL_TAGS_KEY] = _normalize_tag_collection(tags_raw)
@@ -2175,10 +2206,61 @@ def _prepare_settings_import(data: Dict[str, Any]) -> Tuple[Dict[str, Any], List
     for key, value in data.items():
         if not isinstance(key, str) or not key.startswith('_'):
             continue
-        if key in {GLOBAL_TAGS_KEY, '_notes', '_ai_defaults', '_groups', AI_PRESETS_KEY, SYNC_TIMERS_KEY}:
+        if key in {GLOBAL_TAGS_KEY, '_notes', '_ai_defaults', '_groups', AI_PRESETS_KEY, SYNC_TIMERS_KEY, STREAM_ORDER_KEY}:
             continue
         sanitized[key] = deepcopy(value)
     return sanitized, warnings
+
+
+def build_settings_export_payload() -> Dict[str, Any]:
+    snapshot = deepcopy(settings)
+    snapshot[STREAM_ORDER_KEY] = get_stream_order_snapshot()
+    return snapshot
+
+
+def get_stream_order_snapshot() -> List[str]:
+    stream_ids = [key for key in settings.keys() if isinstance(key, str) and not key.startswith("_")]
+    available = set(stream_ids)
+    order_raw = settings.get(STREAM_ORDER_KEY)
+    ordered: List[str] = []
+    seen: Set[str] = set()
+    if isinstance(order_raw, (list, tuple)):
+        for entry in order_raw:
+            if not isinstance(entry, str):
+                continue
+            stream_id = entry.strip()
+            if stream_id in available and stream_id not in seen:
+                ordered.append(stream_id)
+                seen.add(stream_id)
+    if ordered:
+        for stream_id in stream_ids:
+            if stream_id not in seen:
+                ordered.append(stream_id)
+        return ordered
+    return sorted(stream_ids, key=_natural_stream_order_key)
+
+
+def get_natural_stream_order_snapshot() -> List[str]:
+    stream_ids = [key for key in settings.keys() if isinstance(key, str) and not key.startswith("_")]
+    return sorted(stream_ids, key=_natural_stream_order_key)
+
+
+def iter_ordered_stream_items() -> List[Tuple[str, Dict[str, Any]]]:
+    ordered_streams: List[Tuple[str, Dict[str, Any]]] = []
+    for stream_id in get_stream_order_snapshot():
+        conf = settings.get(stream_id)
+        if isinstance(conf, dict):
+            ordered_streams.append((stream_id, conf))
+    return ordered_streams
+
+
+def iter_natural_stream_items() -> List[Tuple[str, Dict[str, Any]]]:
+    ordered_streams: List[Tuple[str, Dict[str, Any]]] = []
+    for stream_id in get_natural_stream_order_snapshot():
+        conf = settings.get(stream_id)
+        if isinstance(conf, dict):
+            ordered_streams.append((stream_id, conf))
+    return ordered_streams
 
 
 def load_settings():
@@ -2309,7 +2391,7 @@ def import_settings():
 
     response = {
         "success": True,
-        "streams": sorted(new_streams),
+        "streams": [stream_id for stream_id in get_stream_order_snapshot() if stream_id in new_streams],
         "added": added,
         "removed": removed,
         "updated": updated,
@@ -2969,7 +3051,7 @@ def dashboard():
     folder_inventory = get_folder_inventory(library=MEDIA_LIBRARY_DEFAULT)
     ai_folder_inventory = get_folder_inventory(library=AI_MEDIA_LIBRARY)
     subfolders = [item["name"] for item in folder_inventory]
-    streams = {k: v for k, v in settings.items() if not k.startswith("_")}
+    streams = dict(iter_natural_stream_items())
     for stream_id, conf in streams.items():
         if not isinstance(conf, dict):
             continue
@@ -2991,6 +3073,7 @@ def dashboard():
         folder_inventory=folder_inventory,
         ai_folder_inventory=ai_folder_inventory,
         stream_settings=streams,
+        custom_stream_order=get_stream_order_snapshot(),
         groups=groups,
         global_tags=get_global_tags(),
         sync_timers=sync_timers,
@@ -3004,7 +3087,7 @@ def dashboard():
 
 def mosaic_streams():
     # Dynamic global view: include all streams ("online" assumed as configured)
-    streams = {k: v for k, v in settings.items() if not k.startswith("_")}
+    streams = dict(iter_natural_stream_items())
     for stream_id, conf in streams.items():
         if not isinstance(conf, dict):
             continue
@@ -3081,6 +3164,18 @@ def delete_stream(stream_id):
     if STREAM_CONFIG_SERVICE.delete_stream(stream_id):
         return jsonify({"status": "deleted"})
     return jsonify({"error": "not found"}), 404
+
+
+def reorder_streams():
+    payload = request.get_json(silent=True) or {}
+    if not isinstance(payload, dict):
+        return jsonify({"error": "Invalid payload"}), 400
+    order = payload.get("stream_order")
+    if not isinstance(order, list):
+        return jsonify({"error": "stream_order must be a list"}), 400
+    updated_order = STREAM_CONFIG_SERVICE.reorder_streams(order)
+    return jsonify({"status": "ok", "stream_order": updated_order})
+
 
 def get_stream_settings(stream_id):
     try:
@@ -3350,6 +3445,7 @@ _dashboard_blueprint = create_dashboard_blueprint(
     update_stream_settings_handler=update_stream_settings,
     update_stream_timer_handler=update_stream_timer,
     refresh_picsum_image_handler=refresh_picsum_image,
+    reorder_streams_handler=reorder_streams,
 )
 register_blueprint_with_legacy_aliases(app, _dashboard_blueprint, {
     "dashboard": "dashboard_routes.dashboard",
@@ -3362,6 +3458,7 @@ register_blueprint_with_legacy_aliases(app, _dashboard_blueprint, {
     "update_stream_settings": "dashboard_routes.update_stream_settings",
     "update_stream_timer": "dashboard_routes.update_stream_timer",
     "refresh_picsum_image": "dashboard_routes.refresh_picsum_image",
+    "reorder_streams": "dashboard_routes.reorder_streams",
 })
 
 
@@ -3405,7 +3502,7 @@ _settings_operations_blueprint = create_settings_operations_blueprint(
     ai_fallback_defaults=AI_FALLBACK_DEFAULTS,
     post_processors=STABLE_HORDE_POST_PROCESSORS,
     max_loras=STABLE_HORDE_MAX_LORAS,
-    settings_export_payload=lambda: deepcopy(settings),
+    settings_export_payload=build_settings_export_payload,
     import_settings_handler=import_settings,
     update_ai_defaults_handler=update_ai_defaults,
     operations_service=OperationsService(
@@ -3835,6 +3932,7 @@ STREAM_CONFIG_SERVICE = StreamConfigService(
     sync_timers_key=SYNC_TIMERS_KEY,
     ai_settings_key=AI_SETTINGS_KEY,
     ai_state_key=AI_STATE_KEY,
+    stream_order_key=STREAM_ORDER_KEY,
     stream_runtime_lock=STREAM_RUNTIME_LOCK,
     stream_runtime_state=STREAM_RUNTIME_STATE,
 )

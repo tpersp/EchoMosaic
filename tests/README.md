@@ -11,6 +11,8 @@ It is intentionally lightweight so AI agents can run it quickly before suggestin
   Verifies updater backup/restore behavior for user files, restore points, and repo-local media folders.
 - `test_settings_store.py`
   Verifies the canonical settings persistence seam used by the de-monolith refactor.
+- `test_settings_import_order.py`
+  Verifies imported settings preserve stream order, including older exports without explicit order metadata.
 - `test_config_runtime.py`
   Verifies the config/media runtime bootstrap seam used to move media root setup out of the monolith.
 - `test_media_runtime.py`

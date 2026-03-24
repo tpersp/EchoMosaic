@@ -19,6 +19,7 @@ def create_dashboard_blueprint(
     update_stream_settings_handler: Callable[[str], object],
     update_stream_timer_handler: Callable[[str], object],
     refresh_picsum_image_handler: Callable[[], object],
+    reorder_streams_handler: Callable[[], object],
 ) -> Blueprint:
     blueprint = Blueprint("dashboard_routes", __name__)
 
@@ -61,5 +62,9 @@ def create_dashboard_blueprint(
     @blueprint.route("/picsum/refresh", methods=["POST"])
     def refresh_picsum_image():
         return refresh_picsum_image_handler()
+
+    @blueprint.route("/streams/reorder", methods=["POST"])
+    def reorder_streams():
+        return reorder_streams_handler()
 
     return blueprint

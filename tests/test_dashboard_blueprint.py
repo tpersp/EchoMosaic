@@ -19,6 +19,7 @@ def test_dashboard_blueprint_registers_expected_routes() -> None:
             update_stream_settings_handler=lambda stream_id: ("ok", 200),
             update_stream_timer_handler=lambda stream_id: ("ok", 200),
             refresh_picsum_image_handler=lambda: ("ok", 200),
+            reorder_streams_handler=lambda: ("ok", 200),
         )
     )
 
@@ -33,3 +34,4 @@ def test_dashboard_blueprint_registers_expected_routes() -> None:
     assert "/settings/<stream_id>" in endpoints
     assert "/api/timer/update/<stream_id>" in endpoints
     assert "/picsum/refresh" in endpoints
+    assert "/streams/reorder" in endpoints

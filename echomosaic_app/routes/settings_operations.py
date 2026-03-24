@@ -39,7 +39,7 @@ def create_settings_operations_blueprint(
     def export_settings_download():
         snapshot = settings_export_payload()
         buffer = io.BytesIO()
-        buffer.write(json.dumps(snapshot, indent=2, sort_keys=True).encode("utf-8"))
+        buffer.write(json.dumps(snapshot, indent=2).encode("utf-8"))
         buffer.seek(0)
         timestamp = datetime.utcnow().strftime("%Y%m%d-%H%M%S")
         filename = f"echo-settings-{timestamp}.json"

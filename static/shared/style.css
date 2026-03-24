@@ -806,6 +806,35 @@ a {
   gap: 0.4rem;
   margin-left: auto;
 }
+.reorder-handle {
+  background: var(--surface-alt);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 6px;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: grab;
+}
+.reorder-handle:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.reorder-handle:active {
+  cursor: grabbing;
+}
+.stream-card.is-dragging {
+  opacity: 0.6;
+}
+.stream-card.drag-over-top {
+  border-top: 2px solid var(--accent);
+}
+.stream-card.drag-over-bottom {
+  border-bottom: 2px solid var(--accent);
+}
 .minimize-button {
   background: var(--surface-alt);
   border: 1px solid var(--border);

@@ -7,10 +7,12 @@ A running list of ideas and future improvements. Add new items anywhere below.
 - [x] Images uploaded with capital "JPG" doesn't show up in media, and is not used in show rotation..
 - [x] Folders created isn't always shown in the dashboard.
 - [x] It created a folder via UI, it uploaded images to the folder via UI, but the dashboard does not show images or folders created. 
+- [ ] [2026-03-23] Importing settings from an exported settings JSON does not preserve the original stream order on the dashboard. After import, streams fall back to string-like ordering such as `stream1`, `stream10`, `stream12`, `stream2`, which is annoying and should preserve the previous/user-visible order.
 
 ## Active Ideas
 - [ ] Stream real-time update logs via Socket.IO instead of the current client-side animation.
 - [ ] Enable minimizing of streams in dashboard, so only streamname and menu button is visible, for better overview.
+- [ ] Add drag-and-drop stream reordering on the dashboard and persist the chosen order so imports/exports and normal dashboard rendering keep the same stream layout.
 - [x] [2026-01-27] Sync timers for random image/GIF streams so multiple streams change at the exact same time. Includes a global Sync Timers manager (create/edit/delete timers with interval + base offset), per-stream timer selection, and per-stream stagger offset in seconds to create cascading transitions instead of fully random timing.
 - [ ] Reduce RAM usage without limiting useability or performance.
 
