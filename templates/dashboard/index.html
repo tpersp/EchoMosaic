@@ -156,9 +156,15 @@
       <div class="custom-layout-overlay" hidden>
         <div class="custom-layout-controls">
           <button type="button" class="layout-move-up" aria-label="Move left" title="Move left">&#8592;</button>
-          <label class="custom-layout-slot-badge" aria-label="Layout slot">
+          <div class="custom-layout-center">
+            <label class="custom-layout-slot-badge" aria-label="Layout slot">
             <input type="number" class="custom-layout-slot-input" min="1" step="1" inputmode="numeric" aria-label="Layout slot">
-          </label>
+            </label>
+            <div class="custom-layout-origin-badge" hidden>
+              <span class="custom-layout-origin-label">Was</span>
+              <span class="custom-layout-origin-number">1</span>
+            </div>
+          </div>
           <button type="button" class="layout-move-down" aria-label="Move right" title="Move right">&#8594;</button>
         </div>
       </div>
@@ -2176,6 +2182,7 @@
   let defaultCardOrder = [];
   let customCardOrder = [];
   let layoutEditMode = false;
+  let layoutEditOriginalOrder = [];
 
   function renderOrderedCardsInPlace(orderedCards) {
     if (!dashboardGrid) {
@@ -2311,18 +2318,28 @@
       layoutEditMode = false;
     }
     const slotMap = new Map(customCardOrder.map((card, index) => [card.dataset.stream, index + 1]));
+    const originalSlotMap = new Map(layoutEditOriginalOrder.map((streamId, index) => [streamId, index + 1]));
     defaultCardOrder.forEach(card => {
       const overlay = card.querySelector('.custom-layout-overlay');
       const inputEl = card.querySelector('.custom-layout-slot-input');
       const upBtn = card.querySelector('.layout-move-up');
       const downBtn = card.querySelector('.layout-move-down');
+      const originBadge = card.querySelector('.custom-layout-origin-badge');
+      const originNumber = card.querySelector('.custom-layout-origin-number');
       const streamId = card.dataset.stream;
       const slot = slotMap.get(streamId) || (defaultCardOrder.indexOf(card) + 1);
+      const originalSlot = originalSlotMap.get(streamId) || slot;
       if (inputEl) {
         inputEl.value = String(slot);
         inputEl.min = '1';
         inputEl.max = String(customCardOrder.length || defaultCardOrder.length || 1);
         inputEl.disabled = !(customModeActive && layoutEditMode);
+      }
+      if (originNumber) {
+        originNumber.textContent = String(originalSlot);
+      }
+      if (originBadge) {
+        originBadge.hidden = !(customModeActive && layoutEditMode);
       }
       if (upBtn) {
         upBtn.disabled = !(customModeActive && layoutEditMode) || slot <= 1;
@@ -6192,7 +6209,13 @@ function applyPicsumSettings(card, settings, opts = {}) {
         if (currentSortMode !== 'custom') {
           return;
         }
+        if (!layoutEditMode) {
+          layoutEditOriginalOrder = customCardOrder.map(card => card.dataset.stream);
+        }
         layoutEditMode = !layoutEditMode;
+        if (!layoutEditMode) {
+          layoutEditOriginalOrder = [];
+        }
         updateLayoutEditorState();
       });
     }
