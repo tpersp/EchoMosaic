@@ -1141,12 +1141,13 @@
     toggleMinimizeAllBtn.textContent = allMinimized ? 'Expand All' : 'Minimize All';
   }
 
-  async function refreshDashboardUpdateBadge() {
+  async function refreshDashboardUpdateBadge(forceRefresh = false) {
     if (!settingsUpdateBadge) {
       return;
     }
     try {
-      const res = await fetch('/api/update_status', { cache: 'no-store' });
+      const query = forceRefresh ? '?refresh=1' : '';
+      const res = await fetch(`/api/update_status${query}`, { cache: 'no-store' });
       if (!res.ok) {
         throw new Error(`status ${res.status}`);
       }
@@ -6265,11 +6266,11 @@ function applyPicsumSettings(card, settings, opts = {}) {
         }
       });
     }
-    refreshDashboardUpdateBadge();
+    refreshDashboardUpdateBadge(true);
     if (updateStatusIntervalId) {
       clearInterval(updateStatusIntervalId);
     }
-    updateStatusIntervalId = window.setInterval(refreshDashboardUpdateBadge, UPDATE_STATUS_POLL_MS);
+    updateStatusIntervalId = window.setInterval(() => refreshDashboardUpdateBadge(false), UPDATE_STATUS_POLL_MS);
     renderSyncManager();
     updateSyncTimerSelects();
     if (syncTimerAddBtn) {

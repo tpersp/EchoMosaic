@@ -31,8 +31,9 @@
     .then(html => { document.body.innerHTML = html; })
     .catch(err => alert('Rollback failed: ' + err));
   }
-  function loadUpdateInfo() {
-    fetch('/update_info', { headers: { 'X-API-Key': SETTINGS_API_KEY }})
+  function loadUpdateInfo(forceRefresh = false) {
+    const query = forceRefresh ? '?refresh=1' : '';
+    fetch(`/update_info${query}`, { headers: { 'X-API-Key': SETTINGS_API_KEY }})
       .then(r => r.json())
       .then(info => {
         latestUpdateInfo = info || {};
@@ -69,7 +70,7 @@
         }
       });
   }
-  document.addEventListener('DOMContentLoaded', loadUpdateInfo);
+  document.addEventListener('DOMContentLoaded', () => loadUpdateInfo(true));
   async function loadUpdateHistory() {
     const list = document.getElementById('history-list');
     if (!list) return;

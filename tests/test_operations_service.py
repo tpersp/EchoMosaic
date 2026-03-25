@@ -95,6 +95,36 @@ def test_operations_service_reads_release_update_info(tmp_path: Path) -> None:
     assert info["update_available"] is True
 
 
+def test_operations_service_force_refresh_bypasses_release_cache(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / ".git").mkdir()
+    releases = iter(
+        [
+            {"tag_name": "v1.1.0", "html_url": "https://example.com/release/v1.1.0", "name": "v1.1.0"},
+            {"tag_name": "v1.2.0", "html_url": "https://example.com/release/v1.2.0", "name": "v1.2.0"},
+        ]
+    )
+    service = _service(
+        load_config=lambda: {
+            "INSTALL_DIR": str(repo),
+            "UPDATE_CHANNEL": "release",
+            "REPO_SLUG": "tpersp/EchoMosaic",
+            "INSTALLED_VERSION": "v1.0.0",
+            "INSTALLED_COMMIT": "abc1234",
+            "RELEASE_CHECK_INTERVAL_SECS": 3600,
+        },
+        fetch_json=lambda url: next(releases),
+        time_fn=lambda: 1000.0,
+    )
+
+    cached = service.read_update_info()
+    refreshed = service.read_update_info(force_refresh=True)
+
+    assert cached["latest_version"] == "v1.1.0"
+    assert refreshed["latest_version"] == "v1.2.0"
+
+
 def test_operations_service_normalizes_stale_dev_release_channel_to_branch(tmp_path: Path) -> None:
     repo = tmp_path / "repo"
     repo.mkdir()
