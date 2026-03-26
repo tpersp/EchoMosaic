@@ -2328,14 +2328,14 @@
   }
 
   async function persistAndRenderCustomOrder(cardToFocus = null) {
-    applyFiltersAndSorting({ anchorCard: cardToFocus, preserveScroll: false });
+    applyFiltersAndSorting({ anchorCard: cardToFocus });
     try {
       const savedOrder = await persistDashboardStreamOrder();
       const cardById = new Map(customCardOrder.map(card => [card.dataset.stream, card]));
       if (Array.isArray(savedOrder) && savedOrder.length) {
         customCardOrder = savedOrder.map(id => cardById.get(id)).filter(Boolean);
       }
-      applyFiltersAndSorting({ anchorCard: cardToFocus, preserveScroll: false });
+      applyFiltersAndSorting({ anchorCard: cardToFocus });
     } catch (err) {
       console.error('Failed to persist stream order', err);
       showNotification((err && err.message) ? err.message : 'Failed to save stream order');
@@ -2345,10 +2345,15 @@
   function updateLayoutEditorState() {
     const customModeActive = currentSortMode === 'custom';
     if (layoutEditToggle) {
-      layoutEditToggle.disabled = !customModeActive;
       layoutEditToggle.hidden = false;
       layoutEditToggle.setAttribute('aria-pressed', String(customModeActive && layoutEditMode));
-      layoutEditToggle.textContent = customModeActive && layoutEditMode ? 'Done Editing' : 'Edit Layout';
+      if (customModeActive && layoutEditMode) {
+        layoutEditToggle.textContent = 'Done Editing';
+      } else if (customModeActive) {
+        layoutEditToggle.textContent = 'Edit Layout';
+      } else {
+        layoutEditToggle.textContent = 'Edit Custom Layout';
+      }
     }
     if (!customModeActive) {
       layoutEditMode = false;
@@ -6243,7 +6248,14 @@ function applyPicsumSettings(card, settings, opts = {}) {
     if (layoutEditToggle) {
       layoutEditToggle.addEventListener('click', () => {
         if (currentSortMode !== 'custom') {
-          return;
+          currentSortMode = 'custom';
+          if (sortSelect) {
+            sortSelect.value = currentSortMode;
+          }
+          try {
+            localStorage.setItem(dashboardSortStorageKey, currentSortMode);
+          } catch (err) {}
+          applyFiltersAndSorting();
         }
         if (!layoutEditMode) {
           layoutEditOriginalOrder = customCardOrder.map(card => card.dataset.stream);
