@@ -2345,6 +2345,7 @@
   function updateLayoutEditorState() {
     const customModeActive = currentSortMode === 'custom';
     if (layoutEditToggle) {
+      layoutEditToggle.disabled = false;
       layoutEditToggle.hidden = false;
       layoutEditToggle.setAttribute('aria-pressed', String(customModeActive && layoutEditMode));
       if (customModeActive && layoutEditMode) {
