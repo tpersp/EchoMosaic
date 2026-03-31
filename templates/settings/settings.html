@@ -353,16 +353,32 @@
   document.addEventListener('DOMContentLoaded', initTimerSettingsControls);
 </script>
 </head>
-<body>
-  <header class="top-bar">
-    <h1>Settings</h1>
-    <nav>
-      <a href="{{ url_for('dashboard_routes.dashboard') }}">Dashboard</a>
-      <a href="{{ url_for('media_routes.media_management_page') }}">Media</a>
-      <button id="theme-toggle" class="icon-btn" type="button" aria-label="Toggle theme" title="Toggle theme" style="margin-left:.5rem;"></button>
-    </nav>
-  </header>
-  <div class="container">
+<body class="dashboard-page">
+  <div class="dashboard-shell">
+    <aside class="dashboard-sidebar">
+      <div class="dashboard-sidebar-brand">
+        <h1>EchoMosaic</h1>
+        <p>Application Settings</p>
+      </div>
+
+      <nav class="dashboard-sidebar-nav" aria-label="Primary">
+        <a class="sidebar-link" href="{{ url_for('dashboard_routes.dashboard') }}">Dashboard</a>
+        <a class="sidebar-link" href="{{ url_for('media_routes.media_management_page') }}">Media</a>
+        <a class="sidebar-link is-active" href="{{ url_for('settings_operations.app_settings') }}" aria-current="page">Settings</a>
+      </nav>
+
+      <div class="dashboard-sidebar-footer">
+        <button id="theme-toggle" class="sidebar-theme-toggle" type="button" aria-label="Toggle theme" title="Toggle theme"></button>
+      </div>
+    </aside>
+
+    <main class="dashboard-workspace">
+      <div class="dashboard-workspace-inner">
+        <header class="page-section-header">
+          <h2>Settings</h2>
+        </header>
+
+  <div class="container settings-container">
     <p><strong>Install Dir:</strong> {{ config.INSTALL_DIR }}</p>
     <p><strong>Service Name:</strong> {{ config.SERVICE_NAME }}</p>
     <p><strong>Update Channel:</strong> {{ config.UPDATE_CHANNEL or 'branch' }}</p>
@@ -556,6 +572,9 @@
       </div>
     </div>
 
+  </div>
+      </div>
+    </main>
   </div>
   <script>
   (function(){

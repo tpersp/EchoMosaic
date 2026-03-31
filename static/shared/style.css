@@ -146,6 +146,21 @@ body.dashboard-page.dashboard-panel-open {
   padding: 1.5rem;
 }
 
+.page-section-header {
+  margin-bottom: 1rem;
+}
+
+.page-section-header h2 {
+  margin: 0;
+  font-size: 1.65rem;
+  line-height: 1.1;
+}
+
+.settings-container {
+  max-width: 1200px;
+  margin: 0;
+}
+
 .dashboard-status-panel {
   display: block;
   margin-bottom: 1rem;

@@ -6,18 +6,32 @@
   <link rel="stylesheet" href="{{ url_for('static', filename='shared/style.css') }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='media/media_manage.css') }}">
 </head>
-<body>
-<header class="top-bar">
-  <h1>Media Manager</h1>
-  <nav>
-    <a href="{{ url_for('dashboard_routes.dashboard') }}">Dashboard</a>
-    <a href="{{ url_for('media_routes.media_management_page') }}" aria-current="page">Media</a>
-    <a href="{{ url_for('settings_operations.app_settings') }}">Settings</a>
-    <button id="theme-toggle" class="icon-btn" type="button" aria-label="Toggle theme" title="Toggle theme" style="margin-left:.5rem;"></button>
-  </nav>
-</header>
+<body class="dashboard-page">
+<div class="dashboard-shell">
+  <aside class="dashboard-sidebar">
+    <div class="dashboard-sidebar-brand">
+      <h1>EchoMosaic</h1>
+      <p>Media Library</p>
+    </div>
 
-<main class="media-manage" data-allow-edit="{{ 'true' if media_allow_edit else 'false' }}">
+    <nav class="dashboard-sidebar-nav" aria-label="Primary">
+      <a class="sidebar-link" href="{{ url_for('dashboard_routes.dashboard') }}">Dashboard</a>
+      <a class="sidebar-link is-active" href="{{ url_for('media_routes.media_management_page') }}" aria-current="page">Media</a>
+      <a class="sidebar-link" href="{{ url_for('settings_operations.app_settings') }}">Settings</a>
+    </nav>
+
+    <div class="dashboard-sidebar-footer">
+      <button id="theme-toggle" class="sidebar-theme-toggle" type="button" aria-label="Toggle theme" title="Toggle theme"></button>
+    </div>
+  </aside>
+
+  <main class="dashboard-workspace">
+    <div class="dashboard-workspace-inner">
+      <header class="page-section-header">
+        <h2>Media</h2>
+      </header>
+
+<section class="media-manage" data-allow-edit="{{ 'true' if media_allow_edit else 'false' }}">
   <aside class="media-tree" id="media-tree" aria-label="Media folders">
     <div class="tree-header">
       <span>Folders</span>
@@ -61,7 +75,10 @@
     <section id="upload-queue" class="upload-queue" aria-live="polite" hidden></section>
     {% endif %}
   </section>
-</main>
+</section>
+    </div>
+  </main>
+</div>
 
 <input type="file" id="upload-input" multiple hidden {% if media_allowed_exts %}accept="{{ media_allowed_exts|join(',') }}"{% endif %}>
 
