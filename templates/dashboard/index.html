@@ -5,16 +5,36 @@
   <title>EchoMosaic Dashboard</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='shared/style.css') }}">
 </head>
-<body>
-<header class="top-bar">
-  <h1>EchoMosaic</h1>
-  <nav>
-    <a href="{{ url_for('media_routes.media_management_page') }}">Media</a>
-    <a id="settings-nav-link" href="{{ url_for('settings_operations.app_settings') }}">Settings<span id="settings-update-badge" class="nav-update-badge" hidden aria-label="Update available"></span></a>
-    <button id="theme-toggle" class="icon-btn" type="button" aria-label="Toggle theme" title="Toggle theme" style="margin-left:.5rem;"></button>
-  </nav>
-</header>
-<div class="container">
+<body class="dashboard-page">
+<div class="dashboard-shell">
+  <aside class="dashboard-sidebar">
+    <div class="dashboard-sidebar-brand">
+      <h1>EchoMosaic</h1>
+      <p>Dashboard Control</p>
+    </div>
+
+    <nav class="dashboard-sidebar-nav" aria-label="Primary">
+      <a class="sidebar-link is-active" href="{{ url_for('dashboard_routes.dashboard') }}">Dashboard</a>
+      <a class="sidebar-link" href="{{ url_for('media_routes.media_management_page') }}">Media</a>
+      <a id="settings-nav-link" class="sidebar-link" href="{{ url_for('settings_operations.app_settings') }}">Settings<span id="settings-update-badge" class="nav-update-badge" hidden aria-label="Update available"></span></a>
+    </nav>
+
+    <section class="dashboard-sidebar-section" aria-labelledby="dashboard-tools-title">
+      <div class="dashboard-sidebar-title" id="dashboard-tools-title">Managers</div>
+      <div class="dashboard-sidebar-actions">
+        <button type="button" class="sidebar-action" data-dashboard-panel="group-manager-panel">Groups</button>
+        <button type="button" class="sidebar-action" data-dashboard-panel="tag-manager-panel">Tags</button>
+        <button type="button" class="sidebar-action" data-dashboard-panel="sync-manager-panel">Sync Timers</button>
+      </div>
+    </section>
+
+    <div class="dashboard-sidebar-footer">
+      <button id="theme-toggle" class="sidebar-theme-toggle" type="button" aria-label="Toggle theme" title="Toggle theme"></button>
+    </div>
+  </aside>
+
+  <main class="dashboard-workspace">
+    <div class="dashboard-workspace-inner">
 
   <datalist id="global-tag-options">
     {% for tag in global_tags %}
@@ -22,113 +42,78 @@
     {% endfor %}
   </datalist>
 
-  <section class="system-monitor" id="system-monitor" role="status" aria-live="polite" hidden>
-    <div class="monitor-item" data-monitor="cpu">
-      <span class="monitor-label">CPU</span>
-      <div class="monitor-subtext" aria-hidden="true"></div>
-      <div class="monitor-bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
-        <div class="monitor-bar-fill"></div>
-      </div>
-      <span class="monitor-value">--%</span>
-    </div>
-    <div class="monitor-item" data-monitor="memory">
-      <span class="monitor-label">RAM</span>
-      <div class="monitor-subtext" aria-hidden="true"></div>
-      <div class="monitor-bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
-        <div class="monitor-bar-fill"></div>
-      </div>
-      <span class="monitor-value">--</span>
-    </div>
-    <div class="monitor-item" data-monitor="gpu" hidden>
-      <span class="monitor-label">GPU</span>
-      <div class="monitor-subtext" aria-hidden="true"></div>
-      <div class="monitor-bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
-        <div class="monitor-bar-fill"></div>
-      </div>
-      <span class="monitor-value">--%</span>
-    </div>
-    <div class="monitor-item" data-monitor="disk">
-      <span class="monitor-label">Storage</span>
-      <div class="monitor-subtext" data-monitor-path></div>
-      <div class="monitor-bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
-        <div class="monitor-bar-fill"></div>
-      </div>
-      <span class="monitor-value">--</span>
-    </div>
-  </section>
+      <header class="dashboard-status-panel">
+        <div class="dashboard-status-copy">
+          <span class="dashboard-kicker">Workspace</span>
+          <h2>Streams Dashboard</h2>
+          <p>Manage active stream cards, filters, layouts, and utilities from one focused workspace.</p>
+        </div>
+        <section class="system-monitor" id="system-monitor" role="status" aria-live="polite" hidden>
+          <div class="monitor-item" data-monitor="cpu">
+            <span class="monitor-label">CPU</span>
+            <div class="monitor-subtext" aria-hidden="true"></div>
+            <div class="monitor-bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+              <div class="monitor-bar-fill"></div>
+            </div>
+            <span class="monitor-value">--%</span>
+          </div>
+          <div class="monitor-item" data-monitor="memory">
+            <span class="monitor-label">RAM</span>
+            <div class="monitor-subtext" aria-hidden="true"></div>
+            <div class="monitor-bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+              <div class="monitor-bar-fill"></div>
+            </div>
+            <span class="monitor-value">--</span>
+          </div>
+          <div class="monitor-item" data-monitor="gpu" hidden>
+            <span class="monitor-label">GPU</span>
+            <div class="monitor-subtext" aria-hidden="true"></div>
+            <div class="monitor-bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+              <div class="monitor-bar-fill"></div>
+            </div>
+            <span class="monitor-value">--%</span>
+          </div>
+          <div class="monitor-item" data-monitor="disk">
+            <span class="monitor-label">Storage</span>
+            <div class="monitor-subtext" data-monitor-path></div>
+            <div class="monitor-bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+              <div class="monitor-bar-fill"></div>
+            </div>
+            <span class="monitor-value">--</span>
+          </div>
+        </section>
+      </header>
 
-  <!-- Group Manager Card -->
-  <div class="stream-card" id="group-manager">
-    <div class="card-header">
-      <h2>Groups</h2>
-    </div>
-    <div class="group-section">
-      <div id="group-tiles" class="group-tiles"></div>
-    </div>
-  </div>
+      <section class="dashboard-toolbar" aria-label="Dashboard controls">
+        <div class="controls dashboard-primary-actions">
+          <button id="add-stream">Add Stream</button>
+          <button id="open-mosaic">View Streams</button>
+          <button id="toggle-minimize-all">Minimize All</button>
+        </div>
 
-  <div class="stream-card" id="tag-manager">
-    <div class="card-header">
-      <h2>Tags</h2>
-    </div>
-    <div class="tag-manager-body">
-      <div id="tag-manager-list" class="tag-manager-list"></div>
-      <div class="tag-manager-actions">
-        <input type="text" id="new-tag-input" placeholder="Create tag" list="global-tag-options" autocomplete="off" />
-        <button type="button" id="create-tag-btn">Add</button>
-      </div>
-      <p class="tag-manager-hint">Tags are shared across all streams. Remove tags here when no cards use them.</p>
-    </div>
-  </div>
-
-  <div class="stream-card" id="sync-manager">
-    <div class="card-header">
-      <h2>Sync Timers</h2>
-    </div>
-    <div class="sync-manager-body">
-      <div id="sync-manager-list" class="sync-manager-list"></div>
-      <div class="sync-manager-actions">
-        <input type="text" id="sync-timer-label" placeholder="Timer name" autocomplete="off" />
-        <input type="number" id="sync-timer-interval" min="1" step="1" placeholder="Interval (sec)" />
-        <button type="button" id="sync-timer-add-btn">Add</button>
-      </div>
-      <p class="sync-manager-hint">Timers drive synchronized changes across random image/GIF streams. Assign one per stream and use the offset to stagger.</p>
-    </div>
-  </div>
-
-  <div class="stream-card" id="ui-controls">
-    <div class="card-header">
-      <h2>UI</h2>
-    </div>
-    <div class="filter-bar" id="filter-bar">
-      <div class="filter-group">
-        <label for="tag-filter-input">Filter Tags</label>
-        <div class="tag-filter-input">
-          <div class="tag-chip-list" id="tag-filter-chips">
-            <input type="text" id="tag-filter-input" placeholder="Add tag filter" list="global-tag-options" autocomplete="off" />
+        <div class="filter-bar dashboard-filter-bar" id="filter-bar">
+          <div class="filter-group">
+            <label for="tag-filter-input">Filter Tags</label>
+            <div class="tag-filter-input">
+              <div class="tag-chip-list" id="tag-filter-chips">
+                <input type="text" id="tag-filter-input" placeholder="Add tag filter" list="global-tag-options" autocomplete="off" />
+              </div>
+            </div>
+          </div>
+          <div class="filter-group">
+            <label for="sort-select">Sort</label>
+            <select id="sort-select">
+              <option value="default" selected>Default</option>
+              <option value="custom">Custom</option>
+              <option value="group">Group by Tag</option>
+            </select>
+          </div>
+          <div class="filter-group filter-group-layout">
+            <label for="layout-edit-toggle">Layout</label>
+            <button id="layout-edit-toggle" type="button" disabled aria-pressed="false">Edit Layout</button>
           </div>
         </div>
-      </div>
-      <div class="filter-group">
-        <label for="sort-select">Sort</label>
-        <select id="sort-select">
-          <option value="default" selected>Default</option>
-          <option value="custom">Custom</option>
-          <option value="group">Group by Tag</option>
-        </select>
-      </div>
-      <div class="filter-group filter-group-layout">
-        <label for="layout-edit-toggle">Layout</label>
-        <button id="layout-edit-toggle" type="button" disabled aria-pressed="false">Edit Layout</button>
-      </div>
-    </div>
-  </div>
-
-  <div class="controls">
-    <button id="add-stream">Add Stream</button>
-    <button id="open-mosaic">View Streams</button>
-    <button id="toggle-minimize-all">Minimize All</button>
-  </div>
+      </section>
 
   <div id="dashboard-grid" class="dashboard-grid">
     {# Generate a card for each stream dynamically #}
@@ -633,8 +618,72 @@
       </p>
     </div>
     {% endfor %}
-  </div>
+      </div>
+    </div>
+  </main>
 </div>
+
+<div id="dashboard-panel-backdrop" class="dashboard-panel-backdrop" hidden></div>
+
+<section id="group-manager-panel" class="dashboard-panel" role="dialog" aria-modal="true" aria-labelledby="group-manager-title" hidden>
+  <div class="dashboard-panel-header">
+    <div>
+      <span class="dashboard-panel-kicker">Manager</span>
+      <h2 id="group-manager-title">Groups</h2>
+    </div>
+    <button type="button" class="dashboard-panel-close" data-close-dashboard-panel aria-label="Close">&times;</button>
+  </div>
+  <div class="dashboard-panel-body">
+    <div class="group-section" id="group-manager">
+      <div id="group-tiles" class="group-tiles"></div>
+    </div>
+  </div>
+</section>
+
+<section id="tag-manager-panel" class="dashboard-panel" role="dialog" aria-modal="true" aria-labelledby="tag-manager-title" hidden>
+  <div class="dashboard-panel-header">
+    <div>
+      <span class="dashboard-panel-kicker">Manager</span>
+      <h2 id="tag-manager-title">Tags</h2>
+    </div>
+    <button type="button" class="dashboard-panel-close" data-close-dashboard-panel aria-label="Close">&times;</button>
+  </div>
+  <div class="dashboard-panel-body">
+    <div id="tag-manager">
+      <div class="tag-manager-body">
+        <div id="tag-manager-list" class="tag-manager-list"></div>
+        <div class="tag-manager-actions">
+          <input type="text" id="new-tag-input" placeholder="Create tag" list="global-tag-options" autocomplete="off" />
+          <button type="button" id="create-tag-btn">Add</button>
+        </div>
+        <p class="tag-manager-hint">Tags are shared across all streams. Remove tags here when no cards use them.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="sync-manager-panel" class="dashboard-panel" role="dialog" aria-modal="true" aria-labelledby="sync-manager-title" hidden>
+  <div class="dashboard-panel-header">
+    <div>
+      <span class="dashboard-panel-kicker">Manager</span>
+      <h2 id="sync-manager-title">Sync Timers</h2>
+    </div>
+    <button type="button" class="dashboard-panel-close" data-close-dashboard-panel aria-label="Close">&times;</button>
+  </div>
+  <div class="dashboard-panel-body">
+    <div id="sync-manager">
+      <div class="sync-manager-body">
+        <div id="sync-manager-list" class="sync-manager-list"></div>
+        <div class="sync-manager-actions">
+          <input type="text" id="sync-timer-label" placeholder="Timer name" autocomplete="off" />
+          <input type="number" id="sync-timer-interval" min="1" step="1" placeholder="Interval (sec)" />
+          <button type="button" id="sync-timer-add-btn">Add</button>
+        </div>
+        <p class="sync-manager-hint">Timers drive synchronized changes across random image/GIF streams. Assign one per stream and use the offset to stagger.</p>
+      </div>
+    </div>
+  </div>
+</section>
 
 <!-- Notification -->
 <div id="notification" class="notification">Settings updated!</div>
@@ -1112,6 +1161,9 @@
   const syncTimerAddBtn = document.getElementById('sync-timer-add-btn');
   const tagDatalist = document.getElementById('global-tag-options');
   const systemMonitor = document.getElementById('system-monitor');
+  const dashboardPanelBackdrop = document.getElementById('dashboard-panel-backdrop');
+  const dashboardPanelLaunchers = Array.from(document.querySelectorAll('[data-dashboard-panel]'));
+  const dashboardPanelCloseButtons = Array.from(document.querySelectorAll('[data-close-dashboard-panel]'));
   const systemMonitorElements = systemMonitor ? {
     cpu: systemMonitor.querySelector('[data-monitor="cpu"]'),
     memory: systemMonitor.querySelector('[data-monitor="memory"]'),
@@ -1127,6 +1179,49 @@
     playlist: 'Playlist',
     live: 'Live',
   };
+  let openDashboardPanelId = null;
+  let dashboardPanelReturnFocus = null;
+
+  function setDashboardPanelState(panelId, open, trigger = null) {
+    const panel = panelId ? document.getElementById(panelId) : null;
+    if (open) {
+      if (!panel) return;
+      if (openDashboardPanelId && openDashboardPanelId !== panelId) {
+        setDashboardPanelState(openDashboardPanelId, false);
+      }
+      openDashboardPanelId = panelId;
+      dashboardPanelReturnFocus = trigger || document.activeElement;
+      panel.hidden = false;
+      if (dashboardPanelBackdrop) {
+        dashboardPanelBackdrop.hidden = false;
+      }
+      document.body.classList.add('dashboard-panel-open');
+      const focusTarget = panel.querySelector('[data-close-dashboard-panel], input, button, select, textarea, a[href]');
+      if (focusTarget && typeof focusTarget.focus === 'function') {
+        window.setTimeout(() => focusTarget.focus(), 0);
+      }
+      return;
+    }
+    if (panel) {
+      panel.hidden = true;
+    }
+    if (openDashboardPanelId === panelId || !panelId) {
+      openDashboardPanelId = null;
+      if (dashboardPanelBackdrop) {
+        dashboardPanelBackdrop.hidden = true;
+      }
+      document.body.classList.remove('dashboard-panel-open');
+      if (dashboardPanelReturnFocus && typeof dashboardPanelReturnFocus.focus === 'function') {
+        window.setTimeout(() => dashboardPanelReturnFocus.focus(), 0);
+      }
+      dashboardPanelReturnFocus = null;
+    }
+  }
+
+  function closeDashboardPanel() {
+    if (!openDashboardPanelId) return;
+    setDashboardPanelState(openDashboardPanelId, false);
+  }
 
   function updateMinimizeAllButton() {
     if (!toggleMinimizeAllBtn) return;
@@ -3127,6 +3222,26 @@
   // initial load
   document.addEventListener('DOMContentLoaded', loadGroupsUI);
 
+  dashboardPanelLaunchers.forEach(button => {
+    button.addEventListener('click', () => {
+      const panelId = button.dataset.dashboardPanel;
+      if (!panelId) return;
+      if (openDashboardPanelId === panelId) {
+        closeDashboardPanel();
+      } else {
+        setDashboardPanelState(panelId, true, button);
+      }
+    });
+  });
+
+  dashboardPanelCloseButtons.forEach(button => {
+    button.addEventListener('click', closeDashboardPanel);
+  });
+
+  if (dashboardPanelBackdrop) {
+    dashboardPanelBackdrop.addEventListener('click', closeDashboardPanel);
+  }
+
   
 
   // Add a new stream by posting to /streams
@@ -3159,6 +3274,12 @@
             }
           });
       }
+    }
+  });
+
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && openDashboardPanelId) {
+      closeDashboardPanel();
     }
   });
 
