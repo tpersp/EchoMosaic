@@ -1154,51 +1154,51 @@ a {
 }
 
 .stream-card.is-minimized.layout-editing {
-  min-height: 132px;
+  min-height: 122px;
 }
 
 .stream-card.is-minimized.layout-editing .custom-layout-overlay {
-  padding: 0.45rem;
+  padding: 0.35rem;
   justify-content: center;
 }
 
 .stream-card.is-minimized.layout-editing .custom-layout-center {
-  --layout-slot-size: 76px;
-  gap: 0.35rem;
+  --layout-slot-size: 68px;
+  gap: 0.25rem;
 }
 
 .stream-card.is-minimized.layout-editing .custom-layout-controls {
-  gap: 0.5rem;
-  padding: 0.45rem 0.55rem;
-  border-radius: 24px;
+  gap: 0.4rem;
+  padding: 0.35rem 0.45rem;
+  border-radius: 20px;
 }
 
 .stream-card.is-minimized.layout-editing .custom-layout-controls button {
-  min-width: 38px;
-  min-height: 38px;
-  font-size: 1.15rem;
+  min-width: 34px;
+  min-height: 34px;
+  font-size: 1rem;
 }
 
 .stream-card.is-minimized.layout-editing .custom-layout-slot-badge {
-  border-radius: 22px;
+  border-radius: 18px;
 }
 
 .stream-card.is-minimized.layout-editing .custom-layout-slot-input {
-  font-size: 2rem;
+  font-size: 1.7rem;
   line-height: var(--layout-slot-size);
 }
 
 .stream-card.is-minimized.layout-editing .custom-layout-origin-badge {
-  padding: 0.22rem 0.5rem;
-  gap: 0.18rem;
+  padding: 0.18rem 0.42rem;
+  gap: 0.14rem;
 }
 
 .stream-card.is-minimized.layout-editing .custom-layout-origin-label {
-  font-size: 0.56rem;
+  font-size: 0.5rem;
 }
 
 .stream-card.is-minimized.layout-editing .custom-layout-origin-number {
-  font-size: 1rem;
+  font-size: 0.88rem;
 }
 .custom-layout-center {
   --layout-slot-size: 132px;
