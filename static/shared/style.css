@@ -282,9 +282,9 @@ body.dashboard-page.dashboard-panel-open {
 }
 
 .settings-stat-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
+  display: grid;
+  grid-template-columns: 110px minmax(0, 1fr);
+  align-items: start;
   gap: 1rem;
   padding: 0.7rem 0.85rem;
   border: 1px solid var(--border);
@@ -297,7 +297,10 @@ body.dashboard-page.dashboard-panel-open {
 }
 
 .settings-stat-row strong {
+  display: block;
   text-align: right;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
 }
 
 .settings-stat-value-group {
