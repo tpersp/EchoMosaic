@@ -364,6 +364,7 @@ a {
   display: grid;
   gap: 1rem;
   grid-template-columns: repeat(4, minmax(0, 1fr));
+  align-items: start;
 }
 
 .filter-group-layout {
