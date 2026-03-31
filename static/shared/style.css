@@ -34,7 +34,7 @@ body {
 
 body.dashboard-page {
   min-height: 100vh;
-  overflow: hidden;
+  overflow: auto;
 }
 
 body.dashboard-page.dashboard-panel-open {
@@ -132,7 +132,7 @@ body.dashboard-page.dashboard-panel-open {
 .dashboard-workspace {
   min-width: 0;
   min-height: 100vh;
-  overflow-y: auto;
+  overflow: visible;
 }
 
 .dashboard-workspace-inner {
@@ -143,21 +143,10 @@ body.dashboard-page.dashboard-panel-open {
 }
 
 .dashboard-status-panel {
-  display: grid;
-  grid-template-columns: minmax(260px, 360px) minmax(0, 1fr);
-  gap: 1rem;
-  align-items: start;
+  display: block;
   margin-bottom: 1rem;
 }
 
-.dashboard-status-copy {
-  padding: 1rem 1.1rem;
-  border: 1px solid var(--border);
-  border-radius: 16px;
-  background: linear-gradient(180deg, rgba(79, 163, 255, 0.12), rgba(79, 163, 255, 0.02));
-}
-
-.dashboard-kicker,
 .dashboard-panel-kicker {
   display: inline-block;
   margin-bottom: 0.45rem;
@@ -166,18 +155,6 @@ body.dashboard-page.dashboard-panel-open {
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: rgba(238, 238, 238, 0.6);
-}
-
-.dashboard-status-copy h2 {
-  margin: 0;
-  font-size: 1.8rem;
-  line-height: 1.1;
-}
-
-.dashboard-status-copy p {
-  margin: 0.6rem 0 0;
-  color: rgba(238, 238, 238, 0.78);
-  line-height: 1.45;
 }
 
 .dashboard-toolbar {
