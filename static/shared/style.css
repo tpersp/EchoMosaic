@@ -1154,51 +1154,53 @@ a {
 }
 
 .stream-card.is-minimized.layout-editing {
-  min-height: 122px;
+  min-height: 112px;
 }
 
 .stream-card.is-minimized.layout-editing .custom-layout-overlay {
-  padding: 0.35rem;
+  padding: 0.25rem 0.35rem;
   justify-content: center;
 }
 
 .stream-card.is-minimized.layout-editing .custom-layout-center {
-  --layout-slot-size: 68px;
-  gap: 0.25rem;
+  --layout-slot-size: 58px;
+  gap: 0.18rem;
 }
 
 .stream-card.is-minimized.layout-editing .custom-layout-controls {
-  gap: 0.4rem;
-  padding: 0.35rem 0.45rem;
-  border-radius: 20px;
-}
-
-.stream-card.is-minimized.layout-editing .custom-layout-controls button {
-  min-width: 34px;
-  min-height: 34px;
-  font-size: 1rem;
-}
-
-.stream-card.is-minimized.layout-editing .custom-layout-slot-badge {
+  gap: 0.3rem;
+  padding: 0.25rem 0.35rem;
   border-radius: 18px;
 }
 
+.stream-card.is-minimized.layout-editing .custom-layout-controls button {
+  min-width: 30px;
+  min-height: 30px;
+  font-size: 0.92rem;
+}
+
+.stream-card.is-minimized.layout-editing .custom-layout-slot-badge {
+  border-radius: 16px;
+}
+
 .stream-card.is-minimized.layout-editing .custom-layout-slot-input {
-  font-size: 1.7rem;
+  font-size: 1.45rem;
   line-height: var(--layout-slot-size);
 }
 
 .stream-card.is-minimized.layout-editing .custom-layout-origin-badge {
-  padding: 0.18rem 0.42rem;
-  gap: 0.14rem;
+  min-width: 42px;
+  padding: 0.12rem 0.3rem;
+  gap: 0.08rem;
+  border-radius: 12px;
 }
 
 .stream-card.is-minimized.layout-editing .custom-layout-origin-label {
-  font-size: 0.5rem;
+  font-size: 0.42rem;
 }
 
 .stream-card.is-minimized.layout-editing .custom-layout-origin-number {
-  font-size: 0.88rem;
+  font-size: 0.72rem;
 }
 .custom-layout-center {
   --layout-slot-size: 132px;
