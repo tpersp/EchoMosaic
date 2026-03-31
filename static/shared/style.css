@@ -43,8 +43,8 @@ body.dashboard-page.dashboard-panel-open {
 
 .dashboard-shell {
   min-height: 100vh;
-  display: grid;
-  grid-template-columns: 260px minmax(0, 1fr);
+  position: relative;
+  padding-left: 260px;
   background:
     linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0)) 0 0 / 100% 220px no-repeat,
     var(--bg);
@@ -57,9 +57,13 @@ body.dashboard-page.dashboard-panel-open {
   padding: 1.5rem 1rem 1rem;
   background: linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0) 18%), #161616;
   border-right: 1px solid var(--border);
-  min-height: 100vh;
-  position: sticky;
+  position: fixed;
   top: 0;
+  left: 0;
+  bottom: 0;
+  width: 260px;
+  overflow-y: auto;
+  z-index: 30;
 }
 
 .dashboard-sidebar-brand h1 {
@@ -376,12 +380,13 @@ a {
   }
 
   .dashboard-shell {
-    grid-template-columns: 1fr;
+    padding-left: 0;
   }
 
   .dashboard-sidebar {
-    min-height: auto;
     position: static;
+    width: auto;
+    overflow: visible;
     border-right: 0;
     border-bottom: 1px solid var(--border);
   }
