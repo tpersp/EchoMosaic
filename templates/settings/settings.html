@@ -379,63 +379,120 @@
         </header>
 
   <div class="container settings-container">
-    <p><strong>Install Dir:</strong> {{ config.INSTALL_DIR }}</p>
-    <p><strong>Service Name:</strong> {{ config.SERVICE_NAME }}</p>
-    <p><strong>Update Channel:</strong> {{ config.UPDATE_CHANNEL or 'branch' }}</p>
-    <p><strong>Update Branch:</strong> {{ config.UPDATE_BRANCH }}</p>
-    <div style="margin: 1rem 0; padding: 0.75rem; border:1px solid var(--border); border-radius:4px; background: var(--surface-alt);">
-      <h3 style="margin-top:0;">Update Status</h3>
-      <p><strong>Channel:</strong> <span id="channel">-</span></p>
-      <p><strong>Branch:</strong> <span id="branch">-</span></p>
-      <p><strong>Current:</strong> <span id="current">-</span></p>
-      <p><strong>Latest:</strong> <span id="remote">-</span></p>
-      <p><strong>Previous:</strong> <span id="previous">-</span></p>
-      <p id="update-note" style="opacity:0.9;">Checking…</p>
-      <div style="display:flex; gap:0.5rem; flex-wrap:wrap;">
-        <button id="update-btn" onclick="triggerUpdate()" disabled>Update Now</button>
-        <button id="rollback-btn" onclick="triggerRollback()" disabled>Rollback</button>
-        <button id="create-restore-btn" type="button" onclick="promptRestorePoint()">Create Restore Point</button>
-      </div>
-    </div>
-
-    <div style="margin: 1rem 0; padding: 0.75rem; border:1px solid var(--border); border-radius:4px; background: var(--surface-alt);">
-      <h3 style="margin-top:0;">Restore Points</h3>
-      <p style="margin-top:0; opacity:0.9;">Save a known good state so you can roll back even after additional updates.</p>
-      <div style="max-height: 260px; overflow-y: auto; border:1px solid var(--border); border-radius:4px; background: var(--surface);">
-        <ul id="restore-point-list" style="list-style:none; margin:0; padding:0;"></ul>
-      </div>
-      <p id="restore-point-note" style="display:none; margin:0.5rem 0 0; font-size:0.9rem;"></p>
-    </div>
-
-    <div style="margin: 1rem 0; padding: 0.75rem; border:1px solid var(--border); border-radius:4px; background: var(--surface-alt);">
-      <h3 style="margin-top:0;">Update History</h3>
-      <div id="history" style="max-height: 280px; overflow-y: auto; border:1px solid var(--border); border-radius:4px; background: var(--surface);">
-        <ul id="history-list" style="list-style:none; margin:0; padding:0;"></ul>
-      </div>
-    </div>
-
-    <div style="margin: 1rem 0; padding: 0.75rem; border:1px solid var(--border); border-radius:4px; background: var(--surface-alt);">
-      <h3 style="margin-top:0;">Auto-Generate Timers</h3>
-      <p style="margin-top:0; opacity:0.9;">Control how automatic generation timers calculate their next run across Picsum and AI streams.</p>
-      <label class="toggle compact">
-        <input type="checkbox" id="timer-snap-toggle">
-        <span class="toggle-switch"></span>
-        <span class="toggle-label">Snap Timers to Full Increments</span>
-      </label>
-      <p id="timer-snap-note" style="display:none; margin:0.5rem 0 0; font-size:0.9rem; opacity:0.85;"></p>
-    </div>
-
-    <div style="margin: 1rem 0; padding: 0.75rem; border:1px solid var(--border); border-radius:4px; background: var(--surface-alt);">
-      <h3 style="margin-top:0;">Stable Horde Defaults</h3>
-      <p style="margin-top:0;">These defaults apply whenever a stream switches to AI mode and has not saved its own overrides.</p>
-      <form id="ai-defaults-form" style="display:flex; flex-direction:column; gap:0.75rem;">
+    <section class="settings-summary-card">
+      <div class="settings-card-header">
         <div>
-          <label for="ai-defaults-prompt" style="display:block; font-weight:600; margin-bottom:0.35rem;">Prompt</label>
-          <textarea id="ai-defaults-prompt" rows="3" style="width:100%; resize:vertical;"></textarea>
+          <p class="settings-kicker">Overview</p>
+          <h3>Application Summary</h3>
+        </div>
+        <p class="settings-card-copy">Key install and update settings in one place.</p>
+      </div>
+      <div class="settings-meta-grid">
+        <div class="settings-meta-item">
+          <span class="settings-meta-label">Install Dir</span>
+          <span class="settings-meta-value settings-meta-value-path">{{ config.INSTALL_DIR }}</span>
+        </div>
+        <div class="settings-meta-item">
+          <span class="settings-meta-label">Service Name</span>
+          <span class="settings-meta-value">{{ config.SERVICE_NAME }}</span>
+        </div>
+        <div class="settings-meta-item">
+          <span class="settings-meta-label">Update Channel</span>
+          <span class="settings-meta-value">{{ config.UPDATE_CHANNEL or 'branch' }}</span>
+        </div>
+        <div class="settings-meta-item">
+          <span class="settings-meta-label">Update Branch</span>
+          <span class="settings-meta-value">{{ config.UPDATE_BRANCH }}</span>
+        </div>
+      </div>
+    </section>
+
+    <div class="settings-grid settings-grid-primary">
+      <section class="settings-card">
+        <div class="settings-card-header">
+          <div>
+            <p class="settings-kicker">Maintenance</p>
+            <h3>Update Status</h3>
+          </div>
+          <p class="settings-card-copy">Check the installed version, compare it to the remote version, and run maintenance actions.</p>
+        </div>
+        <div class="settings-stat-list">
+          <div class="settings-stat-row"><span>Channel</span><strong id="channel">-</strong></div>
+          <div class="settings-stat-row"><span>Branch</span><strong id="branch">-</strong></div>
+          <div class="settings-stat-row"><span>Current</span><strong id="current">-</strong></div>
+          <div class="settings-stat-row"><span>Latest</span><strong id="remote">-</strong></div>
+          <div class="settings-stat-row"><span>Previous</span><strong id="previous">-</strong></div>
+        </div>
+        <p id="update-note" class="settings-status-line">Checking…</p>
+        <div class="settings-actions">
+          <button id="update-btn" onclick="triggerUpdate()" disabled>Update Now</button>
+          <button id="rollback-btn" onclick="triggerRollback()" disabled>Rollback</button>
+          <button id="create-restore-btn" type="button" onclick="promptRestorePoint()">Create Restore Point</button>
+        </div>
+      </section>
+
+      <section class="settings-card">
+        <div class="settings-card-header">
+          <div>
+            <p class="settings-kicker">Automation</p>
+            <h3>Auto-Generate Timers</h3>
+          </div>
+          <p class="settings-card-copy">Control how automatic generation timers calculate their next run across Picsum and AI streams.</p>
+        </div>
+        <label class="toggle compact">
+          <input type="checkbox" id="timer-snap-toggle">
+          <span class="toggle-switch"></span>
+          <span class="toggle-label">Snap Timers to Full Increments</span>
+        </label>
+        <p id="timer-snap-note" class="settings-status-line" style="display:none;"></p>
+      </section>
+    </div>
+
+    <div class="settings-grid settings-grid-secondary">
+      <section class="settings-card">
+        <div class="settings-card-header">
+          <div>
+            <p class="settings-kicker">Recovery</p>
+            <h3>Restore Points</h3>
+          </div>
+          <p class="settings-card-copy">Save a known good state so you can roll back even after additional updates.</p>
+        </div>
+        <div class="settings-scroll-panel">
+          <ul id="restore-point-list" class="settings-list-reset"></ul>
+        </div>
+        <p id="restore-point-note" class="settings-status-line" style="display:none;"></p>
+      </section>
+
+      <section class="settings-card">
+        <div class="settings-card-header">
+          <div>
+            <p class="settings-kicker">History</p>
+            <h3>Update History</h3>
+          </div>
+          <p class="settings-card-copy">Review previous updates and version transitions recorded by the app.</p>
+        </div>
+        <div id="history" class="settings-scroll-panel">
+          <ul id="history-list" class="settings-list-reset"></ul>
+        </div>
+      </section>
+    </div>
+
+    <section class="settings-card settings-card-wide">
+      <div class="settings-card-header">
+        <div>
+          <p class="settings-kicker">AI</p>
+          <h3>Stable Horde Defaults</h3>
+        </div>
+        <p class="settings-card-copy">These defaults apply whenever a stream switches to AI mode and has not saved its own overrides.</p>
+      </div>
+      <form id="ai-defaults-form" class="settings-form-stack">
+        <div>
+          <label for="ai-defaults-prompt" class="settings-field-label">Prompt</label>
+          <textarea id="ai-defaults-prompt" rows="3" class="settings-full-width-textarea"></textarea>
         </div>
         <div>
-          <label for="ai-defaults-negative" style="display:block; font-weight:600; margin-bottom:0.35rem;">Negative Prompt</label>
-          <textarea id="ai-defaults-negative" rows="2" style="width:100%; resize:vertical;"></textarea>
+          <label for="ai-defaults-negative" class="settings-field-label">Negative Prompt</label>
+          <textarea id="ai-defaults-negative" rows="2" class="settings-full-width-textarea"></textarea>
         </div>
         <div class="ai-option-grid">
           <div class="ai-option">
@@ -483,7 +540,7 @@
             <input id="ai-defaults-timeout" type="number" step="1" min="0">
           </div>
         </div>
-        <div style="display:flex; flex-wrap:wrap; gap:0.75rem;">
+        <div class="settings-toggle-row">
           <label class="toggle compact"><input type="checkbox" id="ai-defaults-save-output"><span class="toggle-switch"></span><span class="toggle-label">Persist Images</span></label>
           <label class="toggle compact"><input type="checkbox" id="ai-defaults-nsfw"><span class="toggle-switch"></span><span class="toggle-label">Allow NSFW</span></label>
           <label class="toggle compact"><input type="checkbox" id="ai-defaults-censor"><span class="toggle-switch"></span><span class="toggle-label">Censor NSFW</span></label>
@@ -491,7 +548,7 @@
         <details class="ai-advanced-options" open>
           <summary>Advanced Flags</summary>
           <div class="ai-advanced-grid">
-            <div class="ai-advanced-group" style="display:flex; flex-direction:column; gap:0.4rem;">
+            <div class="ai-advanced-group settings-advanced-group">
               <label class="toggle compact"><input type="checkbox" id="ai-defaults-hires-fix"><span class="toggle-switch"></span><span class="toggle-label">Hires Fix</span></label>
               <label class="toggle compact"><input type="checkbox" id="ai-defaults-karras"><span class="toggle-switch"></span><span class="toggle-label">Karras Noise</span></label>
               <label class="toggle compact"><input type="checkbox" id="ai-defaults-tiling"><span class="toggle-switch"></span><span class="toggle-label">Tiling</span></label>
@@ -503,25 +560,25 @@
               <label class="toggle compact"><input type="checkbox" id="ai-defaults-disable-batching"><span class="toggle-switch"></span><span class="toggle-label">Disable Batching</span></label>
               <label class="toggle compact"><input type="checkbox" id="ai-defaults-allow-downgrade"><span class="toggle-switch"></span><span class="toggle-label">Allow Downgrade</span></label>
             </div>
-            <div class="ai-advanced-group" style="display:flex; flex-direction:column; gap:0.45rem;">
-              <label style="display:flex; flex-direction:column; gap:0.25rem;">
-                <span style="font-size:0.8rem; font-weight:600;">Clip Skip</span>
+            <div class="ai-advanced-group settings-advanced-group settings-advanced-fields">
+              <label class="settings-advanced-field">
+                <span>Clip Skip</span>
                 <input id="ai-defaults-clip-skip" type="number" min="1" max="12" placeholder="Auto">
               </label>
-              <label style="display:flex; flex-direction:column; gap:0.25rem;">
-                <span style="font-size:0.8rem; font-weight:600;">Face Fixer Strength</span>
+              <label class="settings-advanced-field">
+                <span>Face Fixer Strength</span>
                 <input id="ai-defaults-facefixer" type="number" min="0" max="1" step="0.01" placeholder="Auto">
               </label>
-              <label style="display:flex; flex-direction:column; gap:0.25rem;">
-                <span style="font-size:0.8rem; font-weight:600;">Denoising Strength</span>
+              <label class="settings-advanced-field">
+                <span>Denoising Strength</span>
                 <input id="ai-defaults-denoise" type="number" min="0.01" max="1" step="0.01" placeholder="Auto">
               </label>
-              <label style="display:flex; flex-direction:column; gap:0.25rem;">
-                <span style="font-size:0.8rem; font-weight:600;">Hires Denoise Strength</span>
+              <label class="settings-advanced-field">
+                <span>Hires Denoise Strength</span>
                 <input id="ai-defaults-hires-denoise" type="number" min="0.01" max="1" step="0.01" placeholder="Auto">
               </label>
-              <label style="display:flex; flex-direction:column; gap:0.25rem;">
-                <span style="font-size:0.8rem; font-weight:600;">Style</span>
+              <label class="settings-advanced-field">
+                <span>Style</span>
                 <input id="ai-defaults-style" type="text" placeholder="Optional">
               </label>
             </div>
@@ -536,8 +593,8 @@
           </div>
         </details>
         <div class="ai-lora-section" data-max="{{ max_loras }}">
-          <div class="lora-header" style="display:flex; align-items:center; justify-content:space-between; gap:0.5rem;">
-            <span style="font-weight:600;">Default LoRAs</span>
+          <div class="lora-header settings-lora-header">
+            <span>Default LoRAs</span>
             <button type="button" class="ai-add-lora">Add LoRA</button>
           </div>
           <div class="ai-lora-search">
@@ -550,27 +607,32 @@
             <div class="ai-lora-results-list"></div>
           </div>
           <div class="ai-lora-list"></div>
-          <div class="ai-lora-empty" style="opacity:0.75; font-size:0.85rem;">No default LoRAs selected.</div>
+          <div class="ai-lora-empty settings-muted-note">No default LoRAs selected.</div>
         </div>
-        <div style="display:flex; gap:.5rem; align-items:center; flex-wrap:wrap;">
+        <div class="settings-actions">
           <button type="button" id="ai-defaults-save">Save Defaults</button>
           <button type="button" id="ai-defaults-reset">Reset to Fallback</button>
-          <span id="ai-defaults-status" style="opacity:0.9;"></span>
+          <span id="ai-defaults-status" class="settings-inline-status"></span>
         </div>
       </form>
-    </div>
+    </section>
 
-    <div style="margin: 1rem 0; padding: 0.75rem; border:1px solid var(--border); border-radius:4px; background: var(--surface-alt);">
-      <h3 style="margin-top:0;">Backup / Restore</h3>
-      <p style="margin-top:0;">Export or import your dashboard streams, groups, layout and notes.</p>
-      <div style="display:flex; gap:.5rem; align-items:center; flex-wrap:wrap;">
+    <section class="settings-card settings-card-wide">
+      <div class="settings-card-header">
+        <div>
+          <p class="settings-kicker">Portability</p>
+          <h3>Backup / Restore</h3>
+        </div>
+        <p class="settings-card-copy">Export or import your dashboard streams, groups, layout and notes.</p>
+      </div>
+      <div class="settings-actions">
         <button type="button" id="export-btn">Export Settings</button>
-        <span id="export-status" style="opacity:0;"></span>
+        <span id="export-status" class="settings-inline-status settings-inline-status-empty"></span>
         <input type="file" id="import-file" accept="application/json">
         <button type="button" id="import-btn">Import</button>
-        <span id="import-status" style="opacity:.9;"></span>
+        <span id="import-status" class="settings-inline-status"></span>
       </div>
-    </div>
+    </section>
 
   </div>
       </div>

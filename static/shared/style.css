@@ -171,6 +171,226 @@ body.dashboard-page.dashboard-panel-open {
   margin: 0;
 }
 
+.settings-container {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.settings-summary-card,
+.settings-card {
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  background: linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0.01)), var(--surface);
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.18);
+}
+
+.settings-summary-card,
+.settings-card {
+  padding: 1rem 1.1rem;
+}
+
+.settings-card-wide {
+  width: 100%;
+}
+
+.settings-card-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.settings-card-header h3 {
+  margin: 0.2rem 0 0;
+  font-size: 1.15rem;
+}
+
+.settings-card-copy {
+  margin: 0;
+  max-width: 34rem;
+  color: var(--text);
+  opacity: 0.75;
+  line-height: 1.45;
+}
+
+.settings-kicker {
+  margin: 0;
+  font-size: 0.76rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--accent);
+  opacity: 0.9;
+}
+
+.settings-meta-grid {
+  display: grid;
+  gap: 0.85rem;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
+.settings-meta-item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  padding: 0.85rem 0.95rem;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--surface-alt);
+}
+
+.settings-meta-label {
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  opacity: 0.7;
+}
+
+.settings-meta-value {
+  font-size: 0.96rem;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.settings-meta-value-path {
+  word-break: break-word;
+}
+
+.settings-grid {
+  display: grid;
+  gap: 1rem;
+}
+
+.settings-grid-primary {
+  grid-template-columns: minmax(0, 1.3fr) minmax(300px, 0.8fr);
+}
+
+.settings-grid-secondary {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.settings-stat-list {
+  display: grid;
+  gap: 0.65rem;
+}
+
+.settings-stat-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.7rem 0.85rem;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface-alt);
+}
+
+.settings-stat-row span {
+  opacity: 0.78;
+}
+
+.settings-stat-row strong {
+  text-align: right;
+}
+
+.settings-status-line {
+  margin: 0.85rem 0 0;
+  font-size: 0.92rem;
+  opacity: 0.85;
+}
+
+.settings-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.65rem;
+  margin-top: 0.9rem;
+}
+
+.settings-scroll-panel {
+  max-height: 280px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--surface-alt);
+}
+
+.settings-list-reset {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.settings-form-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+}
+
+.settings-field-label {
+  display: block;
+  margin-bottom: 0.35rem;
+  font-weight: 600;
+}
+
+.settings-full-width-textarea {
+  width: 100%;
+  resize: vertical;
+}
+
+.settings-toggle-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.settings-advanced-group {
+  display: flex;
+  flex-direction: column;
+}
+
+.settings-advanced-fields {
+  gap: 0.45rem;
+}
+
+.settings-advanced-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.settings-advanced-field span {
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.settings-lora-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.settings-lora-header span {
+  font-weight: 600;
+}
+
+.settings-inline-status {
+  opacity: 0.9;
+}
+
+.settings-inline-status-empty {
+  opacity: 0;
+}
+
+.settings-muted-note {
+  opacity: 0.75;
+  font-size: 0.85rem;
+}
+
 .dashboard-status-panel {
   display: block;
   margin-bottom: 1rem;
@@ -426,6 +646,11 @@ a {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
+  .settings-grid-primary,
+  .settings-grid-secondary {
+    grid-template-columns: 1fr;
+  }
+
   .dashboard-status-panel {
     grid-template-columns: 1fr;
   }
@@ -463,6 +688,16 @@ a {
 
   .dashboard-grid {
     grid-template-columns: 1fr;
+  }
+
+  .settings-card-header {
+    flex-direction: column;
+  }
+
+  .settings-summary-card,
+  .settings-card {
+    padding: 0.9rem;
+    border-radius: 16px;
   }
 
   .dashboard-panel {
