@@ -8,6 +8,11 @@
   --border-hover: #4fa3ff;
   --text: #eee;
   --accent: #4fa3ff;
+  --sidebar-bg: #161616;
+  --sidebar-sheen: rgba(255, 255, 255, 0.04);
+  --sidebar-muted: rgba(238, 238, 238, 0.65);
+  --sidebar-title: rgba(238, 238, 238, 0.55);
+  --sidebar-active-text: #fff;
 }
 
 /* Light theme overrides */
@@ -19,6 +24,11 @@
   --border-hover: #2979ff;
   --text: #111;
   --accent: #2979ff;
+  --sidebar-bg: #ece9e4;
+  --sidebar-sheen: rgba(255, 255, 255, 0.45);
+  --sidebar-muted: rgba(17, 17, 17, 0.68);
+  --sidebar-title: rgba(17, 17, 17, 0.56);
+  --sidebar-active-text: #111;
 }
 
 *, *::before, *::after {
@@ -55,7 +65,7 @@ body.dashboard-page.dashboard-panel-open {
   flex-direction: column;
   gap: 1.5rem;
   padding: 1.5rem 1rem 1rem;
-  background: linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0) 18%), #161616;
+  background: linear-gradient(180deg, var(--sidebar-sheen), rgba(255,255,255,0) 18%), var(--sidebar-bg);
   border-right: 1px solid var(--border);
   position: fixed;
   top: 0;
@@ -74,7 +84,7 @@ body.dashboard-page.dashboard-panel-open {
 
 .dashboard-sidebar-brand p {
   margin: 0.35rem 0 0;
-  color: rgba(238, 238, 238, 0.65);
+  color: var(--sidebar-muted);
   font-size: 0.88rem;
 }
 
@@ -90,7 +100,7 @@ body.dashboard-page.dashboard-panel-open {
   font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
-  color: rgba(238, 238, 238, 0.55);
+  color: var(--sidebar-title);
   margin-bottom: 0.65rem;
 }
 
@@ -121,7 +131,7 @@ body.dashboard-page.dashboard-panel-open {
 .sidebar-action.is-active {
   background: rgba(79, 163, 255, 0.12);
   border-color: rgba(79, 163, 255, 0.28);
-  color: #fff;
+  color: var(--sidebar-active-text);
 }
 
 .dashboard-sidebar-footer {
