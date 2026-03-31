@@ -686,6 +686,11 @@ a {
   padding: 1rem 1.2rem 1.5rem;
 }
 
+.dashboard-panel[hidden],
+.dashboard-panel-backdrop[hidden] {
+  display: none !important;
+}
+
 #group-manager,
 #tag-manager,
 #sync-manager {
