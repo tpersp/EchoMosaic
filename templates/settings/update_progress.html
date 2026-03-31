@@ -5,9 +5,13 @@
   <title>Updating EchoMosaic…</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='shared/style.css') }}">
   <style>
+    .update-page-layout {
+      width: min(1040px, 100%);
+      margin: 0 auto;
+    }
     .update-page-card {
-      max-width: 1040px;
-      margin: 0;
+      width: 100%;
+      margin: 0 auto;
       background: var(--surface);
       border: 1px solid var(--border);
       border-radius: 12px;
@@ -65,24 +69,26 @@
 
     <main class="dashboard-workspace">
       <div class="dashboard-workspace-inner">
-        <header class="page-section-header">
-          <h2>Updating EchoMosaic</h2>
-        </header>
+        <div class="update-page-layout">
+          <header class="page-section-header">
+            <h2>Updating EchoMosaic</h2>
+          </header>
 
-  <div class="update-page-card">
-    <p>We’re applying the latest update. This page now follows the real updater output.</p>
-    <div class="progress"><div id="bar" class="bar"></div></div>
-    <ul id="steps" class="steps">
-      <li data-stage="fetch" class="active">Fetching latest code</li>
-      <li data-stage="checkout">Selecting target version</li>
-      <li data-stage="apply">Applying update</li>
-      <li data-stage="dependencies">Updating dependencies</li>
-      <li data-stage="restart">Restarting service</li>
-      <li data-stage="wait_restart">Waiting for restart</li>
-    </ul>
-    <p id="status" class="status">Connecting…</p>
-    <div id="log-output" class="log-panel" aria-live="polite"></div>
-  </div>
+          <div class="update-page-card">
+            <p>We’re applying the latest update. This page now follows the real updater output.</p>
+            <div class="progress"><div id="bar" class="bar"></div></div>
+            <ul id="steps" class="steps">
+              <li data-stage="fetch" class="active">Fetching latest code</li>
+              <li data-stage="checkout">Selecting target version</li>
+              <li data-stage="apply">Applying update</li>
+              <li data-stage="dependencies">Updating dependencies</li>
+              <li data-stage="restart">Restarting service</li>
+              <li data-stage="wait_restart">Waiting for restart</li>
+            </ul>
+            <p id="status" class="status">Connecting…</p>
+            <div id="log-output" class="log-panel" aria-live="polite"></div>
+          </div>
+        </div>
       </div>
     </main>
   </div>
