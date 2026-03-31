@@ -113,7 +113,8 @@ body.dashboard-page.dashboard-panel-open {
 .sidebar-link:focus-visible,
 .sidebar-action:focus-visible,
 .sidebar-theme-toggle:focus-visible,
-.sidebar-link.is-active {
+.sidebar-link.is-active,
+.sidebar-action.is-active {
   background: rgba(79, 163, 255, 0.12);
   border-color: rgba(79, 163, 255, 0.28);
   color: #fff;
@@ -416,6 +417,19 @@ a {
   .dashboard-status-panel {
     grid-template-columns: 1fr;
   }
+
+  .dashboard-panel-backdrop {
+    left: 0;
+  }
+
+  .dashboard-panel {
+    left: 0;
+    right: auto;
+    width: min(560px, 100vw);
+    border-right: 0;
+    border-left: 1px solid var(--border);
+    box-shadow: -12px 0 40px rgba(0, 0, 0, 0.35);
+  }
 }
 
 @media (max-width: 760px) {
@@ -440,6 +454,8 @@ a {
   }
 
   .dashboard-panel {
+    left: auto;
+    right: 0;
     width: 100vw;
   }
 }
@@ -619,7 +635,10 @@ a {
 
 .dashboard-panel-backdrop {
   position: fixed;
-  inset: 0;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 260px;
   background: rgba(0, 0, 0, 0.55);
   backdrop-filter: blur(3px);
   z-index: 40;
@@ -628,15 +647,16 @@ a {
 .dashboard-panel {
   position: fixed;
   top: 0;
-  right: 0;
-  width: min(560px, 100vw);
+  left: 260px;
+  right: auto;
+  width: min(520px, calc(100vw - 260px));
   height: 100vh;
   z-index: 45;
   display: flex;
   flex-direction: column;
   background: #171717;
-  border-left: 1px solid var(--border);
-  box-shadow: -12px 0 40px rgba(0, 0, 0, 0.35);
+  border-right: 1px solid var(--border);
+  box-shadow: 12px 0 40px rgba(0, 0, 0, 0.35);
 }
 
 .dashboard-panel-header {

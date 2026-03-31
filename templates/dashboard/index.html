@@ -1181,6 +1181,13 @@
   };
   let openDashboardPanelId = null;
   let dashboardPanelReturnFocus = null;
+  function syncDashboardLauncherState() {
+    dashboardPanelLaunchers.forEach(button => {
+      const isOpen = !!openDashboardPanelId && button.dataset.dashboardPanel === openDashboardPanelId;
+      button.classList.toggle('is-active', isOpen);
+      button.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
+    });
+  }
 
   function setDashboardPanelState(panelId, open, trigger = null) {
     const panel = panelId ? document.getElementById(panelId) : null;
@@ -1196,6 +1203,7 @@
         dashboardPanelBackdrop.hidden = false;
       }
       document.body.classList.add('dashboard-panel-open');
+      syncDashboardLauncherState();
       const focusTarget = panel.querySelector('[data-close-dashboard-panel], input, button, select, textarea, a[href]');
       if (focusTarget && typeof focusTarget.focus === 'function') {
         window.setTimeout(() => focusTarget.focus(), 0);
@@ -1211,6 +1219,7 @@
         dashboardPanelBackdrop.hidden = true;
       }
       document.body.classList.remove('dashboard-panel-open');
+      syncDashboardLauncherState();
       if (dashboardPanelReturnFocus && typeof dashboardPanelReturnFocus.focus === 'function') {
         window.setTimeout(() => dashboardPanelReturnFocus.focus(), 0);
       }
