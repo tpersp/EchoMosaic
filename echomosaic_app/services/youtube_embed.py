@@ -64,6 +64,31 @@ class YouTubeEmbedService:
         self.youtube_sync_max_age_seconds = float(youtube_sync_max_age_seconds)
         self.media_mode_livestream = media_mode_livestream
 
+    def _oembed_like_payload(self, raw: Any) -> Optional[Dict[str, Any]]:
+        if not isinstance(raw, dict):
+            return None
+        payload: Dict[str, Any] = {}
+        title = raw.get("title")
+        if isinstance(title, str) and title.strip():
+            payload["title"] = title.strip()
+        provider = raw.get("provider_name") or raw.get("provider")
+        if isinstance(provider, str) and provider.strip():
+            payload["provider_name"] = provider.strip()
+        author = raw.get("author_name")
+        if isinstance(author, str) and author.strip():
+            payload["author_name"] = author.strip()
+        thumbnail = raw.get("thumbnail_url")
+        if isinstance(thumbnail, str) and thumbnail.strip():
+            payload["thumbnail_url"] = thumbnail.strip()
+        oembed_type = raw.get("oembed_type") or raw.get("type")
+        if isinstance(oembed_type, str) and oembed_type.strip():
+            payload["type"] = oembed_type.strip().lower()
+        if raw.get("is_live") is not None:
+            payload["is_live"] = raw.get("is_live")
+        if raw.get("content_type") is not None:
+            payload["content_type"] = raw.get("content_type")
+        return payload
+
     def sanitize_embed_metadata(self, raw: Any) -> Optional[Dict[str, Any]]:
         if not isinstance(raw, dict):
             return None
@@ -91,6 +116,8 @@ class YouTubeEmbedService:
                 index_value = None
         is_live_raw = raw.get("is_live")
         is_live = bool(is_live_raw) if is_live_raw is not None else (content_type == "live")
+        if is_live:
+            content_type = "live"
         canonical_url = raw.get("canonical_url") or raw.get("url")
         canonical_url = canonical_url.strip() or None if isinstance(canonical_url, str) else None
         thumbnail_url = raw.get("thumbnail_url")
@@ -375,7 +402,14 @@ class YouTubeEmbedService:
         with self.youtube_oembed_cache_lock:
             cached = self.youtube_oembed_cache.get(cache_key)
             if cached and not force and now - cached.get("timestamp", 0) < self.youtube_oembed_cache_ttl:
-                return dict(cached.get("data", {}))
+                cached_data = dict(cached.get("data", {}))
+                refreshed = self.build_youtube_metadata(details, self._oembed_like_payload(cached_data))
+                fetched_at = cached_data.get("fetched_at")
+                if isinstance(fetched_at, str) and fetched_at.strip():
+                    refreshed["fetched_at"] = fetched_at.strip()
+                if refreshed != cached_data:
+                    self.youtube_oembed_cache[cache_key] = {"data": dict(refreshed), "timestamp": time.time()}
+                return refreshed
 
         with self.youtube_in_flight_lock:
             if url in self.youtube_in_flight:

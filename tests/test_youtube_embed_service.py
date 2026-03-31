@@ -38,6 +38,16 @@ class _Response:
         return None
 
 
+class _ChunkedResponse(_Response):
+    def __init__(self, chunks):
+        super().__init__({})
+        self._chunks = list(chunks)
+
+    def iter_content(self, chunk_size=4096, decode_unicode=False):
+        for chunk in self._chunks:
+            yield chunk
+
+
 def _build_service(**overrides):
     emitted = []
     runtime_state = {}
@@ -109,3 +119,38 @@ def test_youtube_embed_service_promotes_next_leader_on_disconnect() -> None:
 
     assert service.youtube_sync_role_for_sid("stream1", "sid-b") is True
     assert emitted[-1][0][1]["is_leader"] is True
+
+
+def test_youtube_embed_service_normalizes_live_content_type() -> None:
+    service, _, _ = _build_service()
+
+    metadata = service.sanitize_embed_metadata({"content_type": "video", "is_live": True, "video_id": "abc123"})
+
+    assert metadata is not None
+    assert metadata["content_type"] == "live"
+    assert metadata["is_live"] is True
+
+
+def test_youtube_embed_service_live_probe_reads_late_markers() -> None:
+    marker = b'"livebroadcastdetails":{"islivenow":true}'
+    requests_module = type(
+        "Requests",
+        (),
+        {"get": staticmethod(lambda *args, **kwargs: _ChunkedResponse([b"x" * 40_000, marker]))},
+    )
+    service, _, _ = _build_service(
+        requests_module=requests_module,
+        youtube_live_probe_cache={},
+    )
+    service.youtube_live_probe_max_bytes = 80_000
+
+    looks_live = service.youtube_page_looks_live(
+        {
+            "video_id": "abc123",
+            "canonical_url": "https://www.youtube.com/watch?v=abc123",
+            "original_url": "https://www.youtube.com/watch?v=abc123",
+            "embed_base": "https://www.youtube-nocookie.com/embed/abc123",
+        }
+    )
+
+    assert looks_live is True
