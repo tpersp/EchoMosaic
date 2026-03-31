@@ -369,6 +369,7 @@ a {
 
 .dashboard-grid.compact-grid {
   --card-min: 220px;
+  grid-auto-flow: row dense;
 }
 
 .filter-group-layout {
@@ -380,12 +381,14 @@ a {
 }
 
 .dashboard-grid.compact-grid .stream-card:not(.is-minimized) {
-  grid-column: span 2;
+  grid-column: 1 / -1;
+  justify-self: start;
+  width: min(100%, 760px);
 }
 
 @media (max-width: 720px) {
   .dashboard-grid.compact-grid .stream-card:not(.is-minimized) {
-    grid-column: span 1;
+    width: 100%;
   }
 }
 
