@@ -300,6 +300,21 @@ body.dashboard-page.dashboard-panel-open {
   text-align: right;
 }
 
+.settings-stat-value-group {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.18rem;
+  min-width: 0;
+}
+
+.settings-stat-meta {
+  font-size: 0.8rem;
+  font-weight: 500;
+  opacity: 0.68;
+  text-align: right;
+}
+
 .settings-status-line {
   margin: 0.85rem 0 0;
   font-size: 0.92rem;

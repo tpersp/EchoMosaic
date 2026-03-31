@@ -38,11 +38,30 @@
       .then(info => {
         latestUpdateInfo = info || {};
         const el = (id, v) => document.getElementById(id).textContent = v || '-';
+        const splitVersionMeta = (value) => {
+          const raw = (value || '').trim();
+          if (!raw) {
+            return { main: '-', meta: '' };
+          }
+          const match = raw.match(/^(.*?)(\s+\([^()]+\))$/);
+          if (!match) {
+            return { main: raw, meta: '' };
+          }
+          return {
+            main: match[1].trim() || raw,
+            meta: match[2].trim(),
+          };
+        };
+        const setVersionField = (mainId, metaId, value) => {
+          const parts = splitVersionMeta(value);
+          el(mainId, parts.main);
+          el(metaId, parts.meta);
+        };
         el('channel', info.channel);
         el('branch', info.branch);
-        el('current', info.current_desc || info.installed_version || info.current_commit);
-        el('remote', info.remote_desc || info.latest_version || info.remote_commit);
-        el('previous', info.previous_desc || info.previous_commit || 'None');
+        setVersionField('current', 'current-meta', info.current_desc || info.installed_version || info.current_commit);
+        setVersionField('remote', 'remote-meta', info.remote_desc || info.latest_version || info.remote_commit);
+        setVersionField('previous', 'previous-meta', info.previous_desc || info.previous_commit || 'None');
         const btn = document.getElementById('update-btn');
         const note = document.getElementById('update-note');
         if (info.update_available) {
@@ -419,9 +438,27 @@
         <div class="settings-stat-list">
           <div class="settings-stat-row"><span>Channel</span><strong id="channel">-</strong></div>
           <div class="settings-stat-row"><span>Branch</span><strong id="branch">-</strong></div>
-          <div class="settings-stat-row"><span>Current</span><strong id="current">-</strong></div>
-          <div class="settings-stat-row"><span>Latest</span><strong id="remote">-</strong></div>
-          <div class="settings-stat-row"><span>Previous</span><strong id="previous">-</strong></div>
+          <div class="settings-stat-row">
+            <span>Current</span>
+            <div class="settings-stat-value-group">
+              <strong id="current">-</strong>
+              <div id="current-meta" class="settings-stat-meta"></div>
+            </div>
+          </div>
+          <div class="settings-stat-row">
+            <span>Latest</span>
+            <div class="settings-stat-value-group">
+              <strong id="remote">-</strong>
+              <div id="remote-meta" class="settings-stat-meta"></div>
+            </div>
+          </div>
+          <div class="settings-stat-row">
+            <span>Previous</span>
+            <div class="settings-stat-value-group">
+              <strong id="previous">-</strong>
+              <div id="previous-meta" class="settings-stat-meta"></div>
+            </div>
+          </div>
         </div>
         <p id="update-note" class="settings-status-line">Checking…</p>
         <div class="settings-actions">
