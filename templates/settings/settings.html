@@ -430,22 +430,6 @@
           <button id="create-restore-btn" type="button" onclick="promptRestorePoint()">Create Restore Point</button>
         </div>
       </section>
-
-      <section class="settings-card">
-        <div class="settings-card-header">
-          <div>
-            <p class="settings-kicker">Automation</p>
-            <h3>Auto-Generate Timers</h3>
-          </div>
-          <p class="settings-card-copy">Control how automatic generation timers calculate their next run across Picsum and AI streams.</p>
-        </div>
-        <label class="toggle compact">
-          <input type="checkbox" id="timer-snap-toggle">
-          <span class="toggle-switch"></span>
-          <span class="toggle-label">Snap Timers to Full Increments</span>
-        </label>
-        <p id="timer-snap-note" class="settings-status-line" style="display:none;"></p>
-      </section>
     </div>
 
     <div class="settings-grid settings-grid-secondary">
@@ -476,6 +460,22 @@
         </div>
       </section>
     </div>
+
+    <section class="settings-card">
+      <div class="settings-card-header">
+        <div>
+          <p class="settings-kicker">Automation</p>
+          <h3>Auto-Generate Timers</h3>
+        </div>
+        <p class="settings-card-copy">Control how automatic generation timers calculate their next run across Picsum and AI streams.</p>
+      </div>
+      <label class="toggle compact">
+        <input type="checkbox" id="timer-snap-toggle">
+        <span class="toggle-switch"></span>
+        <span class="toggle-label">Snap Timers to Full Increments</span>
+      </label>
+      <p id="timer-snap-note" class="settings-status-line" style="display:none;"></p>
+    </section>
 
     <section class="settings-card settings-card-wide">
       <div class="settings-card-header">
