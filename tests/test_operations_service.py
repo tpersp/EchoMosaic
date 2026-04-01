@@ -73,6 +73,21 @@ def test_operations_service_reads_release_update_info(tmp_path: Path) -> None:
     repo = tmp_path / "repo"
     repo.mkdir()
     (repo / ".git").mkdir()
+    def fetch_json(url: str):
+        if url.endswith("/releases/latest"):
+            return {
+                "tag_name": "v1.1.0",
+                "html_url": "https://example.com/release/v1.1.0",
+                "name": "v1.1.0",
+                "published_at": "1970-01-01T00:10:00Z",
+            }
+        if url.endswith("/releases/tags/v1.0.0"):
+            return {
+                "tag_name": "v1.0.0",
+                "name": "v1.0.0",
+                "published_at": "1970-01-01T00:00:00Z",
+            }
+        raise AssertionError(f"Unexpected URL {url}")
     service = _service(
         load_config=lambda: {
             "INSTALL_DIR": str(repo),
@@ -82,7 +97,7 @@ def test_operations_service_reads_release_update_info(tmp_path: Path) -> None:
             "INSTALLED_COMMIT": "abc1234",
             "RELEASE_CHECK_INTERVAL_SECS": 3600,
         },
-        fetch_json=lambda url: {"tag_name": "v1.1.0", "html_url": "https://example.com/release/v1.1.0", "name": "v1.1.0"},
+        fetch_json=fetch_json,
         time_fn=lambda: 1000.0,
     )
 
@@ -92,6 +107,8 @@ def test_operations_service_reads_release_update_info(tmp_path: Path) -> None:
     assert info["installed_version"] == "v1.0.0"
     assert info["latest_version"] == "v1.1.0"
     assert info["latest_release_url"] == "https://example.com/release/v1.1.0"
+    assert info["current_desc"] == "v1.0.0 (16 minutes ago)"
+    assert info["remote_desc"] == "v1.1.0 (6 minutes ago)"
     assert info["update_available"] is True
 
 
@@ -99,12 +116,20 @@ def test_operations_service_force_refresh_bypasses_release_cache(tmp_path: Path)
     repo = tmp_path / "repo"
     repo.mkdir()
     (repo / ".git").mkdir()
-    releases = iter(
+    latest_releases = iter(
         [
             {"tag_name": "v1.1.0", "html_url": "https://example.com/release/v1.1.0", "name": "v1.1.0"},
             {"tag_name": "v1.2.0", "html_url": "https://example.com/release/v1.2.0", "name": "v1.2.0"},
         ]
     )
+
+    def fetch_json(url: str):
+        if url.endswith("/releases/latest"):
+            return next(latest_releases)
+        if url.endswith("/releases/tags/v1.0.0"):
+            return {"tag_name": "v1.0.0", "name": "v1.0.0"}
+        raise AssertionError(f"Unexpected URL {url}")
+
     service = _service(
         load_config=lambda: {
             "INSTALL_DIR": str(repo),
@@ -114,7 +139,7 @@ def test_operations_service_force_refresh_bypasses_release_cache(tmp_path: Path)
             "INSTALLED_COMMIT": "abc1234",
             "RELEASE_CHECK_INTERVAL_SECS": 3600,
         },
-        fetch_json=lambda url: next(releases),
+        fetch_json=fetch_json,
         time_fn=lambda: 1000.0,
     )
 
@@ -123,6 +148,40 @@ def test_operations_service_force_refresh_bypasses_release_cache(tmp_path: Path)
 
     assert cached["latest_version"] == "v1.1.0"
     assert refreshed["latest_version"] == "v1.2.0"
+
+
+def test_operations_service_release_status_survives_missing_installed_release_metadata(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / ".git").mkdir()
+
+    def fetch_json(url: str):
+        if url.endswith("/releases/latest"):
+            return {
+                "tag_name": "v1.1.0",
+                "html_url": "https://example.com/release/v1.1.0",
+                "name": "v1.1.0",
+                "published_at": "1970-01-01T00:10:00Z",
+            }
+        raise RuntimeError("not found")
+
+    service = _service(
+        load_config=lambda: {
+            "INSTALL_DIR": str(repo),
+            "UPDATE_CHANNEL": "release",
+            "REPO_SLUG": "tpersp/EchoMosaic",
+            "INSTALLED_VERSION": "v1.0.0",
+            "INSTALLED_COMMIT": "abc1234",
+            "RELEASE_CHECK_INTERVAL_SECS": 3600,
+        },
+        fetch_json=fetch_json,
+        time_fn=lambda: 1000.0,
+    )
+
+    info = service.read_update_info()
+
+    assert info["current_desc"] == "v1.0.0"
+    assert info["remote_desc"] == "v1.1.0 (6 minutes ago)"
 
 
 def test_operations_service_normalizes_stale_dev_release_channel_to_branch(tmp_path: Path) -> None:

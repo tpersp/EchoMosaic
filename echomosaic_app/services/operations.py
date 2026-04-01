@@ -11,8 +11,9 @@ import subprocess
 import threading
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
@@ -83,6 +84,45 @@ class OperationsService:
             return tuple()
         return tuple(int(part) for part in matches)
 
+    def _format_relative_time(self, value: Any) -> str:
+        text = self._normalize_version(value)
+        if not text:
+            return ""
+        try:
+            published = datetime.fromisoformat(text.replace("Z", "+00:00"))
+        except ValueError:
+            return ""
+        if published.tzinfo is None:
+            published = published.replace(tzinfo=timezone.utc)
+        now = datetime.fromtimestamp(float(self.time_fn()), tz=timezone.utc)
+        delta = now - published.astimezone(timezone.utc)
+        seconds = max(0, int(delta.total_seconds()))
+        if seconds < 60:
+            return "just now"
+        minutes = seconds // 60
+        if minutes < 60:
+            return f"{minutes} minute{'s' if minutes != 1 else ''} ago"
+        hours = minutes // 60
+        if hours < 24:
+            return f"{hours} hour{'s' if hours != 1 else ''} ago"
+        days = hours // 24
+        if days < 30:
+            return f"{days} day{'s' if days != 1 else ''} ago"
+        months = days // 30
+        if months < 12:
+            return f"{months} month{'s' if months != 1 else ''} ago"
+        years = days // 365
+        return f"{years} year{'s' if years != 1 else ''} ago"
+
+    def _describe_release(self, release: Optional[Dict[str, Any]], fallback: str) -> str:
+        label = self._normalize_version((release or {}).get("name")) or self._normalize_version(
+            (release or {}).get("tag_name")
+        ) or fallback
+        relative = self._format_relative_time((release or {}).get("published_at"))
+        if label and relative:
+            return f"{label} ({relative})"
+        return label
+
     def _read_release_status(self, cfg: Dict[str, Any], repo_path: str, *, force_refresh: bool = False) -> Dict[str, Any]:
         repo_slug = str(cfg.get("REPO_SLUG") or "tpersp/EchoMosaic").strip()
         cache_ttl = max(60, int(cfg.get("RELEASE_CHECK_INTERVAL_SECS") or 3600))
@@ -118,13 +158,22 @@ class OperationsService:
             payload["latest_version"] = latest_version
             payload["latest_release_url"] = self._normalize_version(release.get("html_url"))
             payload["release_name"] = self._normalize_version(release.get("name")) or latest_version
-            payload["remote_desc"] = payload["release_name"]
+            payload["remote_desc"] = self._describe_release(release, payload["release_name"])
             payload["release_check_ok"] = True
             if latest_version:
                 if installed_version:
                     payload["update_available"] = self._version_key(latest_version) > self._version_key(installed_version)
                 else:
                     payload["update_available"] = True
+            if installed_version:
+                try:
+                    tag = urllib.parse.quote(installed_version, safe="")
+                    installed_release = self.fetch_json(
+                        f"https://api.github.com/repos/{repo_slug}/releases/tags/{tag}"
+                    ) or {}
+                except Exception:
+                    installed_release = {}
+                payload["current_desc"] = self._describe_release(installed_release, installed_version)
         except Exception as exc:
             self.logger.warning("Unable to query latest release for %s: %s", repo_slug, exc)
             payload["release_error"] = str(exc)

@@ -38,6 +38,13 @@
       .then(info => {
         latestUpdateInfo = info || {};
         const el = (id, v) => document.getElementById(id).textContent = v || '-';
+        const setOptionalText = (id, value) => {
+          const node = document.getElementById(id);
+          if (!node) return;
+          const text = (value || '').trim();
+          node.textContent = text;
+          node.hidden = !text;
+        };
         const splitVersionMeta = (value) => {
           const raw = (value || '').trim();
           if (!raw) {
@@ -55,7 +62,7 @@
         const setVersionField = (mainId, metaId, value) => {
           const parts = splitVersionMeta(value);
           el(mainId, parts.main);
-          el(metaId, parts.meta);
+          setOptionalText(metaId, parts.meta);
         };
         el('channel', info.channel);
         el('branch', info.branch);
