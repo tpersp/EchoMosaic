@@ -917,18 +917,33 @@
     summary.cancelButton.textContent = uploading ? "Cancel queue" : "Cancel pending";
   }
 
+  function humanReadableBytes(value) {
+    const bytes = Number(value || 0);
+    if (!Number.isFinite(bytes) || bytes <= 0) return "0 B";
+    const units = ["B", "KB", "MB", "GB", "TB"];
+    const index = Math.min(units.length - 1, Math.floor(Math.log(bytes) / Math.log(1024)));
+    const scaled = bytes / (1024 ** index);
+    const digits = scaled >= 100 || index === 0 ? 0 : scaled >= 10 ? 1 : 2;
+    return `${scaled.toFixed(digits)} ${units[index]}`;
+  }
+
+  function defaultUploadStatus(entry, status) {
+    const sizeText = humanReadableBytes(entry && entry.file ? entry.file.size : 0);
+    const labels = {
+      pending: `Waiting • ${sizeText}`,
+      uploading: `Uploading • ${sizeText}`,
+      done: `Done • ${sizeText}`,
+      failed: `Failed • ${sizeText}`,
+    };
+    return labels[status] || sizeText;
+  }
+
   function setUploadRowStatus(entry, status, detail) {
     if (!entry || !entry.row) return;
     entry.status = status;
     entry.row.dataset.status = status;
     if (entry.statusLabel) {
-      const labels = {
-        pending: "Waiting",
-        uploading: "Uploading",
-        done: "Done",
-        failed: "Failed",
-      };
-      entry.statusLabel.textContent = detail || labels[status] || "";
+      entry.statusLabel.textContent = detail || defaultUploadStatus(entry, status);
     }
     if (entry.icon) {
       const icons = {
@@ -967,7 +982,7 @@
 
     const statusLabel = document.createElement("div");
     statusLabel.className = "upload-status";
-    statusLabel.textContent = "Waiting";
+    statusLabel.textContent = `Waiting • ${humanReadableBytes(file.size)}`;
 
     header.append(titleWrap, statusLabel);
 
@@ -1000,7 +1015,11 @@
     if (rowInfo.bar) {
       rowInfo.bar.style.width = success ? "100%" : rowInfo.bar.style.width || "0%";
     }
-    setUploadRowStatus(rowInfo, success ? "done" : "failed", detail);
+    setUploadRowStatus(
+      rowInfo,
+      success ? "done" : "failed",
+      detail || `${success ? "Done" : "Failed"} • ${humanReadableBytes(rowInfo.file.size)}`
+    );
   }
 
   function clearCompletedUploads() {
@@ -1157,7 +1176,7 @@
             const pct = Math.round((event.loaded / event.total) * 100);
             rowInfo.bar.style.width = `${pct}%`;
             if (rowInfo.statusLabel) {
-              rowInfo.statusLabel.textContent = `Uploading ${pct}%`;
+              rowInfo.statusLabel.textContent = `Uploading ${pct}% • ${humanReadableBytes(event.loaded)} / ${humanReadableBytes(event.total)}`;
             }
           }
         };
