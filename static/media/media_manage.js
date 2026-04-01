@@ -374,7 +374,7 @@
       detailsEl.dataset.loaded = "true";
       highlightTreeSelection();
     } catch (err) {
-      container.textContent = "Unable to load folders";
+      container.textContent = "Folder list unavailable";
       console.error(err);
     } finally {
       loadingNodes.delete(path);
@@ -464,7 +464,7 @@
     if (!folders || !folders.length) {
       const hint = document.createElement("div");
       hint.className = "subfolder-meta";
-      hint.textContent = "No subfolders in this directory.";
+      hint.textContent = "No subfolders.";
       subfolderContainer.appendChild(hint);
       return;
     }
@@ -622,7 +622,7 @@
     if (!files || !files.length) {
       const message = document.createElement("div");
       message.className = "subfolder-meta";
-      message.textContent = "No files found in this folder.";
+      message.textContent = "No files.";
       grid.appendChild(message);
       return;
     }
@@ -670,7 +670,7 @@
       renderPagination(data.page || 1, data.total_pages || 1);
       highlightTreeSelection();
     } catch (err) {
-      showToast(err.message || "Failed to load folder", "error");
+      showToast(err.message || "Folder load failed", "error");
     }
   }
 
@@ -730,7 +730,7 @@
       refreshTree(parentPath(path));
       loadContent();
     } catch (err) {
-      showToast(err.message || "Unable to rename", "error");
+      showToast(err.message || "Rename failed", "error");
     }
   }
 
@@ -756,7 +756,7 @@
       refreshTree(parent);
       loadContent();
     } catch (err) {
-      showToast(err.message || "Unable to delete", "error");
+      showToast(err.message || "Delete failed", "error");
     }
   }
 
@@ -811,7 +811,7 @@
       refreshTree(base || buildVirtual(info.alias, []));
       loadContent();
     } catch (err) {
-      showToast(err.message || "Unable to create folder", "error");
+      showToast(err.message || "Folder creation failed", "error");
     }
   }
 
@@ -840,7 +840,7 @@
   function ensureUploadTarget() {
     const info = parseVirtual(state.currentPath);
     if (!info.alias) {
-      showToast("Select a folder before uploading.", "error");
+      showToast("Upload target required.", "error");
       return false;
     }
     return true;
@@ -1119,7 +1119,7 @@
             shouldRefresh = true;
             showToast(`Uploaded ${nextEntry.displayName || nextEntry.file.name}`, "success");
           } catch (err) {
-            const message = err.message || `Failed to upload ${nextEntry.displayName || nextEntry.file.name}`;
+            const message = err.message || `Upload failed: ${nextEntry.displayName || nextEntry.file.name}`;
             finalizeUploadRow(nextEntry, false, message);
             showToast(message, "error");
           } finally {
@@ -1278,7 +1278,7 @@
         if (!ensureUploadTarget()) return;
         if (!uploadFolderInput) return;
         if (!("webkitdirectory" in uploadFolderInput)) {
-          showToast("Folder upload is not supported in this browser.", "error");
+          showToast("Folder upload unsupported in current browser.", "error");
           return;
         }
         if (allowedExts.length) {
@@ -1340,7 +1340,7 @@
     if (!uploadMaxMB || !toastContainer) return;
     const notice = document.createElement("div");
     notice.className = "subfolder-meta";
-    notice.textContent = `Current upload limit: ${uploadMaxMB} MB per file.`;
+    notice.textContent = `Upload limit: ${uploadMaxMB} MB per file.`;
     if (uploadQueue && uploadQueue.parentElement) {
       uploadQueue.parentElement.insertBefore(notice, uploadQueue);
     }
