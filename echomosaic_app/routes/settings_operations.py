@@ -163,7 +163,8 @@ def create_settings_operations_blueprint(
         unauthorized = _require_api_key(cfg)
         if unauthorized:
             return unauthorized
-        return jsonify(operations_service.read_update_info(cfg))
+        force_refresh = str(request.args.get("refresh") or "").strip().lower() in {"1", "true", "yes", "on"}
+        return jsonify(operations_service.read_update_info(cfg, force_refresh=force_refresh))
 
     @blueprint.route("/update_history", methods=["GET"])
     def update_history():

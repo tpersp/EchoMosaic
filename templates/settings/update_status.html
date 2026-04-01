@@ -4,14 +4,79 @@
   <meta charset="UTF-8"/>
   <title>Update Status</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='shared/style.css') }}">
+  <style>
+    .update-page-layout {
+      width: min(820px, 100%);
+      margin: 0 auto;
+    }
+    .update-status-card {
+      width: 100%;
+      margin: 0 auto;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 1.2rem;
+      box-shadow: 0 8px 28px rgba(0, 0, 0, 0.12);
+    }
+    .update-status-card p {
+      margin-bottom: 0;
+    }
+  </style>
   <script>
     setTimeout(function(){ window.location.href = '{{ url_for('dashboard_routes.dashboard') }}'; }, 10000);
   </script>
 </head>
-<body>
-  <div class="container">
-    <h1>Update</h1>
-    <p>{{ message }}</p>
+<body class="dashboard-page">
+  <div class="dashboard-shell">
+    <aside class="dashboard-sidebar">
+      <div class="dashboard-sidebar-brand">
+        <h1>EchoMosaic</h1>
+        <p>Update Status</p>
+      </div>
+
+      <nav class="dashboard-sidebar-nav" aria-label="Primary">
+        <a class="sidebar-link" href="{{ url_for('dashboard_routes.dashboard') }}">Dashboard</a>
+        <a class="sidebar-link" href="{{ url_for('media_routes.media_management_page') }}">Media</a>
+        <a class="sidebar-link is-active" href="{{ url_for('settings_operations.app_settings') }}">Settings</a>
+      </nav>
+
+      <div class="dashboard-sidebar-footer">
+        <button id="theme-toggle" class="sidebar-theme-toggle" type="button" aria-label="Toggle theme" title="Toggle theme"></button>
+      </div>
+    </aside>
+
+    <main class="dashboard-workspace">
+      <div class="dashboard-workspace-inner">
+        <div class="update-page-layout">
+          <header class="page-section-header">
+            <h2>Update</h2>
+          </header>
+
+          <div class="update-status-card">
+            <p>{{ message }}</p>
+          </div>
+        </div>
+      </div>
+    </main>
   </div>
+  <script>
+    (function(){
+      const root = document.documentElement;
+      const btn = document.getElementById('theme-toggle');
+      function apply(theme){
+        const t = (theme === 'light') ? 'light' : 'dark';
+        root.setAttribute('data-theme', t);
+        if (btn) btn.textContent = t === 'light' ? '\u2600' : '\u263D';
+      }
+      const saved = localStorage.getItem('theme') || 'dark';
+      apply(saved);
+      if (btn) btn.addEventListener('click', () => {
+        const cur = root.getAttribute('data-theme') === 'light' ? 'light' : 'dark';
+        const next = cur === 'light' ? 'dark' : 'light';
+        apply(next);
+        try { localStorage.setItem('theme', next); } catch(e){}
+      });
+    })();
+  </script>
 </body>
 </html>

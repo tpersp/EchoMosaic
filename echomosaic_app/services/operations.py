@@ -83,12 +83,12 @@ class OperationsService:
             return tuple()
         return tuple(int(part) for part in matches)
 
-    def _read_release_status(self, cfg: Dict[str, Any], repo_path: str) -> Dict[str, Any]:
+    def _read_release_status(self, cfg: Dict[str, Any], repo_path: str, *, force_refresh: bool = False) -> Dict[str, Any]:
         repo_slug = str(cfg.get("REPO_SLUG") or "tpersp/EchoMosaic").strip()
         cache_ttl = max(60, int(cfg.get("RELEASE_CHECK_INTERVAL_SECS") or 3600))
         cached = self._release_status_cache.get(repo_slug)
         now = float(self.time_fn())
-        if cached and (now - cached.get("fetched_at", 0.0)) < cache_ttl:
+        if not force_refresh and cached and (now - cached.get("fetched_at", 0.0)) < cache_ttl:
             return dict(cached["payload"])
 
         installed_version = self._normalize_version(
@@ -388,7 +388,7 @@ class OperationsService:
         worker.start()
         return {"status": "started", "service_name": service_name}
 
-    def read_update_info(self, cfg: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    def read_update_info(self, cfg: Optional[Dict[str, Any]] = None, *, force_refresh: bool = False) -> Dict[str, Any]:
         cfg = cfg or self.load_config()
         cfg, _ = config_manager.normalize_update_configuration(cfg)
         repo_path = self.repo_path_from_config(cfg)
@@ -397,7 +397,7 @@ class OperationsService:
         info = {"branch": branch, "channel": update_channel}
 
         if update_channel == "release":
-            info.update(self._read_release_status(cfg, repo_path))
+            info.update(self._read_release_status(cfg, repo_path, force_refresh=force_refresh))
         else:
             current = self._git_safe(repo_path, ["git", "rev-parse", "HEAD"]) or ""
             current_short = self._git_safe(repo_path, ["git", "rev-parse", "--short", "HEAD"]) or ""
@@ -429,7 +429,10 @@ class OperationsService:
                     info["previous_commit"] = last.get("from")
                     previous = last.get("from")
                     if previous:
-                        prev_desc = safe(["git", "log", "-1", previous, "--pretty=%h %s (%cr)"]) or previous[:7]
+                        prev_desc = self._git_safe(
+                            repo_path,
+                            ["git", "log", "-1", previous, "--pretty=%h %s (%cr)"],
+                        ) or previous[:7]
                     else:
                         prev_desc = None
                     info["previous_desc"] = prev_desc

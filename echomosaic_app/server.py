@@ -936,7 +936,7 @@ YOUTUBE_DOMAINS = {
 YOUTUBE_OEMBED_ENDPOINT = "https://www.youtube.com/oembed"
 YOUTUBE_OEMBED_CACHE_TTL = 20 * 60  # 20 minutes
 YOUTUBE_LIVE_PROBE_CACHE_TTL = 15 * 60  # 15 minutes
-YOUTUBE_LIVE_PROBE_MAX_BYTES = 30_000
+YOUTUBE_LIVE_PROBE_MAX_BYTES = 900_000
 YOUTUBE_LIVE_HTML_MARKERS = (
     '"islive":true',
     '"islive":1',
@@ -3450,7 +3450,8 @@ OPERATIONS_SERVICE = OperationsService(
 
 def dashboard_update_status():
     cfg = load_config()
-    info = OPERATIONS_SERVICE.read_update_info(cfg)
+    force_refresh = str(request.args.get("refresh") or "").strip().lower() in {"1", "true", "yes", "on"}
+    info = OPERATIONS_SERVICE.read_update_info(cfg, force_refresh=force_refresh)
     return jsonify(
         {
             "channel": info.get("channel"),

@@ -26,6 +26,7 @@ ai_media/_thumbnails_cache/
 # Local agent guidance and readiness notes
 AGENTS.md
 main-readiness/
+plans/
 
 # Editor/IDE
 .vscode/
