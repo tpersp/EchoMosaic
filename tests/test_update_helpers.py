@@ -114,3 +114,29 @@ def test_backup_ignores_media_paths_outside_repo(tmp_path: Path) -> None:
     assert all(item["repo_relative_path"] != external.name for item in manifest)
 
     update_helpers.restore_user_state(str(repo), str(backup_dir), cleanup=True)
+
+
+def test_append_update_history_records_previous_and_current_commit(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+
+    changed = update_helpers.append_update_history(str(repo), "abc1234", "def5678", "dev")
+
+    history = json.loads((repo / "update_history.json").read_text(encoding="utf-8"))
+
+    assert changed is True
+    assert len(history) == 1
+    assert history[0]["from"] == "abc1234"
+    assert history[0]["to"] == "def5678"
+    assert history[0]["branch"] == "dev"
+    assert history[0]["timestamp"].endswith("Z")
+
+
+def test_append_update_history_ignores_noop_update(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+
+    changed = update_helpers.append_update_history(str(repo), "abc1234", "abc1234", "dev")
+
+    assert changed is False
+    assert not (repo / "update_history.json").exists()

@@ -94,6 +94,8 @@ fi
 
 cd "$INSTALL_DIR"
 
+PRE_UPDATE_COMMIT="$(git rev-parse HEAD 2>/dev/null || true)"
+
 PYTHON_BIN="$INSTALL_DIR/venv/bin/python"
 if [ ! -x "$PYTHON_BIN" ]; then
   if command -v python3 >/dev/null 2>&1; then
@@ -292,6 +294,22 @@ data["INSTALLED_VERSION"] = installed_version
 data["INSTALLED_COMMIT"] = installed_commit
 config_path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
 PY
+
+POST_UPDATE_COMMIT="$(git rev-parse HEAD 2>/dev/null || true)"
+if [ -n "$PRE_UPDATE_COMMIT" ] && [ -n "$POST_UPDATE_COMMIT" ] && [ "$PRE_UPDATE_COMMIT" != "$POST_UPDATE_COMMIT" ]; then
+  echo -e "\nRecording update history..."
+  "$PYTHON_BIN" - "$INSTALL_DIR" "$PRE_UPDATE_COMMIT" "$POST_UPDATE_COMMIT" "$BRANCH" <<'PY'
+import sys
+from update_helpers import append_update_history
+
+append_update_history(
+    sys.argv[1],
+    sys.argv[2],
+    sys.argv[3],
+    sys.argv[4] if len(sys.argv) > 4 else None,
+)
+PY
+fi
 
 echo -e "\nRestarting $SERVICE_NAME..."
 systemctl --user restart "$SERVICE_NAME"
