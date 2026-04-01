@@ -46,7 +46,9 @@
   const actionRenameFolder = document.getElementById("action-rename-folder");
   const actionDeleteFolder = document.getElementById("action-delete-folder");
   const actionUpload = document.getElementById("action-upload");
+  const actionUploadFiles = document.getElementById("action-upload-files");
   const actionUploadFolder = document.getElementById("action-upload-folder");
+  const uploadMenu = document.getElementById("upload-menu");
   const refreshButton = document.getElementById("tree-refresh");
 
   const thumbObserver = new IntersectionObserver((entries) => {
@@ -598,6 +600,13 @@
     document.querySelectorAll(".card-menu.open").forEach((menu) => {
       menu.classList.remove("open");
     });
+    if (uploadMenu) {
+      uploadMenu.hidden = true;
+      uploadMenu.classList.remove("open");
+    }
+    if (actionUpload) {
+      actionUpload.setAttribute("aria-expanded", "false");
+    }
   }
 
   function renderFiles(files) {
@@ -1139,7 +1148,21 @@
       actionDeleteFolder.addEventListener("click", deleteCurrentFolder);
     }
     if (allowEdit && actionUpload) {
-      actionUpload.addEventListener("click", () => {
+      actionUpload.addEventListener("click", (event) => {
+        if (!ensureUploadTarget()) return;
+        event.stopPropagation();
+        if (!uploadMenu) return;
+        const nextOpen = uploadMenu.hidden;
+        closeAllMenus();
+        uploadMenu.hidden = !nextOpen;
+        uploadMenu.classList.toggle("open", nextOpen);
+        actionUpload.setAttribute("aria-expanded", nextOpen ? "true" : "false");
+      });
+    }
+    if (allowEdit && actionUploadFiles) {
+      actionUploadFiles.addEventListener("click", (event) => {
+        event.stopPropagation();
+        closeAllMenus();
         if (!ensureUploadTarget()) return;
         if (!uploadInput) return;
         if (allowedExts.length) {
@@ -1149,7 +1172,9 @@
       });
     }
     if (allowEdit && actionUploadFolder) {
-      actionUploadFolder.addEventListener("click", () => {
+      actionUploadFolder.addEventListener("click", (event) => {
+        event.stopPropagation();
+        closeAllMenus();
         if (!ensureUploadTarget()) return;
         if (!uploadFolderInput) return;
         if (!("webkitdirectory" in uploadFolderInput)) {

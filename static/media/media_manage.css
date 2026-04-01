@@ -149,6 +149,47 @@
 .toolbar-buttons {
   display: flex;
   gap: 0.5rem;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.toolbar-upload-menu {
+  position: relative;
+}
+
+.toolbar-menu {
+  position: absolute;
+  top: calc(100% + 0.4rem);
+  right: 0;
+  min-width: 170px;
+  padding: 0.35rem;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  box-shadow: 0 16px 34px rgba(0, 0, 0, 0.24);
+  z-index: 20;
+}
+
+.toolbar-menu.open {
+  display: block;
+}
+
+.toolbar-menu[hidden] {
+  display: none !important;
+}
+
+.toolbar-menu button {
+  width: 100%;
+  text-align: left;
+  border: none;
+  background: transparent;
+  border-radius: 8px;
+  padding: 0.65rem 0.8rem;
+}
+
+.toolbar-menu button:hover,
+.toolbar-menu button:focus {
+  background: var(--surface-alt);
 }
 
 .subfolder-list {

@@ -62,8 +62,13 @@
           <button id="action-create-folder" type="button">Create Folder</button>
           <button id="action-rename-folder" type="button">Rename</button>
           <button id="action-delete-folder" type="button">Delete</button>
-          <button id="action-upload" type="button">Upload Files</button>
-          <button id="action-upload-folder" type="button">Upload Folder</button>
+          <div class="toolbar-upload-menu">
+            <button id="action-upload" type="button" aria-haspopup="true" aria-expanded="false">Upload</button>
+            <div id="upload-menu" class="toolbar-menu" hidden>
+              <button id="action-upload-files" type="button">Upload Files</button>
+              <button id="action-upload-folder" type="button">Upload Folder</button>
+            </div>
+          </div>
         </div>
         {% endif %}
       </div>
