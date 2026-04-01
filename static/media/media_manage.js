@@ -865,15 +865,25 @@
 
     counts.append(title, meta);
 
+    const actions = document.createElement("div");
+    actions.className = "upload-summary-actions";
+
+    const cancelButton = document.createElement("button");
+    cancelButton.type = "button";
+    cancelButton.className = "upload-cancel";
+    cancelButton.textContent = "Cancel pending";
+    cancelButton.addEventListener("click", cancelQueuedUploads);
+
     const clearButton = document.createElement("button");
     clearButton.type = "button";
     clearButton.className = "upload-clear";
     clearButton.textContent = "Clear completed";
     clearButton.addEventListener("click", clearCompletedUploads);
 
-    summary.append(counts, clearButton);
+    actions.append(cancelButton, clearButton);
+    summary.append(counts, actions);
     uploadQueue.appendChild(summary);
-    uploadState.summary = { wrapper: summary, meta, clearButton };
+    uploadState.summary = { wrapper: summary, meta, clearButton, cancelButton };
     updateUploadSummary();
     return uploadState.summary;
   }
@@ -892,6 +902,7 @@
     if (!total) {
       summary.meta.textContent = "No files in the queue.";
       summary.clearButton.hidden = true;
+      summary.cancelButton.hidden = true;
       return;
     }
 
@@ -902,6 +913,8 @@
     parts.push(`${uploadConcurrency} parallel`);
     summary.meta.textContent = parts.join(" • ");
     summary.clearButton.hidden = done + failed === 0;
+    summary.cancelButton.hidden = pending + uploading === 0;
+    summary.cancelButton.textContent = uploading ? "Cancel queue" : "Cancel pending";
   }
 
   function setUploadRowStatus(entry, status, detail) {
@@ -975,6 +988,7 @@
       icon,
       statusLabel,
       status: "pending",
+      xhr: null,
     };
     uploadState.queue.push(entry);
     updateUploadSummary();
@@ -1001,6 +1015,37 @@
       }
     });
     uploadState.queue = retained;
+    if (!uploadState.queue.length && uploadQueue) {
+      uploadQueue.hidden = true;
+      if (uploadState.summary && uploadState.summary.wrapper.parentNode) {
+        uploadState.summary.wrapper.remove();
+      }
+      uploadState.summary = null;
+      return;
+    }
+    updateUploadSummary();
+  }
+
+  function cancelQueuedUploads() {
+    let cancelled = 0;
+    uploadState.queue.forEach((entry) => {
+      if (entry.status === "pending") {
+        entry.status = "cancelled";
+        cancelled += 1;
+        if (entry.row && entry.row.parentNode) {
+          entry.row.remove();
+        }
+        return;
+      }
+      if (entry.status === "uploading" && entry.xhr) {
+        entry.xhr.abort();
+        cancelled += 1;
+      }
+    });
+    uploadState.queue = uploadState.queue.filter((entry) => entry.status !== "cancelled");
+    if (cancelled) {
+      showToast(`Cancelled ${cancelled} upload${cancelled === 1 ? "" : "s"}`, "success");
+    }
     if (!uploadState.queue.length && uploadQueue) {
       uploadQueue.hidden = true;
       if (uploadState.summary && uploadState.summary.wrapper.parentNode) {
@@ -1078,9 +1123,15 @@
   function uploadSingle(file, rowInfo) {
     return new Promise((resolve, reject) => {
       const xhr = new XMLHttpRequest();
+      if (rowInfo) {
+        rowInfo.xhr = xhr;
+      }
       xhr.open("POST", "/api/media/upload");
       xhr.responseType = "json";
       xhr.onload = () => {
+        if (rowInfo) {
+          rowInfo.xhr = null;
+        }
         if (xhr.status >= 200 && xhr.status < 300) {
           resolve(xhr.response);
         } else {
@@ -1088,7 +1139,18 @@
           reject(new Error(msg));
         }
       };
-      xhr.onerror = () => reject(new Error("Upload failed"));
+      xhr.onabort = () => {
+        if (rowInfo) {
+          rowInfo.xhr = null;
+        }
+        reject(new Error("Upload cancelled"));
+      };
+      xhr.onerror = () => {
+        if (rowInfo) {
+          rowInfo.xhr = null;
+        }
+        reject(new Error("Upload failed"));
+      };
       if (rowInfo && rowInfo.bar) {
         xhr.upload.onprogress = (event) => {
           if (event.lengthComputable) {
