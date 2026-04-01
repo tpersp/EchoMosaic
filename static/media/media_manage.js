@@ -4,6 +4,11 @@
   const roots = Array.isArray(bootstrap.roots) ? bootstrap.roots : [];
   const allowedExts = Array.isArray(bootstrap.allowedExts) ? bootstrap.allowedExts : [];
   const uploadMaxMB = Number(bootstrap.uploadMaxMB || 0);
+  const uploadConcurrency = (() => {
+    const value = Number(bootstrap.uploadConcurrency || 3);
+    if (!Number.isFinite(value) || value <= 0) return 3;
+    return Math.min(Math.max(Math.floor(value), 1), 6);
+  })();
   const previewEnabled = bootstrap.previewEnabled !== false;
   const PREVIEW_INTERVAL = (() => {
     const value = Number(bootstrap.previewIntervalMs || 150);
@@ -25,6 +30,7 @@
   const uploadState = {
     queue: [],
     processing: false,
+    activeCount: 0,
     nextId: 1,
     summary: null,
   };
@@ -893,6 +899,7 @@
     if (uploading) parts.push(`${uploading} uploading`);
     if (pending) parts.push(`${pending} waiting`);
     if (failed) parts.push(`${failed} failed`);
+    parts.push(`${uploadConcurrency} parallel`);
     summary.meta.textContent = parts.join(" • ");
     summary.clearButton.hidden = done + failed === 0;
   }
@@ -1030,22 +1037,34 @@
     if (uploadState.processing) return;
     uploadState.processing = true;
     let shouldRefresh = false;
+    const workerCount = Math.min(
+      uploadConcurrency,
+      uploadState.queue.filter((item) => item.status === "pending").length || uploadConcurrency
+    );
     try {
-      while (true) {
-        const nextEntry = uploadState.queue.find((item) => item.status === "pending");
-        if (!nextEntry) break;
-        setUploadRowStatus(nextEntry, "uploading");
-        try {
-          await uploadSingle(nextEntry.file, nextEntry);
-          finalizeUploadRow(nextEntry, true);
-          shouldRefresh = true;
-          showToast(`Uploaded ${nextEntry.displayName || nextEntry.file.name}`, "success");
-        } catch (err) {
-          const message = err.message || `Failed to upload ${nextEntry.displayName || nextEntry.file.name}`;
-          finalizeUploadRow(nextEntry, false, message);
-          showToast(message, "error");
+      const runWorker = async () => {
+        while (true) {
+          const nextEntry = uploadState.queue.find((item) => item.status === "pending");
+          if (!nextEntry) return;
+          setUploadRowStatus(nextEntry, "uploading");
+          uploadState.activeCount += 1;
+          updateUploadSummary();
+          try {
+            await uploadSingle(nextEntry.file, nextEntry);
+            finalizeUploadRow(nextEntry, true);
+            shouldRefresh = true;
+            showToast(`Uploaded ${nextEntry.displayName || nextEntry.file.name}`, "success");
+          } catch (err) {
+            const message = err.message || `Failed to upload ${nextEntry.displayName || nextEntry.file.name}`;
+            finalizeUploadRow(nextEntry, false, message);
+            showToast(message, "error");
+          } finally {
+            uploadState.activeCount = Math.max(0, uploadState.activeCount - 1);
+            updateUploadSummary();
+          }
         }
-      }
+      };
+      await Promise.all(Array.from({ length: workerCount }, () => runWorker()));
     } finally {
       uploadState.processing = false;
       updateUploadSummary();
