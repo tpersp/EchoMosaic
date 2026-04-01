@@ -1025,5 +1025,11 @@ class MediaManager:
     def allowed_extensions(self) -> List[str]:
         return sorted(self._allowed_exts)
 
+    def set_max_upload_mb(self, value: int) -> None:
+        self._max_upload_bytes = max(1, int(value)) * 1024 * 1024
+
+    def max_upload_mb(self) -> int:
+        return max(1, self._max_upload_bytes // (1024 * 1024))
+
     def max_upload_bytes(self) -> int:
         return self._max_upload_bytes

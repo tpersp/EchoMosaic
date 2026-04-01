@@ -2929,6 +2929,7 @@ _media_blueprint = create_media_blueprint(
     media_allow_edit=MEDIA_MANAGEMENT_ALLOW_EDIT,
     media_allowed_exts=MEDIA_ALLOWED_EXTS,
     media_upload_max_mb=MEDIA_UPLOAD_MAX_MB,
+    media_upload_max_mb_getter=lambda: max(1, _as_int(load_config().get("MEDIA_UPLOAD_MAX_MB"), MEDIA_UPLOAD_MAX_MB)),
     media_preview_enabled=MEDIA_PREVIEW_ENABLED,
     media_preview_frames=MEDIA_PREVIEW_FRAMES,
     media_preview_width=MEDIA_PREVIEW_WIDTH,
@@ -3529,6 +3530,7 @@ def update_ai_defaults():
 _settings_operations_blueprint = create_settings_operations_blueprint(
     settings=settings,
     load_config=load_config,
+    media_settings_handler=lambda: api_media_settings(),
     default_ai_settings=default_ai_settings,
     ai_fallback_defaults=AI_FALLBACK_DEFAULTS,
     post_processors=STABLE_HORDE_POST_PROCESSORS,
@@ -4136,6 +4138,49 @@ def api_timer_settings():
 
     stream_summary = _apply_timer_snap_setting(requested)
     return jsonify({"timer_snap_enabled": requested, "streams": stream_summary})
+
+
+def api_media_settings():
+    global CONFIG, MEDIA_UPLOAD_MAX_MB, MEDIA_UPLOAD_MAX_BYTES
+
+    cfg = load_config()
+    upload_limit_mb = max(1, _as_int(cfg.get("MEDIA_UPLOAD_MAX_MB"), 2048))
+    if request.method == "GET":
+        return jsonify(
+            {
+                "media_upload_max_mb": upload_limit_mb,
+                "media_upload_max_bytes": upload_limit_mb * 1024 * 1024,
+            }
+        )
+
+    api_key = cfg.get("API_KEY")
+    if api_key and request.headers.get("X-API-Key") != api_key:
+        return jsonify({"error": "Unauthorized"}), 401
+
+    payload = request.get_json(silent=True) or {}
+    requested = max(1, _as_int(payload.get("media_upload_max_mb"), upload_limit_mb))
+    cfg["MEDIA_UPLOAD_MAX_MB"] = requested
+    try:
+        config_manager.save_config(cfg)
+    except Exception:
+        logger.exception("Failed to persist media upload setting")
+        return jsonify({"error": "Unable to save setting"}), 500
+
+    CONFIG["MEDIA_UPLOAD_MAX_MB"] = requested
+    MEDIA_UPLOAD_MAX_MB = requested
+    MEDIA_UPLOAD_MAX_BYTES = requested * 1024 * 1024
+    try:
+        MEDIA_MANAGER.set_max_upload_mb(requested)
+    except Exception:
+        logger.exception("Failed to apply media upload setting to runtime")
+        return jsonify({"error": "Unable to apply setting"}), 500
+
+    return jsonify(
+        {
+            "media_upload_max_mb": requested,
+            "media_upload_max_bytes": MEDIA_UPLOAD_MAX_BYTES,
+        }
+    )
 
 
 def _sync_timer_payload(timer_id: str, entry: Dict[str, Any]) -> Dict[str, Any]:

@@ -377,6 +377,78 @@
   }
 
   document.addEventListener('DOMContentLoaded', initTimerSettingsControls);
+
+  function setMediaSettingsStatus(message, ok = true) {
+    const note = document.getElementById('media-settings-note');
+    if (!note) return;
+    if (!message) {
+      note.textContent = '';
+      note.style.display = 'none';
+      return;
+    }
+    note.textContent = message;
+    note.style.display = 'block';
+    note.style.color = ok ? 'inherit' : '#f66';
+    note.style.opacity = ok ? 0.85 : 1;
+  }
+
+  async function loadMediaSettings() {
+    const input = document.getElementById('media-upload-max-mb');
+    if (!input) return;
+    setMediaSettingsStatus('Loading…');
+    try {
+      const res = await fetch('/api/settings/media', { cache: 'no-store' });
+      if (!res.ok) {
+        throw new Error('Request failed');
+      }
+      const data = await res.json();
+      input.value = data.media_upload_max_mb || 2048;
+      setMediaSettingsStatus('');
+    } catch (err) {
+      setMediaSettingsStatus('Unable to load media settings.', false);
+    }
+  }
+
+  async function saveMediaSettings() {
+    const input = document.getElementById('media-upload-max-mb');
+    if (!input) return;
+    const parsed = Number(input.value);
+    if (!Number.isFinite(parsed) || parsed < 1) {
+      setMediaSettingsStatus('Enter a valid upload limit in MB.', false);
+      return;
+    }
+    setMediaSettingsStatus('Saving…');
+    input.disabled = true;
+    try {
+      const res = await fetch('/api/settings/media', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-API-Key': SETTINGS_API_KEY
+        },
+        body: JSON.stringify({ media_upload_max_mb: Math.floor(parsed) })
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(data.error || 'Failed to update media settings');
+      }
+      input.value = data.media_upload_max_mb || Math.floor(parsed);
+      setMediaSettingsStatus(`Upload limit saved at ${input.value} MB.`);
+    } catch (err) {
+      setMediaSettingsStatus(err.message || 'Failed to save media settings.', false);
+    } finally {
+      input.disabled = false;
+    }
+  }
+
+  function initMediaSettingsControls() {
+    const saveButton = document.getElementById('media-settings-save');
+    if (!saveButton) return;
+    saveButton.addEventListener('click', saveMediaSettings);
+    loadMediaSettings();
+  }
+
+  document.addEventListener('DOMContentLoaded', initMediaSettingsControls);
 </script>
 </head>
 <body class="dashboard-page">
@@ -519,6 +591,27 @@
         <span class="toggle-label">Snap Timers to Full Increments</span>
       </label>
       <p id="timer-snap-note" class="settings-status-line" style="display:none;"></p>
+    </section>
+
+    <section class="settings-card">
+      <div class="settings-card-header">
+        <div>
+          <p class="settings-kicker">Media Settings</p>
+          <h3>Uploads</h3>
+        </div>
+        <p class="settings-card-copy">Control the maximum size allowed for file and folder uploads in the Media manager.</p>
+      </div>
+      <div class="settings-inline-form">
+        <label class="settings-advanced-field settings-advanced-field-inline" for="media-upload-max-mb">
+          <span>Max Upload Size</span>
+          <div class="settings-inline-input-wrap">
+            <input id="media-upload-max-mb" type="number" min="1" step="1">
+            <span class="settings-inline-suffix">MB</span>
+          </div>
+        </label>
+        <button id="media-settings-save" type="button">Save Media Setting</button>
+      </div>
+      <p id="media-settings-note" class="settings-status-line" style="display:none;"></p>
     </section>
 
     <section class="settings-card settings-card-wide">

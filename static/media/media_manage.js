@@ -1340,7 +1340,7 @@
     if (!uploadMaxMB || !toastContainer) return;
     const notice = document.createElement("div");
     notice.className = "subfolder-meta";
-    notice.textContent = `Max upload size: ${uploadMaxMB} MB.`;
+    notice.textContent = `Current upload limit: ${uploadMaxMB} MB per file.`;
     if (uploadQueue && uploadQueue.parentElement) {
       uploadQueue.parentElement.insertBefore(notice, uploadQueue);
     }

@@ -389,6 +389,29 @@ body.dashboard-page.dashboard-panel-open {
   font-weight: 600;
 }
 
+.settings-inline-form {
+  display: flex;
+  align-items: flex-end;
+  gap: 0.85rem;
+  flex-wrap: wrap;
+}
+
+.settings-advanced-field-inline {
+  min-width: 220px;
+}
+
+.settings-inline-input-wrap {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.settings-inline-suffix {
+  font-size: 0.9rem;
+  font-weight: 600;
+  opacity: 0.75;
+}
+
 .settings-lora-header {
   display: flex;
   align-items: center;
