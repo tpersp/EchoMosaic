@@ -461,17 +461,31 @@
     folders.forEach((folder) => {
       const card = document.createElement("div");
       card.className = "subfolder-card";
-      const header = document.createElement("div");
-      header.className = "subfolder-header";
-      const button = document.createElement("button");
-      button.type = "button";
-      button.textContent = folder.name;
-      button.addEventListener("click", () => selectFolder(folder.path));
-      button.title = folder.path;
-      header.appendChild(button);
+      const topline = document.createElement("div");
+      topline.className = "subfolder-topline";
+
+      const title = document.createElement("div");
+      title.className = "subfolder-title";
+      title.textContent = folder.name;
+      title.title = folder.path;
+
+      const count = folder.count || 0;
+      const badge = document.createElement("div");
+      badge.className = "subfolder-count";
+      badge.textContent = `${count} item${count === 1 ? "" : "s"}`;
+
+      topline.append(title, badge);
+
+      const openButton = document.createElement("button");
+      openButton.type = "button";
+      openButton.className = "subfolder-open";
+      openButton.textContent = "Open Folder";
+      openButton.addEventListener("click", () => selectFolder(folder.path));
+      openButton.title = folder.path;
+
       if (allowEdit) {
         const actions = document.createElement("div");
-        actions.className = "media-card-actions";
+        actions.className = "subfolder-actions";
         const rename = document.createElement("button");
         rename.type = "button";
         rename.textContent = "Rename";
@@ -487,13 +501,10 @@
           deleteEntry(folder.path);
         });
         actions.append(rename, del);
-        header.appendChild(actions);
+        card.append(topline, openButton, actions);
+      } else {
+        card.append(topline, openButton);
       }
-      const meta = document.createElement("div");
-      meta.className = "subfolder-meta";
-      const count = folder.count || 0;
-      meta.textContent = `${count} item${count === 1 ? "" : "s"}`;
-      card.append(header, meta);
       subfolderContainer.appendChild(card);
     });
   }

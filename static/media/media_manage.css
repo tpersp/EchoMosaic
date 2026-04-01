@@ -152,44 +152,82 @@
 }
 
 .subfolder-list {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.75rem;
+  display: grid;
+  gap: 0.9rem;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
 }
 
 .subfolder-card {
-  background: var(--surface-alt);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.035), rgba(255, 255, 255, 0.015)),
+    var(--surface-alt);
   border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 0.75rem 0.85rem;
-  min-width: 140px;
+  border-radius: 14px;
+  padding: 0.95rem;
   display: flex;
   flex-direction: column;
-  gap: 0.5rem;
+  gap: 0.85rem;
+  min-height: 148px;
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.12);
+  transition: border-color 0.2s ease, transform 0.2s ease, box-shadow 0.2s ease;
 }
 
-.subfolder-card button {
-  width: fit-content;
+.subfolder-card:hover {
+  border-color: var(--border-hover);
+  transform: translateY(-1px);
+  box-shadow: 0 14px 30px rgba(0, 0, 0, 0.18);
 }
 
-.subfolder-header {
+.subfolder-topline {
   display: flex;
-  align-items: center;
   justify-content: space-between;
-  gap: 0.5rem;
+  align-items: flex-start;
+  gap: 0.75rem;
 }
 
 .subfolder-title {
-  font-weight: 600;
-  font-size: 0.95rem;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  font-weight: 700;
+  font-size: 1rem;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+  flex: 1 1 auto;
 }
 
 .subfolder-meta {
   font-size: 0.75rem;
   opacity: 0.75;
+}
+
+.subfolder-count {
+  flex: 0 0 auto;
+  padding: 0.28rem 0.55rem;
+  border-radius: 999px;
+  background: rgba(79, 163, 255, 0.12);
+  border: 1px solid rgba(79, 163, 255, 0.22);
+  color: var(--text);
+  font-size: 0.78rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.subfolder-open {
+  width: 100%;
+  justify-content: center;
+  text-align: center;
+  padding: 0.7rem 0.85rem;
+  border-radius: 12px;
+  font-weight: 600;
+}
+
+.subfolder-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+  margin-top: auto;
+}
+
+.subfolder-actions button {
+  flex: 1 1 120px;
 }
 
 .media-grid {
