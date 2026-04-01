@@ -62,7 +62,8 @@
           <button id="action-create-folder" type="button">Create Folder</button>
           <button id="action-rename-folder" type="button">Rename</button>
           <button id="action-delete-folder" type="button">Delete</button>
-          <button id="action-upload" type="button">Upload</button>
+          <button id="action-upload" type="button">Upload Files</button>
+          <button id="action-upload-folder" type="button">Upload Folder</button>
         </div>
         {% endif %}
       </div>
@@ -81,6 +82,7 @@
 </div>
 
 <input type="file" id="upload-input" multiple hidden {% if media_allowed_exts %}accept="{{ media_allowed_exts|join(',') }}"{% endif %}>
+<input type="file" id="upload-folder-input" multiple webkitdirectory directory hidden {% if media_allowed_exts %}accept="{{ media_allowed_exts|join(',') }}"{% endif %}>
 
 <div id="toast-container" class="toast-container" role="alert" aria-live="assertive"></div>
 

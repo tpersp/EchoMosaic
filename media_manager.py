@@ -87,6 +87,23 @@ def _safe_name(name: str) -> str:
     return cleaned
 
 
+def _safe_relative_upload_path(relative_path: Optional[str], fallback_name: str) -> Path:
+    raw = str(relative_path or "").strip().replace("\\", "/")
+    if not raw:
+        return Path(_safe_name(fallback_name))
+
+    parts: List[str] = []
+    for part in raw.split("/"):
+        cleaned = part.strip()
+        if not cleaned:
+            continue
+        parts.append(_safe_name(cleaned))
+
+    if not parts:
+        return Path(_safe_name(fallback_name))
+    return Path(*parts)
+
+
 def _normalize_ext(value: str) -> str:
     text = value.strip().lower()
     return text if text.startswith(".") else f".{text}"
@@ -592,26 +609,41 @@ class MediaManager:
         if ext and ext not in self._allowed_exts:
             raise MediaManagerError("File type not allowed", code="invalid_extension")
 
-    def upload(self, destination: ListablePath, files: Sequence[FileStorage]) -> List[Dict[str, Any]]:
+    def upload(
+        self,
+        destination: ListablePath,
+        files: Sequence[FileStorage],
+        *,
+        relative_paths: Optional[Sequence[str]] = None,
+    ) -> List[Dict[str, Any]]:
         if not files:
             return []
         root, folder = self._resolve(destination)
         if not folder.exists() or not folder.is_dir():
             raise MediaManagerError("Destination folder not found", code="not_found", status=404)
         saved: List[Dict[str, Any]] = []
-        for storage in files:
+        relative_paths = list(relative_paths or [])
+        for index, storage in enumerate(files):
             filename = (storage.filename or "").strip()
             if not filename:
                 continue
-            safe_filename = _safe_name(Path(filename).name)
+            target_relative = _safe_relative_upload_path(
+                relative_paths[index] if index < len(relative_paths) else "",
+                Path(filename).name,
+            )
+            safe_filename = target_relative.name
             ext = Path(safe_filename).suffix.lower()
             size = self._detect_size(storage)
             self.validate_upload(safe_filename, size if size is not None else 0)
             if size is not None and size > self._max_upload_bytes:
                 raise MediaManagerError("File exceeds configured upload limit", code="too_large")
-            target_path = folder / safe_filename
+            target_path = (folder / target_relative).resolve()
+            try:
+                target_path.relative_to(folder.resolve())
+            except ValueError:
+                raise MediaManagerError("Upload path escapes destination folder", code="invalid_path")
             if target_path.exists():
-                raise MediaManagerError(f"'{safe_filename}' already exists", code="exists")
+                raise MediaManagerError(f"'{target_relative.as_posix()}' already exists", code="exists")
             try:
                 self._save_upload(storage, target_path)
                 stats = target_path.stat()

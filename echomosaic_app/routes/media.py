@@ -116,9 +116,10 @@ def create_media_blueprint(
             require_media_edit()
             destination = request.form.get("path") or ""
             files = request.files.getlist("files")
+            relative_paths = request.form.getlist("relative_paths")
             if not files:
                 raise media_error_type("No files were provided", code="invalid_request")
-            saved = media_manager.upload(destination, files)
+            saved = media_manager.upload(destination, files, relative_paths=relative_paths)
         except Exception as exc:
             return media_error_response(exc)
         logger.info("media.upload path=%s count=%d", destination, len(saved))

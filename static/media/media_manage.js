@@ -38,6 +38,7 @@
   const hideNsfwToggle = document.getElementById("media-hide-nsfw");
   const sortSelect = document.getElementById("media-sort");
   const uploadInput = document.getElementById("upload-input");
+  const uploadFolderInput = document.getElementById("upload-folder-input");
   const toastContainer = document.getElementById("toast-container");
   const panel = document.querySelector(".media-panel");
 
@@ -45,6 +46,7 @@
   const actionRenameFolder = document.getElementById("action-rename-folder");
   const actionDeleteFolder = document.getElementById("action-delete-folder");
   const actionUpload = document.getElementById("action-upload");
+  const actionUploadFolder = document.getElementById("action-upload-folder");
   const refreshButton = document.getElementById("tree-refresh");
 
   const thumbObserver = new IntersectionObserver((entries) => {
@@ -911,7 +913,7 @@
     updateUploadSummary();
   }
 
-  function prepareUploadRow(file, destinationPath) {
+  function prepareUploadRow(file, destinationPath, relativePath) {
     if (!uploadQueue) return null;
     ensureUploadSummary();
     const row = document.createElement("div");
@@ -930,7 +932,7 @@
 
     const title = document.createElement("div");
     title.className = "title";
-    title.textContent = file.name;
+    title.textContent = relativePath || file.name;
 
     titleWrap.append(icon, title);
 
@@ -950,6 +952,8 @@
       id: uploadState.nextId++,
       file,
       destinationPath,
+      relativePath: relativePath || "",
+      displayName: relativePath || file.name,
       row,
       bar: span,
       icon,
@@ -992,13 +996,24 @@
     updateUploadSummary();
   }
 
+  function getRelativeUploadPath(file) {
+    if (!file) return "";
+    const relative = typeof file.webkitRelativePath === "string" ? file.webkitRelativePath.trim() : "";
+    if (relative && relative.includes("/")) {
+      return relative;
+    }
+    return "";
+  }
+
   function uploadFiles(files) {
     if (!validateCanModify()) return;
     if (!ensureUploadTarget()) return;
     const items = Array.from(files || []);
     if (!items.length) return;
     const destinationPath = state.currentPath;
-    items.forEach((file) => prepareUploadRow(file, destinationPath));
+    items.forEach((file) => {
+      prepareUploadRow(file, destinationPath, getRelativeUploadPath(file));
+    });
     processUploadQueue();
   }
 
@@ -1015,9 +1030,9 @@
           await uploadSingle(nextEntry.file, nextEntry);
           finalizeUploadRow(nextEntry, true);
           shouldRefresh = true;
-          showToast(`Uploaded ${nextEntry.file.name}`, "success");
+          showToast(`Uploaded ${nextEntry.displayName || nextEntry.file.name}`, "success");
         } catch (err) {
-          const message = err.message || `Failed to upload ${nextEntry.file.name}`;
+          const message = err.message || `Failed to upload ${nextEntry.displayName || nextEntry.file.name}`;
           finalizeUploadRow(nextEntry, false, message);
           showToast(message, "error");
         }
@@ -1060,6 +1075,7 @@
       const form = new FormData();
       form.append("path", rowInfo && rowInfo.destinationPath ? rowInfo.destinationPath : state.currentPath);
       form.append("files", file);
+      form.append("relative_paths", rowInfo && rowInfo.relativePath ? rowInfo.relativePath : "");
       xhr.send(form);
     });
   }
@@ -1107,6 +1123,12 @@
         uploadInput.value = "";
       });
     }
+    if (allowEdit && uploadFolderInput) {
+      uploadFolderInput.addEventListener("change", () => {
+        uploadFiles(uploadFolderInput.files);
+        uploadFolderInput.value = "";
+      });
+    }
     if (allowEdit && actionCreateFolder) {
       actionCreateFolder.addEventListener("click", createFolder);
     }
@@ -1124,6 +1146,20 @@
           uploadInput.setAttribute("accept", allowedExts.join(","));
         }
         uploadInput.click();
+      });
+    }
+    if (allowEdit && actionUploadFolder) {
+      actionUploadFolder.addEventListener("click", () => {
+        if (!ensureUploadTarget()) return;
+        if (!uploadFolderInput) return;
+        if (!("webkitdirectory" in uploadFolderInput)) {
+          showToast("Folder upload is not supported in this browser.", "error");
+          return;
+        }
+        if (allowedExts.length) {
+          uploadFolderInput.setAttribute("accept", allowedExts.join(","));
+        }
+        uploadFolderInput.click();
       });
     }
     if (refreshButton) {
