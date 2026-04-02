@@ -55,6 +55,53 @@ class OperationsService:
         self.time_fn = time_fn or time.time
         self._release_status_cache: Dict[str, Dict[str, Any]] = {}
 
+    def _read_raw_update_history(self, repo_path: str) -> List[Dict[str, Any]]:
+        history_path = os.path.join(repo_path, "update_history.json")
+        if not os.path.exists(history_path):
+            return []
+        try:
+            with open(history_path, "r") as history_file:
+                loaded = json.load(history_file)
+        except Exception:
+            return []
+        return loaded if isinstance(loaded, list) else []
+
+    def _resolve_previous_commit(self, repo_path: str, current_commit: str) -> Tuple[Optional[str], Optional[str]]:
+        history = self._read_raw_update_history(repo_path)
+        normalized_current = self._normalize_version(current_commit)
+        previous: Optional[str] = None
+
+        if history:
+            matched_entry: Optional[Dict[str, Any]] = None
+            if normalized_current:
+                for entry in reversed(history):
+                    if not isinstance(entry, dict):
+                        continue
+                    if self._normalize_version(entry.get("to")) == normalized_current:
+                        matched_entry = entry
+                        break
+            if matched_entry is None:
+                for entry in reversed(history):
+                    if isinstance(entry, dict):
+                        matched_entry = entry
+                        break
+            if matched_entry is not None:
+                previous = self._normalize_version(matched_entry.get("from")) or None
+
+        if not previous:
+            fallback = self._normalize_version(self._git_safe(repo_path, ["git", "rev-parse", "ORIG_HEAD"]))
+            if fallback and fallback != normalized_current:
+                previous = fallback
+
+        if not previous:
+            return None, None
+
+        previous_desc = self._git_safe(
+            repo_path,
+            ["git", "log", "-1", previous, "--pretty=%h %s (%cr)"],
+        ) or previous[:7]
+        return previous, previous_desc
+
     def _fetch_json(self, url: str) -> Any:
         request = urllib.request.Request(
             url,
@@ -468,38 +515,22 @@ class OperationsService:
                 }
             )
 
-        history_path = os.path.join(repo_path, "update_history.json")
-        if os.path.exists(history_path):
-            try:
-                with open(history_path, "r") as history_file:
-                    history = json.load(history_file)
-                if history:
-                    last = history[-1]
-                    info["previous_commit"] = last.get("from")
-                    previous = last.get("from")
-                    if previous:
-                        prev_desc = self._git_safe(
-                            repo_path,
-                            ["git", "log", "-1", previous, "--pretty=%h %s (%cr)"],
-                        ) or previous[:7]
-                    else:
-                        prev_desc = None
-                    info["previous_desc"] = prev_desc
-            except Exception:
-                pass
+        previous_commit, previous_desc = self._resolve_previous_commit(
+            repo_path,
+            self._normalize_version(
+                info.get("installed_commit") or info.get("current_commit") or ""
+            ),
+        )
+        if previous_commit:
+            info["previous_commit"] = previous_commit
+        if previous_desc:
+            info["previous_desc"] = previous_desc
         return info
 
     def read_update_history(self, cfg: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
         cfg = cfg or self.load_config()
         repo_path = self.repo_path_from_config(cfg)
-        history_path = os.path.join(repo_path, "update_history.json")
-        history = []
-        if os.path.exists(history_path):
-            try:
-                with open(history_path, "r") as history_file:
-                    history = json.load(history_file)
-            except Exception:
-                history = []
+        history = self._read_raw_update_history(repo_path)
 
         def srun(cmd):
             try:
