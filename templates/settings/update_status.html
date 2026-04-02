@@ -3,6 +3,15 @@
 <head>
   <meta charset="UTF-8"/>
   <title>Update Status</title>
+  <script>
+    (function () {
+      try {
+        if (window.localStorage.getItem('sidebar-collapsed') === '1') {
+          document.documentElement.classList.add('sidebar-collapsed');
+        }
+      } catch (err) {}
+    })();
+  </script>
   <link rel="stylesheet" href="{{ url_for('static', filename='shared/style.css') }}">
   <script src="{{ url_for('static', filename='shared/sidebar_shell.js') }}" defer></script>
   <style>

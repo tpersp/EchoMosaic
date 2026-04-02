@@ -218,36 +218,48 @@ body.dashboard-page.dashboard-panel-open {
 }
 
 @media (min-width: 981px) {
+  html.sidebar-collapsed body.dashboard-page .dashboard-shell,
   body.dashboard-page.sidebar-collapsed .dashboard-shell {
     padding-left: 88px;
   }
 
+  html.sidebar-collapsed body.dashboard-page .dashboard-sidebar,
   body.dashboard-page.sidebar-collapsed .dashboard-sidebar {
     width: 88px;
     padding-inline: 0.7rem;
     align-items: center;
   }
 
+  html.sidebar-collapsed body.dashboard-page .dashboard-workspace-inner,
   body.dashboard-page.sidebar-collapsed .dashboard-workspace-inner {
     width: min(1680px, calc(100vw - 144px));
   }
 
+  html.sidebar-collapsed body.dashboard-page .dashboard-sidebar-brand,
   body.dashboard-page.sidebar-collapsed .dashboard-sidebar-brand {
     width: 100%;
     align-items: center;
   }
 
+  html.sidebar-collapsed body.dashboard-page .dashboard-sidebar-brand-head,
   body.dashboard-page.sidebar-collapsed .dashboard-sidebar-brand-head {
     width: 100%;
     justify-content: center;
   }
 
+  html.sidebar-collapsed body.dashboard-page .dashboard-sidebar-brand-copy,
+  html.sidebar-collapsed body.dashboard-page .dashboard-sidebar-title,
+  html.sidebar-collapsed body.dashboard-page .sidebar-item-label,
   body.dashboard-page.sidebar-collapsed .dashboard-sidebar-brand-copy,
   body.dashboard-page.sidebar-collapsed .dashboard-sidebar-title,
   body.dashboard-page.sidebar-collapsed .sidebar-item-label {
     display: none;
   }
 
+  html.sidebar-collapsed body.dashboard-page .dashboard-sidebar-nav,
+  html.sidebar-collapsed body.dashboard-page .dashboard-sidebar-actions,
+  html.sidebar-collapsed body.dashboard-page .dashboard-sidebar-section,
+  html.sidebar-collapsed body.dashboard-page .dashboard-sidebar-footer,
   body.dashboard-page.sidebar-collapsed .dashboard-sidebar-nav,
   body.dashboard-page.sidebar-collapsed .dashboard-sidebar-actions,
   body.dashboard-page.sidebar-collapsed .dashboard-sidebar-section,
@@ -255,6 +267,9 @@ body.dashboard-page.dashboard-panel-open {
     width: 100%;
   }
 
+  html.sidebar-collapsed body.dashboard-page .sidebar-link,
+  html.sidebar-collapsed body.dashboard-page .sidebar-action,
+  html.sidebar-collapsed body.dashboard-page .sidebar-theme-toggle,
   body.dashboard-page.sidebar-collapsed .sidebar-link,
   body.dashboard-page.sidebar-collapsed .sidebar-action,
   body.dashboard-page.sidebar-collapsed .sidebar-theme-toggle {
@@ -262,10 +277,12 @@ body.dashboard-page.dashboard-panel-open {
     padding-inline: 0.65rem;
   }
 
+  html.sidebar-collapsed body.dashboard-page .dashboard-panel-backdrop,
   body.dashboard-page.sidebar-collapsed .dashboard-panel-backdrop {
     left: 88px;
   }
 
+  html.sidebar-collapsed body.dashboard-page .dashboard-panel,
   body.dashboard-page.sidebar-collapsed .dashboard-panel {
     left: 88px;
     width: min(520px, calc(100vw - 88px));

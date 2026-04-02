@@ -1,7 +1,16 @@
 (() => {
   const STORAGE_KEY = "sidebar-collapsed";
+  const root = document.documentElement;
+
+  function applyRootState(collapsed) {
+    if (!root) {
+      return;
+    }
+    root.classList.toggle("sidebar-collapsed", collapsed);
+  }
 
   function applySidebarState(button, collapsed) {
+    applyRootState(collapsed);
     if (!document.body) {
       return;
     }
