@@ -4311,13 +4311,29 @@ def stream_live():
                 content_type = "live"
             else:
                 content_type = "video"
+        resolved_video_id = youtube_details.get("video_id")
+        resolved_start_index = youtube_details.get("start_index")
+        if youtube_details.get("playlist_id") and content_type == "playlist" and not resolved_video_id:
+            playlist = YOUTUBE_EMBED_SERVICE.fetch_youtube_playlist(stream_url, youtube_details)
+            current_item = YOUTUBE_EMBED_SERVICE.resolve_youtube_playlist_current_item(
+                playlist,
+                youtube_details,
+                sanitized_meta,
+            )
+            if current_item:
+                resolved_video_id = current_item.get("video_id")
+                if current_item.get("index") is not None:
+                    resolved_start_index = current_item.get("index")
+                if sanitized_meta is not None:
+                    sanitized_meta["video_id"] = resolved_video_id
+                    sanitized_meta["start_index"] = resolved_start_index
         response_payload: Dict[str, Any] = {
             "embed_type": "youtube",
-            "embed_id": youtube_details.get("video_id"),
-            "video_id": youtube_details.get("video_id"),
+            "embed_id": resolved_video_id,
+            "video_id": resolved_video_id,
             "playlist_id": youtube_details.get("playlist_id"),
             "content_type": content_type,
-            "start_index": youtube_details.get("start_index"),
+            "start_index": resolved_start_index,
             "start_seconds": youtube_details.get("start_seconds"),
             "is_live": bool((sanitized_meta or {}).get("is_live") or youtube_details.get("is_live")),
             "embed_base": youtube_details.get("embed_base"),
@@ -4330,7 +4346,7 @@ def stream_live():
                 stream_id,
                 {
                     "playlist_id": youtube_details.get("playlist_id"),
-                    "video_id": youtube_details.get("video_id"),
+                    "video_id": resolved_video_id,
                     "content_type": content_type,
                 },
             )

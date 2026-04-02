@@ -199,3 +199,23 @@ def test_youtube_embed_service_fetches_playlist_entries_and_current_item() -> No
     assert current is not None
     assert current["video_id"] == "vid-b"
     assert current["index"] == 2
+
+
+def test_youtube_embed_service_resolves_first_playlist_item_when_url_has_no_video() -> None:
+    _FakeYoutubeDL.payload = {
+        "id": "pl1",
+        "title": "Cartoon Queue",
+        "entries": [
+            {"id": "vid-a", "title": "Episode A", "playlist_index": 1},
+            {"id": "vid-b", "title": "Episode B", "playlist_index": 2},
+        ],
+    }
+    service, _, _ = _build_service(youtube_dl_cls=_FakeYoutubeDL, youtube_playlist_cache={})
+    details = service.parse_youtube_url_details("https://www.youtube.com/playlist?list=pl1")
+
+    playlist = service.fetch_youtube_playlist("https://www.youtube.com/playlist?list=pl1", details, force=True)
+    current = service.resolve_youtube_playlist_current_item(playlist, details, {})
+
+    assert current is not None
+    assert current["video_id"] == "vid-a"
+    assert current["index"] == 1
