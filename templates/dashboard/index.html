@@ -4,27 +4,55 @@
   <meta charset="UTF-8"/>
   <title>EchoMosaic Dashboard</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='shared/style.css') }}">
+  <script src="{{ url_for('static', filename='shared/sidebar_shell.js') }}" defer></script>
 </head>
 <body class="dashboard-page">
 <div class="dashboard-shell">
   <aside class="dashboard-sidebar">
     <div class="dashboard-sidebar-brand">
-      <h1>EchoMosaic</h1>
-      <p>Dashboard Control</p>
+      <div class="dashboard-sidebar-brand-head">
+        <div class="dashboard-sidebar-brand-mark" aria-hidden="true">E</div>
+        <button id="sidebar-toggle" class="sidebar-shell-toggle" type="button" aria-label="Collapse sidebar" title="Collapse sidebar" aria-pressed="false">
+          <span class="sidebar-shell-toggle-icon" aria-hidden="true">&laquo;</span>
+        </button>
+      </div>
+      <div class="dashboard-sidebar-brand-copy">
+        <h1>EchoMosaic</h1>
+        <p>Dashboard Control</p>
+      </div>
     </div>
 
     <nav class="dashboard-sidebar-nav" aria-label="Primary">
-      <a class="sidebar-link is-active" href="{{ url_for('dashboard_routes.dashboard') }}">Dashboard</a>
-      <a class="sidebar-link" href="{{ url_for('media_routes.media_management_page') }}">Media</a>
-      <a id="settings-nav-link" class="sidebar-link" href="{{ url_for('settings_operations.app_settings') }}">Settings<span id="settings-update-badge" class="nav-update-badge" hidden aria-label="Update available"></span></a>
+      <a class="sidebar-link is-active" href="{{ url_for('dashboard_routes.dashboard') }}" title="Dashboard">
+        <span class="sidebar-item-icon" aria-hidden="true">▦</span>
+        <span class="sidebar-item-label">Dashboard</span>
+      </a>
+      <a class="sidebar-link" href="{{ url_for('media_routes.media_management_page') }}" title="Media">
+        <span class="sidebar-item-icon" aria-hidden="true">🗂</span>
+        <span class="sidebar-item-label">Media</span>
+      </a>
+      <a id="settings-nav-link" class="sidebar-link" href="{{ url_for('settings_operations.app_settings') }}" title="Settings">
+        <span class="sidebar-item-icon" aria-hidden="true">⚙</span>
+        <span class="sidebar-item-label">Settings</span>
+        <span id="settings-update-badge" class="nav-update-badge" hidden aria-label="Update available"></span>
+      </a>
     </nav>
 
     <section class="dashboard-sidebar-section" aria-labelledby="dashboard-tools-title">
       <div class="dashboard-sidebar-title" id="dashboard-tools-title">Managers</div>
       <div class="dashboard-sidebar-actions">
-        <button type="button" class="sidebar-action" data-dashboard-panel="group-manager-panel">Groups</button>
-        <button type="button" class="sidebar-action" data-dashboard-panel="tag-manager-panel">Tags</button>
-        <button type="button" class="sidebar-action" data-dashboard-panel="sync-manager-panel">Sync Timers</button>
+        <button type="button" class="sidebar-action" data-dashboard-panel="group-manager-panel" title="Groups">
+          <span class="sidebar-item-icon" aria-hidden="true">◫</span>
+          <span class="sidebar-item-label">Groups</span>
+        </button>
+        <button type="button" class="sidebar-action" data-dashboard-panel="tag-manager-panel" title="Tags">
+          <span class="sidebar-item-icon" aria-hidden="true">#</span>
+          <span class="sidebar-item-label">Tags</span>
+        </button>
+        <button type="button" class="sidebar-action" data-dashboard-panel="sync-manager-panel" title="Sync Timers">
+          <span class="sidebar-item-icon" aria-hidden="true">⏱</span>
+          <span class="sidebar-item-label">Sync Timers</span>
+        </button>
       </div>
     </section>
 
