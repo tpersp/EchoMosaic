@@ -6,6 +6,8 @@ EchoMosaic is a self-hosted Flask + Flask-SocketIO dashboard for building image,
 
 ### Dashboard and stream control
 - Multi-stream dashboard with per-stream cards for configuration, playback, and monitoring.
+- Dashboard workspace shell with a shared sidebar across Dashboard, Media, Settings, and update pages.
+- Collapsible desktop sidebar that remembers its state while you move between pages.
 - Stream viewer pages for individual displays and a mosaic `/stream` view for multiple streams at once.
 - Per-stream labels, folders, shuffle, durations, pinned/specific file selection, and background blur for letterboxed media.
 - Dashboard organization with:
@@ -38,6 +40,9 @@ EchoMosaic is a self-hosted Flask + Flask-SocketIO dashboard for building image,
 ### Media library and thumbnails
 - Media manager page for browsing folders and uploads.
 - Create folder, rename, delete, upload, thumbnail, and preview-frame operations.
+- Folder uploads that preserve the selected folder structure under the destination library path.
+- Concurrent uploads with queue progress details and cancel support.
+- Configurable media upload size limit from the Settings page.
 - Cached thumbnails for dashboard cards and media browsing.
 - Read-only media endpoints for random or explicit media fetches.
 - Optional NSFW-folder hiding in stream folder selectors.
@@ -48,6 +53,7 @@ EchoMosaic is a self-hosted Flask + Flask-SocketIO dashboard for building image,
 - Stream subscribe/unsubscribe live events via Socket.IO.
 - Video control events over Socket.IO for viewer synchronization.
 - YouTube sync handling for embed/live state updates.
+- Improved YouTube playlist embeds, including playlist item resolution and synchronized active-item handling.
 
 ### Operations and diagnostics
 - Settings import/export from the browser.
