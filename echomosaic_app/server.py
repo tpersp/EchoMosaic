@@ -974,6 +974,8 @@ YOUTUBE_OEMBED_CACHE = YOUTUBE_RUNTIME.youtube_oembed_cache
 YOUTUBE_OEMBED_CACHE_LOCK = YOUTUBE_RUNTIME.youtube_oembed_cache_lock
 YOUTUBE_LIVE_PROBE_CACHE = YOUTUBE_RUNTIME.youtube_live_probe_cache
 YOUTUBE_LIVE_PROBE_CACHE_LOCK = YOUTUBE_RUNTIME.youtube_live_probe_cache_lock
+YOUTUBE_PLAYLIST_CACHE = YOUTUBE_RUNTIME.youtube_playlist_cache
+YOUTUBE_PLAYLIST_CACHE_LOCK = YOUTUBE_RUNTIME.youtube_playlist_cache_lock
 YOUTUBE_SYNC_STATE_LOCK = YOUTUBE_RUNTIME.youtube_sync_state_lock
 YOUTUBE_SYNC_STATE = YOUTUBE_RUNTIME.youtube_sync_state
 YOUTUBE_SYNC_SUBSCRIBERS = YOUTUBE_RUNTIME.youtube_sync_subscribers
@@ -983,6 +985,7 @@ _YOUTUBE_IN_FLIGHT_LOCK = YOUTUBE_RUNTIME.youtube_in_flight_lock
 
 YOUTUBE_EMBED_SERVICE = YouTubeEmbedService(
     requests_module=requests,
+    youtube_dl_cls=YoutubeDL,
     eventlet_module=eventlet,
     logger=logger,
     youtube_domains=YOUTUBE_DOMAINS,
@@ -995,6 +998,8 @@ YOUTUBE_EMBED_SERVICE = YouTubeEmbedService(
     youtube_oembed_cache_lock=YOUTUBE_OEMBED_CACHE_LOCK,
     youtube_live_probe_cache=YOUTUBE_LIVE_PROBE_CACHE,
     youtube_live_probe_cache_lock=YOUTUBE_LIVE_PROBE_CACHE_LOCK,
+    youtube_playlist_cache=YOUTUBE_PLAYLIST_CACHE,
+    youtube_playlist_cache_lock=YOUTUBE_PLAYLIST_CACHE_LOCK,
     youtube_sync_state_lock=YOUTUBE_SYNC_STATE_LOCK,
     youtube_sync_state=YOUTUBE_SYNC_STATE,
     youtube_sync_subscribers=YOUTUBE_SYNC_SUBSCRIBERS,
@@ -3465,9 +3470,42 @@ def dashboard_update_status():
     )
 
 
+def get_youtube_playlist(stream_id: str):
+    conf = settings.get(stream_id)
+    if not isinstance(conf, dict):
+        return jsonify({"error": f"No stream '{stream_id}' found"}), 404
+    stream_url = str(conf.get("stream_url") or "").strip()
+    if not stream_url:
+        return jsonify({"error": "No YouTube URL configured for this stream"}), 400
+    details = _parse_youtube_url_details(stream_url)
+    if details is None or not details.get("playlist_id"):
+        return jsonify({"error": "This stream is not using a YouTube playlist"}), 400
+    force_refresh = str(request.args.get("refresh") or "").strip().lower() in {"1", "true", "yes", "on"}
+    playlist = YOUTUBE_EMBED_SERVICE.fetch_youtube_playlist(stream_url, details, force=force_refresh)
+    if not playlist:
+        return jsonify({"error": "Playlist details are unavailable"}), 503
+    current = YOUTUBE_EMBED_SERVICE.resolve_youtube_playlist_current_item(
+        playlist,
+        details,
+        conf.get("embed_metadata"),
+    )
+    current_index = int(current.get("index")) if isinstance(current, dict) and current.get("index") else None
+    current_video_id = str(current.get("video_id") or "").strip() if isinstance(current, dict) else ""
+    return jsonify(
+        {
+            "status": "success",
+            "playlist": playlist,
+            "current": current,
+            "current_index": current_index,
+            "current_video_id": current_video_id or None,
+        }
+    )
+
+
 _dashboard_blueprint = create_dashboard_blueprint(
     dashboard_handler=dashboard,
     update_status_handler=dashboard_update_status,
+    youtube_playlist_handler=get_youtube_playlist,
     mosaic_streams_handler=mosaic_streams,
     render_stream_handler=render_stream,
     add_stream_handler=add_stream,

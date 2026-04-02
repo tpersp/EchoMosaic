@@ -13,6 +13,8 @@ class YouTubeRuntime:
     youtube_oembed_cache_lock: threading.Lock
     youtube_live_probe_cache: Any
     youtube_live_probe_cache_lock: threading.Lock
+    youtube_playlist_cache: Any
+    youtube_playlist_cache_lock: threading.Lock
     youtube_sync_state_lock: threading.Lock
     youtube_sync_state: Dict[str, Dict[str, Any]]
     youtube_sync_subscribers: Dict[str, Set[str]]
@@ -27,6 +29,8 @@ def build_youtube_runtime(*, cache_factory: Callable[[int], Any]) -> YouTubeRunt
         youtube_oembed_cache_lock=threading.Lock(),
         youtube_live_probe_cache=cache_factory(256),
         youtube_live_probe_cache_lock=threading.Lock(),
+        youtube_playlist_cache=cache_factory(64),
+        youtube_playlist_cache_lock=threading.Lock(),
         youtube_sync_state_lock=threading.Lock(),
         youtube_sync_state={},
         youtube_sync_subscribers={},

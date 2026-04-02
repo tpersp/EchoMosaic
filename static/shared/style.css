@@ -1765,6 +1765,126 @@ a {
   font-weight: 500;
 }
 
+.yt-playlist-panel {
+  margin-top: 0.8rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  padding-top: 0.8rem;
+  border-top: 1px solid var(--border);
+}
+
+.yt-playlist-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.yt-playlist-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  min-width: 0;
+}
+
+.yt-playlist-kicker {
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--accent);
+  opacity: 0.9;
+}
+
+.yt-playlist-title {
+  font-size: 0.98rem;
+  line-height: 1.35;
+}
+
+.yt-playlist-meta {
+  font-size: 0.84rem;
+  opacity: 0.76;
+  line-height: 1.35;
+}
+
+.yt-playlist-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+
+.yt-playlist-status {
+  font-size: 0.84rem;
+  opacity: 0.85;
+}
+
+.yt-playlist-status[data-tone="error"] {
+  color: #e67e73;
+}
+
+.yt-playlist-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  max-height: 240px;
+  overflow-y: auto;
+  padding-right: 0.2rem;
+}
+
+.yt-playlist-item {
+  width: 100%;
+  display: grid;
+  grid-template-columns: 2.25rem minmax(0, 1fr);
+  gap: 0.7rem;
+  align-items: center;
+  padding: 0.55rem 0.7rem;
+  border-radius: 12px;
+  text-align: left;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.yt-playlist-item:hover,
+.yt-playlist-item:focus-visible {
+  background: rgba(79, 163, 255, 0.1);
+}
+
+.yt-playlist-item.is-active {
+  border-color: rgba(79, 163, 255, 0.5);
+  background: rgba(79, 163, 255, 0.12);
+}
+
+.yt-playlist-item-index {
+  width: 2rem;
+  height: 2rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+
+.yt-playlist-item-copy {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.yt-playlist-item-title {
+  font-weight: 600;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.yt-playlist-item-meta {
+  font-size: 0.78rem;
+  opacity: 0.68;
+}
+
 /* Layout gallery for group tiles */
 .layout-gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 8px; margin-top: 6px; }
 .layout-option { border: 1px solid var(--border); border-radius: 6px; background: var(--surface-alt); padding: 6px; cursor: pointer; }

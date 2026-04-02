@@ -117,7 +117,7 @@
     {% set embed_title = embed_meta.title if embed_meta and embed_meta.title else '' %}
     {% set embed_type = embed_meta.content_type if embed_meta and embed_meta.content_type else '' %}
     {% set embed_provider = embed_meta.provider if embed_meta and embed_meta.provider else '' %}
-    <div class="stream-card" data-stream="{{ stream_id }}" data-hide-nsfw="{{ "true" if conf.hide_nsfw|default(False) else "false" }}" data-tags='{{ (conf.tags|default([]))|tojson }}' data-selected-path="{{ conf.selected_image or '' }}" data-selected-kind="{{ conf.selected_media_kind or '' }}" data-video-mode="{{ conf.video_playback_mode|default('duration') }}" data-video-volume="{{ conf.video_volume|default(1.0) }}" data-media-mode="{{ conf.media_mode|default('image') }}" data-mode="{{ conf.mode|default('random') }}" data-picsum-seed="{{ conf.picsum_settings.seed if conf.picsum_settings and conf.picsum_settings.seed is not none else '' }}" data-sync-timer="{{ conf.sync.timer_id if conf.sync and conf.sync.timer_id else '' }}" data-sync-offset="{{ conf.sync.offset if conf.sync and conf.sync.offset is not none else 0 }}" data-embed-title="{{ embed_title }}" data-embed-type="{{ embed_type }}" data-embed-provider="{{ embed_provider }}">
+    <div class="stream-card" data-stream="{{ stream_id }}" data-hide-nsfw="{{ "true" if conf.hide_nsfw|default(False) else "false" }}" data-tags='{{ (conf.tags|default([]))|tojson }}' data-selected-path="{{ conf.selected_image or '' }}" data-selected-kind="{{ conf.selected_media_kind or '' }}" data-video-mode="{{ conf.video_playback_mode|default('duration') }}" data-video-volume="{{ conf.video_volume|default(1.0) }}" data-media-mode="{{ conf.media_mode|default('image') }}" data-mode="{{ conf.mode|default('random') }}" data-picsum-seed="{{ conf.picsum_settings.seed if conf.picsum_settings and conf.picsum_settings.seed is not none else '' }}" data-sync-timer="{{ conf.sync.timer_id if conf.sync and conf.sync.timer_id else '' }}" data-sync-offset="{{ conf.sync.offset if conf.sync and conf.sync.offset is not none else 0 }}" data-embed-title="{{ embed_title }}" data-embed-type="{{ embed_type }}" data-embed-provider="{{ embed_provider }}" data-embed-video-id="{{ embed_meta.video_id or '' }}" data-embed-playlist-id="{{ embed_meta.playlist_id or '' }}" data-embed-start-index="{{ embed_meta.start_index if embed_meta.start_index is not none else '' }}">
       <div class="card-header">
         <div class="card-header-info">
           <div class="title-row">
@@ -390,6 +390,22 @@
                   <option value="{{ opt }}" {% if q|lower == opt|lower %} selected {% endif %}>{{ opt|upper }}</option>
                 {% endfor %}
               </select>
+            </div>
+            <div class="yt-playlist-panel" data-stream="{{ stream_id }}" hidden>
+              <div class="yt-playlist-header">
+                <div class="yt-playlist-summary">
+                  <span class="yt-playlist-kicker">Playlist</span>
+                  <strong class="yt-playlist-title">Loading playlist…</strong>
+                  <span class="yt-playlist-meta">Current item unavailable.</span>
+                </div>
+                <div class="yt-playlist-actions">
+                  <button type="button" class="yt-playlist-prev" data-stream="{{ stream_id }}">Previous</button>
+                  <button type="button" class="yt-playlist-next" data-stream="{{ stream_id }}">Next</button>
+                  <button type="button" class="yt-playlist-refresh" data-stream="{{ stream_id }}">Refresh</button>
+                </div>
+              </div>
+              <div class="yt-playlist-status" aria-live="polite"></div>
+              <div class="yt-playlist-list" role="listbox" aria-label="YouTube playlist items"></div>
             </div>
           </details>
         </div>
@@ -1506,9 +1522,17 @@
     const title = typeof meta.title === 'string' ? meta.title.trim() : (card.dataset.embedTitle || '');
     const rawType = typeof meta.content_type === 'string' ? meta.content_type.trim().toLowerCase() : (card.dataset.embedType || '').toLowerCase();
     const provider = typeof meta.provider === 'string' ? meta.provider : (card.dataset.embedProvider || '');
+    const videoId = typeof meta.video_id === 'string' ? meta.video_id.trim() : (card.dataset.embedVideoId || '');
+    const playlistId = typeof meta.playlist_id === 'string' ? meta.playlist_id.trim() : (card.dataset.embedPlaylistId || '');
+    const startIndex = meta.start_index !== undefined && meta.start_index !== null
+      ? String(meta.start_index).trim()
+      : (card.dataset.embedStartIndex || '');
     card.dataset.embedTitle = title || '';
     card.dataset.embedType = rawType || '';
     card.dataset.embedProvider = provider || '';
+    card.dataset.embedVideoId = videoId || '';
+    card.dataset.embedPlaylistId = playlistId || '';
+    card.dataset.embedStartIndex = startIndex || '';
     if (row) {
       if (title) {
         row.hidden = false;
@@ -1536,6 +1560,241 @@
         delete typeBadge.dataset.type;
       }
     }
+    syncYouTubePlaylistPanel(card);
+  }
+
+  const youtubePlaylistState = new Map();
+
+  function setYouTubePlaylistStatus(card, message, tone = '') {
+    const el = card ? card.querySelector('.yt-playlist-status') : null;
+    if (!el) return;
+    const text = typeof message === 'string' ? message.trim() : '';
+    el.textContent = text;
+    el.hidden = !text;
+    el.dataset.tone = tone || '';
+    if (!text) {
+      delete el.dataset.tone;
+    }
+  }
+
+  function getYouTubePlaylistState(card) {
+    if (!card) return null;
+    let state = youtubePlaylistState.get(card);
+    if (!state) {
+      state = { loading: false, data: null, selectedUrl: '' };
+      youtubePlaylistState.set(card, state);
+    }
+    return state;
+  }
+
+  function isYouTubePlaylistCard(card) {
+    if (!card) return false;
+    const mediaMode = String(card.dataset.mediaMode || '').toLowerCase();
+    const provider = String(card.dataset.embedProvider || '').toLowerCase();
+    const contentType = String(card.dataset.embedType || '').toLowerCase();
+    const playlistId = String(card.dataset.embedPlaylistId || '').trim();
+    const urlInput = card.querySelector('.stream-url-input');
+    const streamUrl = urlInput ? String(urlInput.value || '').trim() : '';
+    return mediaMode === 'livestream'
+      && !!playlistId
+      && (provider === 'youtube' || detectUrlType(streamUrl) === 'YouTube')
+      && contentType === 'playlist';
+  }
+
+  function setYouTubePlaylistButtonsDisabled(card, disabled) {
+    if (!card) return;
+    card.querySelectorAll('.yt-playlist-prev, .yt-playlist-next, .yt-playlist-refresh, .yt-playlist-item').forEach((el) => {
+      el.disabled = !!disabled;
+    });
+  }
+
+  function renderYouTubePlaylist(card, payload) {
+    if (!card) return;
+    const panel = card.querySelector('.yt-playlist-panel');
+    const titleEl = card.querySelector('.yt-playlist-title');
+    const metaEl = card.querySelector('.yt-playlist-meta');
+    const listEl = card.querySelector('.yt-playlist-list');
+    const prevBtn = card.querySelector('.yt-playlist-prev');
+    const nextBtn = card.querySelector('.yt-playlist-next');
+    const playingTitleEl = card.querySelector('.playing-row .playing-title');
+    if (!panel || !titleEl || !metaEl || !listEl) return;
+    setYouTubePlaylistButtonsDisabled(card, false);
+
+    const playlist = payload && payload.playlist && typeof payload.playlist === 'object' ? payload.playlist : null;
+    const entries = playlist && Array.isArray(playlist.entries) ? playlist.entries : [];
+    const current = payload && payload.current && typeof payload.current === 'object' ? payload.current : null;
+    const currentVideoId = current && typeof current.video_id === 'string' ? current.video_id : '';
+    const currentIndex = current && current.index !== undefined && current.index !== null ? Number(current.index) : null;
+
+    if (!playlist || !entries.length) {
+      panel.hidden = true;
+      listEl.innerHTML = '';
+      titleEl.textContent = 'Playlist unavailable';
+      metaEl.textContent = 'No playlist items were returned.';
+      setYouTubePlaylistStatus(card, '');
+      return;
+    }
+
+    panel.hidden = false;
+    titleEl.textContent = playlist.title || 'YouTube Playlist';
+    const currentTitle = current && typeof current.title === 'string' ? current.title : '';
+    metaEl.textContent = currentIndex
+      ? `Item ${currentIndex} of ${entries.length}${currentTitle ? ` • ${currentTitle}` : ''}`
+      : `${entries.length} items`;
+    if (playingTitleEl && currentTitle) {
+      playingTitleEl.textContent = currentTitle;
+      const playingRow = card.querySelector('.playing-row');
+      if (playingRow) {
+        playingRow.hidden = false;
+      }
+    }
+
+    listEl.innerHTML = '';
+    const fragment = document.createDocumentFragment();
+    entries.forEach((entry) => {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'yt-playlist-item';
+      button.dataset.url = entry.url || '';
+      button.dataset.videoId = entry.video_id || '';
+      button.dataset.index = String(entry.index || '');
+      if ((currentVideoId && entry.video_id === currentVideoId) || (currentIndex && Number(entry.index) === currentIndex)) {
+        button.classList.add('is-active');
+        button.setAttribute('aria-selected', 'true');
+      } else {
+        button.setAttribute('aria-selected', 'false');
+      }
+      const index = document.createElement('span');
+      index.className = 'yt-playlist-item-index';
+      index.textContent = String(entry.index || '•');
+      const textWrap = document.createElement('span');
+      textWrap.className = 'yt-playlist-item-copy';
+      const title = document.createElement('span');
+      title.className = 'yt-playlist-item-title';
+      title.textContent = entry.title || `Video ${entry.index || ''}`.trim();
+      textWrap.appendChild(title);
+      if (entry.duration) {
+        const meta = document.createElement('span');
+        meta.className = 'yt-playlist-item-meta';
+        meta.textContent = `${Math.floor(Number(entry.duration) / 60)}:${String(Number(entry.duration) % 60).padStart(2, '0')}`;
+        textWrap.appendChild(meta);
+      }
+      button.append(index, textWrap);
+      button.addEventListener('click', () => selectYouTubePlaylistEntry(card, entry));
+      fragment.appendChild(button);
+    });
+    listEl.appendChild(fragment);
+
+    const activeIndex = entries.findIndex((entry) => (
+      (currentVideoId && entry.video_id === currentVideoId)
+      || (currentIndex && Number(entry.index) === currentIndex)
+    ));
+    if (prevBtn) prevBtn.disabled = activeIndex <= 0;
+    if (nextBtn) nextBtn.disabled = activeIndex < 0 || activeIndex >= entries.length - 1;
+  }
+
+  async function loadYouTubePlaylist(card, { force = false } = {}) {
+    if (!card) return null;
+    const streamId = card.dataset.stream;
+    const state = getYouTubePlaylistState(card);
+    if (!state || !streamId) return null;
+    if (state.loading) return state.data;
+    state.loading = true;
+    setYouTubePlaylistButtonsDisabled(card, true);
+    setYouTubePlaylistStatus(card, force ? 'Refreshing playlist…' : 'Loading playlist…');
+    try {
+      const query = force ? '?refresh=1' : '';
+      const response = await fetch(`/api/youtube_playlist/${encodeURIComponent(streamId)}${query}`, { cache: 'no-store' });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || data.status !== 'success') {
+        throw new Error(data.error || `Unable to load playlist (${response.status})`);
+      }
+      state.data = data;
+      renderYouTubePlaylist(card, data);
+      setYouTubePlaylistStatus(card, '');
+      return data;
+    } catch (err) {
+      renderYouTubePlaylist(card, null);
+      setYouTubePlaylistStatus(card, err && err.message ? err.message : 'Playlist details unavailable.', 'error');
+      return null;
+    } finally {
+      state.loading = false;
+      if (state.data) {
+        renderYouTubePlaylist(card, state.data);
+      } else {
+        setYouTubePlaylistButtonsDisabled(card, false);
+      }
+    }
+  }
+
+  function syncYouTubePlaylistPanel(card, options = {}) {
+    if (!card) return;
+    const panel = card.querySelector('.yt-playlist-panel');
+    if (!panel) return;
+    if (!isYouTubePlaylistCard(card)) {
+      panel.hidden = true;
+      setYouTubePlaylistStatus(card, '');
+      return;
+    }
+    const state = getYouTubePlaylistState(card);
+    const currentSignature = [
+      card.dataset.embedPlaylistId || '',
+      card.dataset.embedVideoId || '',
+      card.dataset.embedStartIndex || ''
+    ].join('|');
+    if (state && state.selectedUrl && state.selectedUrl === (card.querySelector('.stream-url-input')?.value || '').trim()) {
+      state.selectedUrl = '';
+    }
+    if (!state || !state.data || options.force || state.signature !== currentSignature) {
+      if (state) {
+        state.signature = currentSignature;
+      }
+      loadYouTubePlaylist(card, { force: !!options.force });
+      return;
+    }
+    renderYouTubePlaylist(card, state.data);
+  }
+
+  function findYouTubePlaylistEntry(card, direction) {
+    const state = getYouTubePlaylistState(card);
+    const entries = state && state.data && state.data.playlist && Array.isArray(state.data.playlist.entries)
+      ? state.data.playlist.entries
+      : [];
+    if (!entries.length) return null;
+    const currentVideoId = String(card.dataset.embedVideoId || '').trim();
+    const currentIndex = Number(card.dataset.embedStartIndex || '');
+    const activeIndex = entries.findIndex((entry) => (
+      (currentVideoId && entry.video_id === currentVideoId)
+      || (Number.isFinite(currentIndex) && currentIndex > 0 && Number(entry.index) === currentIndex)
+    ));
+    if (activeIndex < 0) return direction > 0 ? entries[0] : entries[entries.length - 1];
+    const nextIndex = activeIndex + direction;
+    if (nextIndex < 0 || nextIndex >= entries.length) return null;
+    return entries[nextIndex];
+  }
+
+  function selectYouTubePlaylistEntry(card, entry) {
+    if (!card || !entry || !entry.url) return;
+    const streamId = card.dataset.stream;
+    const urlInput = card.querySelector('.stream-url-input');
+    const nextUrl = String(entry.url || '').trim();
+    if (!streamId || !nextUrl) return;
+    const state = getYouTubePlaylistState(card);
+    if (state) {
+      state.selectedUrl = nextUrl;
+    }
+    if (urlInput) {
+      urlInput.value = nextUrl;
+    }
+    setYouTubePlaylistStatus(card, `Switching to item ${entry.index || 'selected'}…`);
+    saveSettings(streamId, { stream_url: nextUrl }, {
+      onSuccess: () => {
+        syncYouTubePlaylistPanel(card, { force: true });
+      },
+      onError: () => {
+        setYouTubePlaylistStatus(card, 'Playlist selection failed.', 'error');
+      }
+    });
   }
 
   function updateThumbnailUI(card, payload, options = {}) {
@@ -4945,6 +5204,9 @@
         if (card) {
           const modeCategorySelect = card.querySelector('.mode-category-select');
           const urlInputEl = card.querySelector('.stream-url-input');
+          if (data.new_config && data.new_config.stream_url !== undefined && urlInputEl) {
+            urlInputEl.value = data.new_config.stream_url || '';
+          }
           let updatedMediaMode = (modeCategorySelect ? modeCategorySelect.value : (card.dataset.mediaMode || 'image')).toLowerCase();
           const variantlessModes = new Set(['livestream', 'picsum']);
           let updatedMode = getModeValue(card, updatedMediaMode) || (updatedMediaMode === 'ai' ? 'generate' : (variantlessModes.has(updatedMediaMode) ? updatedMediaMode : 'random'));
@@ -5059,6 +5321,7 @@
           selectModeVariant(card, updatedMediaMode, updatedMode);
           const effectiveMode = updatedMode || (updatedMediaMode === 'ai' ? 'generate' : (variantlessModes.has(updatedMediaMode) ? updatedMediaMode : 'random'));
           applyModeState(card, updatedMediaMode, effectiveMode, urlInputEl ? urlInputEl.value : '');
+          syncYouTubePlaylistPanel(card);
           if (data.new_config && data.new_config.picsum_settings !== undefined) {
             applyPicsumSettings(card, data.new_config.picsum_settings);
             if (updatedMediaMode === 'picsum') {
@@ -5647,6 +5910,7 @@ function applyPicsumSettings(card, settings, opts = {}) {
 
     const urlType = detectUrlType(streamUrl);
     if (ytSettingsDiv) ytSettingsDiv.style.display = (isLivestream && urlType === 'YouTube') ? '' : 'none';
+    syncYouTubePlaylistPanel(card);
 
     filterFolderOptions(card, normalizedMedia);
   }
@@ -6224,6 +6488,7 @@ function applyPicsumSettings(card, settings, opts = {}) {
       if (urlInput) {
         setUrlBadge(urlInput.value || '');
         runEmbedTest(urlInput.value || '');
+        syncYouTubePlaylistPanel(card);
         urlInput.addEventListener('input', e => {
           setUrlBadge(e.target.value);
           applyModeState(card, getCurrentMediaMode(), getModeValue(card, getCurrentMediaMode()), e.target.value);
@@ -6245,6 +6510,9 @@ function applyPicsumSettings(card, settings, opts = {}) {
       const ccChk = card.querySelector('.yt-cc-chk');
       const muteChk = card.querySelector('.yt-mute-chk');
       const qualitySelect = card.querySelector('.yt-quality-select');
+      const ytPlaylistPrevBtn = card.querySelector('.yt-playlist-prev');
+      const ytPlaylistNextBtn = card.querySelector('.yt-playlist-next');
+      const ytPlaylistRefreshBtn = card.querySelector('.yt-playlist-refresh');
       const renameBtn = card.querySelector('.menu-rename');
       if (ccChk) {
         ccChk.addEventListener('change', e => {
@@ -6259,6 +6527,27 @@ function applyPicsumSettings(card, settings, opts = {}) {
       if (qualitySelect) {
         qualitySelect.addEventListener('change', e => {
           saveSettings(streamId, { yt_quality: e.target.value });
+        });
+      }
+      if (ytPlaylistPrevBtn) {
+        ytPlaylistPrevBtn.addEventListener('click', () => {
+          const entry = findYouTubePlaylistEntry(card, -1);
+          if (entry) {
+            selectYouTubePlaylistEntry(card, entry);
+          }
+        });
+      }
+      if (ytPlaylistNextBtn) {
+        ytPlaylistNextBtn.addEventListener('click', () => {
+          const entry = findYouTubePlaylistEntry(card, 1);
+          if (entry) {
+            selectYouTubePlaylistEntry(card, entry);
+          }
+        });
+      }
+      if (ytPlaylistRefreshBtn) {
+        ytPlaylistRefreshBtn.addEventListener('click', () => {
+          syncYouTubePlaylistPanel(card, { force: true });
         });
       }
       

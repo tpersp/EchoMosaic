@@ -48,6 +48,22 @@ class _ChunkedResponse(_Response):
             yield chunk
 
 
+class _FakeYoutubeDL:
+    payload = None
+
+    def __init__(self, options):
+        self.options = options
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        return False
+
+    def extract_info(self, url, download=False):
+        return self.payload
+
+
 def _build_service(**overrides):
     emitted = []
     runtime_state = {}
@@ -57,18 +73,22 @@ def _build_service(**overrides):
     )
     service = YouTubeEmbedService(
         requests_module=requests_module,
+        youtube_dl_cls=overrides.get("youtube_dl_cls"),
         eventlet_module=overrides.get("eventlet_module", _ImmediateEventlet()),
         logger=type("Logger", (), {"debug": lambda *args, **kwargs: None})(),
         youtube_domains={"youtube.com", "www.youtube.com", "youtu.be"},
         youtube_oembed_endpoint="https://www.youtube.com/oembed",
         youtube_oembed_cache_ttl=1200,
         youtube_live_probe_cache_ttl=900,
+        youtube_playlist_cache_ttl=900,
         youtube_live_probe_max_bytes=30000,
         youtube_live_html_markers=('"islive":true',),
         youtube_oembed_cache=overrides.get("youtube_oembed_cache", {}),
         youtube_oembed_cache_lock=_DummyLock(),
         youtube_live_probe_cache=overrides.get("youtube_live_probe_cache", {}),
         youtube_live_probe_cache_lock=_DummyLock(),
+        youtube_playlist_cache=overrides.get("youtube_playlist_cache", {}),
+        youtube_playlist_cache_lock=_DummyLock(),
         youtube_sync_state_lock=_DummyLock(),
         youtube_sync_state=overrides.get("youtube_sync_state", {}),
         youtube_sync_subscribers=overrides.get("youtube_sync_subscribers", {}),
@@ -154,3 +174,28 @@ def test_youtube_embed_service_live_probe_reads_late_markers() -> None:
     )
 
     assert looks_live is True
+
+
+def test_youtube_embed_service_fetches_playlist_entries_and_current_item() -> None:
+    _FakeYoutubeDL.payload = {
+        "id": "pl1",
+        "title": "Cartoon Queue",
+        "entries": [
+            {"id": "vid-a", "title": "Episode A", "playlist_index": 1},
+            {"id": "vid-b", "title": "Episode B", "playlist_index": 2},
+            {"id": "vid-c", "title": "Episode C", "playlist_index": 3},
+        ],
+    }
+    service, _, _ = _build_service(youtube_dl_cls=_FakeYoutubeDL, youtube_playlist_cache={})
+    details = service.parse_youtube_url_details("https://www.youtube.com/watch?v=vid-b&list=pl1&index=2")
+
+    playlist = service.fetch_youtube_playlist("https://www.youtube.com/watch?v=vid-b&list=pl1&index=2", details, force=True)
+    current = service.resolve_youtube_playlist_current_item(playlist, details, {"video_id": "vid-b", "start_index": 2})
+
+    assert playlist is not None
+    assert playlist["title"] == "Cartoon Queue"
+    assert playlist["entry_count"] == 3
+    assert playlist["entries"][1]["url"].endswith("v=vid-b&list=pl1&index=2")
+    assert current is not None
+    assert current["video_id"] == "vid-b"
+    assert current["index"] == 2

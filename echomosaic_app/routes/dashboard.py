@@ -11,6 +11,7 @@ def create_dashboard_blueprint(
     *,
     dashboard_handler: Callable[[], object],
     update_status_handler: Callable[[], object],
+    youtube_playlist_handler: Callable[[str], object],
     mosaic_streams_handler: Callable[[], object],
     render_stream_handler: Callable[[str], object],
     add_stream_handler: Callable[[], object],
@@ -31,6 +32,10 @@ def create_dashboard_blueprint(
     @blueprint.route("/api/update_status", methods=["GET"])
     def update_status():
         return update_status_handler()
+
+    @blueprint.route("/api/youtube_playlist/<stream_id>", methods=["GET"])
+    def youtube_playlist(stream_id: str):
+        return youtube_playlist_handler(stream_id)
 
     @blueprint.route("/stream")
     def mosaic_streams():
