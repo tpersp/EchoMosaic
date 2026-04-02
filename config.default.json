@@ -32,7 +32,7 @@
     "./media"
   ],
   "MEDIA_MANAGEMENT_ALLOW_EDIT": true,
-  "MEDIA_UPLOAD_MAX_MB": 256,
+  "MEDIA_UPLOAD_MAX_MB": 2048,
   "MEDIA_ALLOWED_EXTS": [
     ".png",
     ".jpg",

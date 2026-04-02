@@ -76,6 +76,26 @@ body.dashboard-page.dashboard-panel-open {
   z-index: 30;
 }
 
+.dashboard-sidebar-brand {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+}
+
+.dashboard-sidebar-brand-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.dashboard-sidebar-brand-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  min-width: 0;
+}
+
 .dashboard-sidebar-brand h1 {
   margin: 0;
   font-size: 1.35rem;
@@ -111,6 +131,7 @@ body.dashboard-page.dashboard-panel-open {
   display: flex;
   align-items: center;
   justify-content: flex-start;
+  gap: 0.7rem;
   min-height: 42px;
   padding: 0.7rem 0.85rem;
   border-radius: 10px;
@@ -119,6 +140,20 @@ body.dashboard-page.dashboard-panel-open {
   color: var(--text);
   text-decoration: none;
   font-weight: 600;
+}
+
+.sidebar-item-icon {
+  width: 1.25rem;
+  flex: 0 0 1.25rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1rem;
+  line-height: 1;
+}
+
+.sidebar-item-label {
+  min-width: 0;
 }
 
 .sidebar-link:hover,
@@ -143,6 +178,32 @@ body.dashboard-page.dashboard-panel-open {
   font-size: 1.15rem;
 }
 
+.sidebar-shell-toggle {
+  width: 42px;
+  height: 42px;
+  padding: 0;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: var(--surface-alt);
+  color: var(--text);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 42px;
+}
+
+.sidebar-shell-toggle:hover,
+.sidebar-shell-toggle:focus-visible {
+  border-color: rgba(79, 163, 255, 0.32);
+  background: rgba(79, 163, 255, 0.1);
+  outline: none;
+}
+
+.sidebar-shell-toggle-icon {
+  font-size: 1rem;
+  line-height: 1;
+}
+
 .dashboard-workspace {
   min-width: 0;
   min-height: 100vh;
@@ -154,6 +215,78 @@ body.dashboard-page.dashboard-panel-open {
   min-width: 0;
   margin: 0 auto;
   padding: 1.5rem;
+}
+
+@media (min-width: 981px) {
+  html.sidebar-collapsed body.dashboard-page .dashboard-shell,
+  body.dashboard-page.sidebar-collapsed .dashboard-shell {
+    padding-left: 88px;
+  }
+
+  html.sidebar-collapsed body.dashboard-page .dashboard-sidebar,
+  body.dashboard-page.sidebar-collapsed .dashboard-sidebar {
+    width: 88px;
+    padding-inline: 0.7rem;
+    align-items: center;
+  }
+
+  html.sidebar-collapsed body.dashboard-page .dashboard-workspace-inner,
+  body.dashboard-page.sidebar-collapsed .dashboard-workspace-inner {
+    width: min(1680px, calc(100vw - 144px));
+  }
+
+  html.sidebar-collapsed body.dashboard-page .dashboard-sidebar-brand,
+  body.dashboard-page.sidebar-collapsed .dashboard-sidebar-brand {
+    width: 100%;
+    align-items: center;
+  }
+
+  html.sidebar-collapsed body.dashboard-page .dashboard-sidebar-brand-head,
+  body.dashboard-page.sidebar-collapsed .dashboard-sidebar-brand-head {
+    width: 100%;
+    justify-content: center;
+  }
+
+  html.sidebar-collapsed body.dashboard-page .dashboard-sidebar-brand-copy,
+  html.sidebar-collapsed body.dashboard-page .dashboard-sidebar-title,
+  html.sidebar-collapsed body.dashboard-page .sidebar-item-label,
+  body.dashboard-page.sidebar-collapsed .dashboard-sidebar-brand-copy,
+  body.dashboard-page.sidebar-collapsed .dashboard-sidebar-title,
+  body.dashboard-page.sidebar-collapsed .sidebar-item-label {
+    display: none;
+  }
+
+  html.sidebar-collapsed body.dashboard-page .dashboard-sidebar-nav,
+  html.sidebar-collapsed body.dashboard-page .dashboard-sidebar-actions,
+  html.sidebar-collapsed body.dashboard-page .dashboard-sidebar-section,
+  html.sidebar-collapsed body.dashboard-page .dashboard-sidebar-footer,
+  body.dashboard-page.sidebar-collapsed .dashboard-sidebar-nav,
+  body.dashboard-page.sidebar-collapsed .dashboard-sidebar-actions,
+  body.dashboard-page.sidebar-collapsed .dashboard-sidebar-section,
+  body.dashboard-page.sidebar-collapsed .dashboard-sidebar-footer {
+    width: 100%;
+  }
+
+  html.sidebar-collapsed body.dashboard-page .sidebar-link,
+  html.sidebar-collapsed body.dashboard-page .sidebar-action,
+  html.sidebar-collapsed body.dashboard-page .sidebar-theme-toggle,
+  body.dashboard-page.sidebar-collapsed .sidebar-link,
+  body.dashboard-page.sidebar-collapsed .sidebar-action,
+  body.dashboard-page.sidebar-collapsed .sidebar-theme-toggle {
+    justify-content: center;
+    padding-inline: 0.65rem;
+  }
+
+  html.sidebar-collapsed body.dashboard-page .dashboard-panel-backdrop,
+  body.dashboard-page.sidebar-collapsed .dashboard-panel-backdrop {
+    left: 88px;
+  }
+
+  html.sidebar-collapsed body.dashboard-page .dashboard-panel,
+  body.dashboard-page.sidebar-collapsed .dashboard-panel {
+    left: 88px;
+    width: min(520px, calc(100vw - 88px));
+  }
 }
 
 .page-section-header {
@@ -387,6 +520,29 @@ body.dashboard-page.dashboard-panel-open {
 .settings-advanced-field span {
   font-size: 0.8rem;
   font-weight: 600;
+}
+
+.settings-inline-form {
+  display: flex;
+  align-items: flex-end;
+  gap: 0.85rem;
+  flex-wrap: wrap;
+}
+
+.settings-advanced-field-inline {
+  min-width: 220px;
+}
+
+.settings-inline-input-wrap {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.settings-inline-suffix {
+  font-size: 0.9rem;
+  font-weight: 600;
+  opacity: 0.75;
 }
 
 .settings-lora-header {
@@ -636,13 +792,19 @@ a {
   justify-self: stretch;
 }
 
-@media (max-width: 1500px) {
+@media (max-width: 1600px) {
   .dashboard-grid {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 }
 
-@media (max-width: 1100px) {
+@media (max-width: 1380px) {
+  .dashboard-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 980px) {
   body.dashboard-page {
     overflow: auto;
   }
@@ -657,6 +819,23 @@ a {
     overflow: visible;
     border-right: 0;
     border-bottom: 1px solid var(--border);
+    align-items: stretch;
+  }
+
+  .dashboard-sidebar-brand-head {
+    justify-content: space-between;
+  }
+
+  .dashboard-sidebar-brand-copy {
+    display: flex;
+  }
+
+  .sidebar-item-label {
+    display: inline;
+  }
+
+  .dashboard-sidebar-title {
+    display: block;
   }
 
   .dashboard-workspace-inner {
@@ -692,6 +871,10 @@ a {
 }
 
 @media (max-width: 760px) {
+  .dashboard-sidebar-brand-head {
+    flex-wrap: wrap;
+  }
+
   .dashboard-sidebar-nav,
   .dashboard-sidebar-actions {
     display: grid;
@@ -1740,6 +1923,126 @@ a {
 .playing-field .playing-title {
   word-break: break-word;
   font-weight: 500;
+}
+
+.yt-playlist-panel {
+  margin-top: 0.8rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  padding-top: 0.8rem;
+  border-top: 1px solid var(--border);
+}
+
+.yt-playlist-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.yt-playlist-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  min-width: 0;
+}
+
+.yt-playlist-kicker {
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--accent);
+  opacity: 0.9;
+}
+
+.yt-playlist-title {
+  font-size: 0.98rem;
+  line-height: 1.35;
+}
+
+.yt-playlist-meta {
+  font-size: 0.84rem;
+  opacity: 0.76;
+  line-height: 1.35;
+}
+
+.yt-playlist-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+
+.yt-playlist-status {
+  font-size: 0.84rem;
+  opacity: 0.85;
+}
+
+.yt-playlist-status[data-tone="error"] {
+  color: #e67e73;
+}
+
+.yt-playlist-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  max-height: 240px;
+  overflow-y: auto;
+  padding-right: 0.2rem;
+}
+
+.yt-playlist-item {
+  width: 100%;
+  display: grid;
+  grid-template-columns: 2.25rem minmax(0, 1fr);
+  gap: 0.7rem;
+  align-items: center;
+  padding: 0.55rem 0.7rem;
+  border-radius: 12px;
+  text-align: left;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.yt-playlist-item:hover,
+.yt-playlist-item:focus-visible {
+  background: rgba(79, 163, 255, 0.1);
+}
+
+.yt-playlist-item.is-active {
+  border-color: rgba(79, 163, 255, 0.5);
+  background: rgba(79, 163, 255, 0.12);
+}
+
+.yt-playlist-item-index {
+  width: 2rem;
+  height: 2rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+
+.yt-playlist-item-copy {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.yt-playlist-item-title {
+  font-weight: 600;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.yt-playlist-item-meta {
+  font-size: 0.78rem;
+  opacity: 0.68;
 }
 
 /* Layout gallery for group tiles */

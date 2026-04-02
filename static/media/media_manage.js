@@ -4,6 +4,11 @@
   const roots = Array.isArray(bootstrap.roots) ? bootstrap.roots : [];
   const allowedExts = Array.isArray(bootstrap.allowedExts) ? bootstrap.allowedExts : [];
   const uploadMaxMB = Number(bootstrap.uploadMaxMB || 0);
+  const uploadConcurrency = (() => {
+    const value = Number(bootstrap.uploadConcurrency || 3);
+    if (!Number.isFinite(value) || value <= 0) return 3;
+    return Math.min(Math.max(Math.floor(value), 1), 6);
+  })();
   const previewEnabled = bootstrap.previewEnabled !== false;
   const PREVIEW_INTERVAL = (() => {
     const value = Number(bootstrap.previewIntervalMs || 150);
@@ -25,6 +30,7 @@
   const uploadState = {
     queue: [],
     processing: false,
+    activeCount: 0,
     nextId: 1,
     summary: null,
   };
@@ -38,6 +44,7 @@
   const hideNsfwToggle = document.getElementById("media-hide-nsfw");
   const sortSelect = document.getElementById("media-sort");
   const uploadInput = document.getElementById("upload-input");
+  const uploadFolderInput = document.getElementById("upload-folder-input");
   const toastContainer = document.getElementById("toast-container");
   const panel = document.querySelector(".media-panel");
 
@@ -45,6 +52,9 @@
   const actionRenameFolder = document.getElementById("action-rename-folder");
   const actionDeleteFolder = document.getElementById("action-delete-folder");
   const actionUpload = document.getElementById("action-upload");
+  const actionUploadFiles = document.getElementById("action-upload-files");
+  const actionUploadFolder = document.getElementById("action-upload-folder");
+  const uploadMenu = document.getElementById("upload-menu");
   const refreshButton = document.getElementById("tree-refresh");
 
   const thumbObserver = new IntersectionObserver((entries) => {
@@ -364,7 +374,7 @@
       detailsEl.dataset.loaded = "true";
       highlightTreeSelection();
     } catch (err) {
-      container.textContent = "Unable to load folders";
+      container.textContent = "Folder list unavailable";
       console.error(err);
     } finally {
       loadingNodes.delete(path);
@@ -454,24 +464,38 @@
     if (!folders || !folders.length) {
       const hint = document.createElement("div");
       hint.className = "subfolder-meta";
-      hint.textContent = "No subfolders in this directory.";
+      hint.textContent = "No subfolders.";
       subfolderContainer.appendChild(hint);
       return;
     }
     folders.forEach((folder) => {
       const card = document.createElement("div");
       card.className = "subfolder-card";
-      const header = document.createElement("div");
-      header.className = "subfolder-header";
-      const button = document.createElement("button");
-      button.type = "button";
-      button.textContent = folder.name;
-      button.addEventListener("click", () => selectFolder(folder.path));
-      button.title = folder.path;
-      header.appendChild(button);
+      const topline = document.createElement("div");
+      topline.className = "subfolder-topline";
+
+      const title = document.createElement("div");
+      title.className = "subfolder-title";
+      title.textContent = folder.name;
+      title.title = folder.path;
+
+      const count = folder.count || 0;
+      const badge = document.createElement("div");
+      badge.className = "subfolder-count";
+      badge.textContent = `${count} item${count === 1 ? "" : "s"}`;
+
+      topline.append(title, badge);
+
+      const openButton = document.createElement("button");
+      openButton.type = "button";
+      openButton.className = "subfolder-open";
+      openButton.textContent = "Open Folder";
+      openButton.addEventListener("click", () => selectFolder(folder.path));
+      openButton.title = folder.path;
+
       if (allowEdit) {
         const actions = document.createElement("div");
-        actions.className = "media-card-actions";
+        actions.className = "subfolder-actions";
         const rename = document.createElement("button");
         rename.type = "button";
         rename.textContent = "Rename";
@@ -487,13 +511,10 @@
           deleteEntry(folder.path);
         });
         actions.append(rename, del);
-        header.appendChild(actions);
+        card.append(topline, openButton, actions);
+      } else {
+        card.append(topline, openButton);
       }
-      const meta = document.createElement("div");
-      meta.className = "subfolder-meta";
-      const count = folder.count || 0;
-      meta.textContent = `${count} item${count === 1 ? "" : "s"}`;
-      card.append(header, meta);
       subfolderContainer.appendChild(card);
     });
   }
@@ -585,6 +606,13 @@
     document.querySelectorAll(".card-menu.open").forEach((menu) => {
       menu.classList.remove("open");
     });
+    if (uploadMenu) {
+      uploadMenu.hidden = true;
+      uploadMenu.classList.remove("open");
+    }
+    if (actionUpload) {
+      actionUpload.setAttribute("aria-expanded", "false");
+    }
   }
 
   function renderFiles(files) {
@@ -594,7 +622,7 @@
     if (!files || !files.length) {
       const message = document.createElement("div");
       message.className = "subfolder-meta";
-      message.textContent = "No files found in this folder.";
+      message.textContent = "No files.";
       grid.appendChild(message);
       return;
     }
@@ -642,7 +670,7 @@
       renderPagination(data.page || 1, data.total_pages || 1);
       highlightTreeSelection();
     } catch (err) {
-      showToast(err.message || "Failed to load folder", "error");
+      showToast(err.message || "Folder load failed", "error");
     }
   }
 
@@ -702,7 +730,7 @@
       refreshTree(parentPath(path));
       loadContent();
     } catch (err) {
-      showToast(err.message || "Unable to rename", "error");
+      showToast(err.message || "Rename failed", "error");
     }
   }
 
@@ -728,7 +756,7 @@
       refreshTree(parent);
       loadContent();
     } catch (err) {
-      showToast(err.message || "Unable to delete", "error");
+      showToast(err.message || "Delete failed", "error");
     }
   }
 
@@ -783,7 +811,7 @@
       refreshTree(base || buildVirtual(info.alias, []));
       loadContent();
     } catch (err) {
-      showToast(err.message || "Unable to create folder", "error");
+      showToast(err.message || "Folder creation failed", "error");
     }
   }
 
@@ -812,7 +840,7 @@
   function ensureUploadTarget() {
     const info = parseVirtual(state.currentPath);
     if (!info.alias) {
-      showToast("Select a folder before uploading.", "error");
+      showToast("Upload target required.", "error");
       return false;
     }
     return true;
@@ -837,15 +865,25 @@
 
     counts.append(title, meta);
 
+    const actions = document.createElement("div");
+    actions.className = "upload-summary-actions";
+
+    const cancelButton = document.createElement("button");
+    cancelButton.type = "button";
+    cancelButton.className = "upload-cancel";
+    cancelButton.textContent = "Cancel pending";
+    cancelButton.addEventListener("click", cancelQueuedUploads);
+
     const clearButton = document.createElement("button");
     clearButton.type = "button";
     clearButton.className = "upload-clear";
     clearButton.textContent = "Clear completed";
     clearButton.addEventListener("click", clearCompletedUploads);
 
-    summary.append(counts, clearButton);
+    actions.append(cancelButton, clearButton);
+    summary.append(counts, actions);
     uploadQueue.appendChild(summary);
-    uploadState.summary = { wrapper: summary, meta, clearButton };
+    uploadState.summary = { wrapper: summary, meta, clearButton, cancelButton };
     updateUploadSummary();
     return uploadState.summary;
   }
@@ -864,6 +902,7 @@
     if (!total) {
       summary.meta.textContent = "No files in the queue.";
       summary.clearButton.hidden = true;
+      summary.cancelButton.hidden = true;
       return;
     }
 
@@ -871,8 +910,32 @@
     if (uploading) parts.push(`${uploading} uploading`);
     if (pending) parts.push(`${pending} waiting`);
     if (failed) parts.push(`${failed} failed`);
+    parts.push(`${uploadConcurrency} parallel`);
     summary.meta.textContent = parts.join(" • ");
     summary.clearButton.hidden = done + failed === 0;
+    summary.cancelButton.hidden = pending + uploading === 0;
+    summary.cancelButton.textContent = uploading ? "Cancel queue" : "Cancel pending";
+  }
+
+  function humanReadableBytes(value) {
+    const bytes = Number(value || 0);
+    if (!Number.isFinite(bytes) || bytes <= 0) return "0 B";
+    const units = ["B", "KB", "MB", "GB", "TB"];
+    const index = Math.min(units.length - 1, Math.floor(Math.log(bytes) / Math.log(1024)));
+    const scaled = bytes / (1024 ** index);
+    const digits = scaled >= 100 || index === 0 ? 0 : scaled >= 10 ? 1 : 2;
+    return `${scaled.toFixed(digits)} ${units[index]}`;
+  }
+
+  function defaultUploadStatus(entry, status) {
+    const sizeText = humanReadableBytes(entry && entry.file ? entry.file.size : 0);
+    const labels = {
+      pending: `Waiting • ${sizeText}`,
+      uploading: `Uploading • ${sizeText}`,
+      done: `Done • ${sizeText}`,
+      failed: `Failed • ${sizeText}`,
+    };
+    return labels[status] || sizeText;
   }
 
   function setUploadRowStatus(entry, status, detail) {
@@ -880,13 +943,7 @@
     entry.status = status;
     entry.row.dataset.status = status;
     if (entry.statusLabel) {
-      const labels = {
-        pending: "Waiting",
-        uploading: "Uploading",
-        done: "Done",
-        failed: "Failed",
-      };
-      entry.statusLabel.textContent = detail || labels[status] || "";
+      entry.statusLabel.textContent = detail || defaultUploadStatus(entry, status);
     }
     if (entry.icon) {
       const icons = {
@@ -900,7 +957,7 @@
     updateUploadSummary();
   }
 
-  function prepareUploadRow(file, destinationPath) {
+  function prepareUploadRow(file, destinationPath, relativePath) {
     if (!uploadQueue) return null;
     ensureUploadSummary();
     const row = document.createElement("div");
@@ -919,13 +976,13 @@
 
     const title = document.createElement("div");
     title.className = "title";
-    title.textContent = file.name;
+    title.textContent = relativePath || file.name;
 
     titleWrap.append(icon, title);
 
     const statusLabel = document.createElement("div");
     statusLabel.className = "upload-status";
-    statusLabel.textContent = "Waiting";
+    statusLabel.textContent = `Waiting • ${humanReadableBytes(file.size)}`;
 
     header.append(titleWrap, statusLabel);
 
@@ -939,11 +996,14 @@
       id: uploadState.nextId++,
       file,
       destinationPath,
+      relativePath: relativePath || "",
+      displayName: relativePath || file.name,
       row,
       bar: span,
       icon,
       statusLabel,
       status: "pending",
+      xhr: null,
     };
     uploadState.queue.push(entry);
     updateUploadSummary();
@@ -955,7 +1015,11 @@
     if (rowInfo.bar) {
       rowInfo.bar.style.width = success ? "100%" : rowInfo.bar.style.width || "0%";
     }
-    setUploadRowStatus(rowInfo, success ? "done" : "failed", detail);
+    setUploadRowStatus(
+      rowInfo,
+      success ? "done" : "failed",
+      detail || `${success ? "Done" : "Failed"} • ${humanReadableBytes(rowInfo.file.size)}`
+    );
   }
 
   function clearCompletedUploads() {
@@ -981,13 +1045,55 @@
     updateUploadSummary();
   }
 
+  function cancelQueuedUploads() {
+    let cancelled = 0;
+    uploadState.queue.forEach((entry) => {
+      if (entry.status === "pending") {
+        entry.status = "cancelled";
+        cancelled += 1;
+        if (entry.row && entry.row.parentNode) {
+          entry.row.remove();
+        }
+        return;
+      }
+      if (entry.status === "uploading" && entry.xhr) {
+        entry.xhr.abort();
+        cancelled += 1;
+      }
+    });
+    uploadState.queue = uploadState.queue.filter((entry) => entry.status !== "cancelled");
+    if (cancelled) {
+      showToast(`Cancelled ${cancelled} upload${cancelled === 1 ? "" : "s"}`, "success");
+    }
+    if (!uploadState.queue.length && uploadQueue) {
+      uploadQueue.hidden = true;
+      if (uploadState.summary && uploadState.summary.wrapper.parentNode) {
+        uploadState.summary.wrapper.remove();
+      }
+      uploadState.summary = null;
+      return;
+    }
+    updateUploadSummary();
+  }
+
+  function getRelativeUploadPath(file) {
+    if (!file) return "";
+    const relative = typeof file.webkitRelativePath === "string" ? file.webkitRelativePath.trim() : "";
+    if (relative && relative.includes("/")) {
+      return relative;
+    }
+    return "";
+  }
+
   function uploadFiles(files) {
     if (!validateCanModify()) return;
     if (!ensureUploadTarget()) return;
     const items = Array.from(files || []);
     if (!items.length) return;
     const destinationPath = state.currentPath;
-    items.forEach((file) => prepareUploadRow(file, destinationPath));
+    items.forEach((file) => {
+      prepareUploadRow(file, destinationPath, getRelativeUploadPath(file));
+    });
     processUploadQueue();
   }
 
@@ -995,22 +1101,34 @@
     if (uploadState.processing) return;
     uploadState.processing = true;
     let shouldRefresh = false;
+    const workerCount = Math.min(
+      uploadConcurrency,
+      uploadState.queue.filter((item) => item.status === "pending").length || uploadConcurrency
+    );
     try {
-      while (true) {
-        const nextEntry = uploadState.queue.find((item) => item.status === "pending");
-        if (!nextEntry) break;
-        setUploadRowStatus(nextEntry, "uploading");
-        try {
-          await uploadSingle(nextEntry.file, nextEntry);
-          finalizeUploadRow(nextEntry, true);
-          shouldRefresh = true;
-          showToast(`Uploaded ${nextEntry.file.name}`, "success");
-        } catch (err) {
-          const message = err.message || `Failed to upload ${nextEntry.file.name}`;
-          finalizeUploadRow(nextEntry, false, message);
-          showToast(message, "error");
+      const runWorker = async () => {
+        while (true) {
+          const nextEntry = uploadState.queue.find((item) => item.status === "pending");
+          if (!nextEntry) return;
+          setUploadRowStatus(nextEntry, "uploading");
+          uploadState.activeCount += 1;
+          updateUploadSummary();
+          try {
+            await uploadSingle(nextEntry.file, nextEntry);
+            finalizeUploadRow(nextEntry, true);
+            shouldRefresh = true;
+            showToast(`Uploaded ${nextEntry.displayName || nextEntry.file.name}`, "success");
+          } catch (err) {
+            const message = err.message || `Upload failed: ${nextEntry.displayName || nextEntry.file.name}`;
+            finalizeUploadRow(nextEntry, false, message);
+            showToast(message, "error");
+          } finally {
+            uploadState.activeCount = Math.max(0, uploadState.activeCount - 1);
+            updateUploadSummary();
+          }
         }
-      }
+      };
+      await Promise.all(Array.from({ length: workerCount }, () => runWorker()));
     } finally {
       uploadState.processing = false;
       updateUploadSummary();
@@ -1024,9 +1142,15 @@
   function uploadSingle(file, rowInfo) {
     return new Promise((resolve, reject) => {
       const xhr = new XMLHttpRequest();
+      if (rowInfo) {
+        rowInfo.xhr = xhr;
+      }
       xhr.open("POST", "/api/media/upload");
       xhr.responseType = "json";
       xhr.onload = () => {
+        if (rowInfo) {
+          rowInfo.xhr = null;
+        }
         if (xhr.status >= 200 && xhr.status < 300) {
           resolve(xhr.response);
         } else {
@@ -1034,14 +1158,25 @@
           reject(new Error(msg));
         }
       };
-      xhr.onerror = () => reject(new Error("Upload failed"));
+      xhr.onabort = () => {
+        if (rowInfo) {
+          rowInfo.xhr = null;
+        }
+        reject(new Error("Upload cancelled"));
+      };
+      xhr.onerror = () => {
+        if (rowInfo) {
+          rowInfo.xhr = null;
+        }
+        reject(new Error("Upload failed"));
+      };
       if (rowInfo && rowInfo.bar) {
         xhr.upload.onprogress = (event) => {
           if (event.lengthComputable) {
             const pct = Math.round((event.loaded / event.total) * 100);
             rowInfo.bar.style.width = `${pct}%`;
             if (rowInfo.statusLabel) {
-              rowInfo.statusLabel.textContent = `Uploading ${pct}%`;
+              rowInfo.statusLabel.textContent = `Uploading ${pct}% • ${humanReadableBytes(event.loaded)} / ${humanReadableBytes(event.total)}`;
             }
           }
         };
@@ -1049,6 +1184,7 @@
       const form = new FormData();
       form.append("path", rowInfo && rowInfo.destinationPath ? rowInfo.destinationPath : state.currentPath);
       form.append("files", file);
+      form.append("relative_paths", rowInfo && rowInfo.relativePath ? rowInfo.relativePath : "");
       xhr.send(form);
     });
   }
@@ -1096,6 +1232,12 @@
         uploadInput.value = "";
       });
     }
+    if (allowEdit && uploadFolderInput) {
+      uploadFolderInput.addEventListener("change", () => {
+        uploadFiles(uploadFolderInput.files);
+        uploadFolderInput.value = "";
+      });
+    }
     if (allowEdit && actionCreateFolder) {
       actionCreateFolder.addEventListener("click", createFolder);
     }
@@ -1106,13 +1248,43 @@
       actionDeleteFolder.addEventListener("click", deleteCurrentFolder);
     }
     if (allowEdit && actionUpload) {
-      actionUpload.addEventListener("click", () => {
+      actionUpload.addEventListener("click", (event) => {
+        if (!ensureUploadTarget()) return;
+        event.stopPropagation();
+        if (!uploadMenu) return;
+        const nextOpen = uploadMenu.hidden;
+        closeAllMenus();
+        uploadMenu.hidden = !nextOpen;
+        uploadMenu.classList.toggle("open", nextOpen);
+        actionUpload.setAttribute("aria-expanded", nextOpen ? "true" : "false");
+      });
+    }
+    if (allowEdit && actionUploadFiles) {
+      actionUploadFiles.addEventListener("click", (event) => {
+        event.stopPropagation();
+        closeAllMenus();
         if (!ensureUploadTarget()) return;
         if (!uploadInput) return;
         if (allowedExts.length) {
           uploadInput.setAttribute("accept", allowedExts.join(","));
         }
         uploadInput.click();
+      });
+    }
+    if (allowEdit && actionUploadFolder) {
+      actionUploadFolder.addEventListener("click", (event) => {
+        event.stopPropagation();
+        closeAllMenus();
+        if (!ensureUploadTarget()) return;
+        if (!uploadFolderInput) return;
+        if (!("webkitdirectory" in uploadFolderInput)) {
+          showToast("Folder upload unsupported in current browser.", "error");
+          return;
+        }
+        if (allowedExts.length) {
+          uploadFolderInput.setAttribute("accept", allowedExts.join(","));
+        }
+        uploadFolderInput.click();
       });
     }
     if (refreshButton) {
@@ -1168,7 +1340,7 @@
     if (!uploadMaxMB || !toastContainer) return;
     const notice = document.createElement("div");
     notice.className = "subfolder-meta";
-    notice.textContent = `Max upload size: ${uploadMaxMB} MB.`;
+    notice.textContent = `Upload limit: ${uploadMaxMB} MB per file.`;
     if (uploadQueue && uploadQueue.parentElement) {
       uploadQueue.parentElement.insertBefore(notice, uploadQueue);
     }

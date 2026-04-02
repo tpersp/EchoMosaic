@@ -6,6 +6,7 @@ import json
 import logging
 import shutil
 import tempfile
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
 
@@ -177,6 +178,37 @@ def _write_json(path: Path, data: Any) -> None:
     with path.open("w", encoding="utf-8") as handle:
         json.dump(data, handle, indent=2)
         handle.write("\n")
+
+
+def append_update_history(repo_path: str, from_commit: str, to_commit: str, branch: Optional[str] = None) -> bool:
+    repo = _resolve_repo_path(repo_path)
+    old_commit = str(from_commit or "").strip()
+    new_commit = str(to_commit or "").strip()
+    branch_name = str(branch or "").strip() or None
+
+    if not old_commit or not new_commit or old_commit == new_commit:
+        return False
+
+    history_path = repo / "update_history.json"
+    history: List[Dict[str, Any]] = []
+    if history_path.is_file():
+        try:
+            loaded = json.loads(history_path.read_text(encoding="utf-8"))
+            if isinstance(loaded, list):
+                history = loaded
+        except json.JSONDecodeError:
+            logger.warning("Unable to parse update history from %s", history_path)
+
+    history.append(
+        {
+            "timestamp": datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
+            "branch": branch_name,
+            "from": old_commit,
+            "to": new_commit,
+        }
+    )
+    _write_json(history_path, history)
+    return True
 
 
 def _restore_settings(repo: Path, backup: Path) -> None:

@@ -13,18 +13,22 @@ class YouTubeEmbedService:
         self,
         *,
         requests_module,
+        youtube_dl_cls=None,
         eventlet_module,
         logger,
         youtube_domains,
         youtube_oembed_endpoint: str,
         youtube_oembed_cache_ttl: float,
         youtube_live_probe_cache_ttl: float,
+        youtube_playlist_cache_ttl: float = 900.0,
         youtube_live_probe_max_bytes: int,
         youtube_live_html_markers,
         youtube_oembed_cache,
         youtube_oembed_cache_lock,
         youtube_live_probe_cache,
         youtube_live_probe_cache_lock,
+        youtube_playlist_cache=None,
+        youtube_playlist_cache_lock=None,
         youtube_sync_state_lock,
         youtube_sync_state,
         youtube_sync_subscribers,
@@ -39,18 +43,22 @@ class YouTubeEmbedService:
         media_mode_livestream: str,
     ) -> None:
         self.requests = requests_module
+        self.youtube_dl_cls = youtube_dl_cls
         self.eventlet = eventlet_module
         self.logger = logger
         self.youtube_domains = set(youtube_domains)
         self.youtube_oembed_endpoint = youtube_oembed_endpoint
         self.youtube_oembed_cache_ttl = float(youtube_oembed_cache_ttl)
         self.youtube_live_probe_cache_ttl = float(youtube_live_probe_cache_ttl)
+        self.youtube_playlist_cache_ttl = float(youtube_playlist_cache_ttl)
         self.youtube_live_probe_max_bytes = int(youtube_live_probe_max_bytes)
         self.youtube_live_html_markers = tuple(youtube_live_html_markers)
         self.youtube_oembed_cache = youtube_oembed_cache
         self.youtube_oembed_cache_lock = youtube_oembed_cache_lock
         self.youtube_live_probe_cache = youtube_live_probe_cache
         self.youtube_live_probe_cache_lock = youtube_live_probe_cache_lock
+        self.youtube_playlist_cache = youtube_playlist_cache if youtube_playlist_cache is not None else {}
+        self.youtube_playlist_cache_lock = youtube_playlist_cache_lock if youtube_playlist_cache_lock is not None else youtube_oembed_cache_lock
         self.youtube_sync_state_lock = youtube_sync_state_lock
         self.youtube_sync_state = youtube_sync_state
         self.youtube_sync_subscribers = youtube_sync_subscribers
@@ -263,6 +271,13 @@ class YouTubeEmbedService:
         canonical = details.get("canonical_url") or details.get("original_url") or ""
         return ("url", canonical)
 
+    def youtube_playlist_cache_key(self, details: Dict[str, Any]) -> Tuple[str, ...]:
+        playlist_id = str(details.get("playlist_id") or "").strip()
+        if playlist_id:
+            return ("playlist", playlist_id)
+        canonical = str(details.get("canonical_url") or details.get("original_url") or "").strip()
+        return ("url", canonical)
+
     def youtube_oembed_html_says_live(self, oembed: Optional[Dict[str, Any]]) -> bool:
         if not isinstance(oembed, dict):
             return False
@@ -395,6 +410,175 @@ class YouTubeEmbedService:
         metadata["content_type"] = content_type
         metadata["is_live"] = content_type == "live"
         return metadata
+
+    def build_youtube_playlist_item_url(
+        self,
+        *,
+        playlist_id: str,
+        video_id: Optional[str] = None,
+        index: Optional[int] = None,
+        start_seconds: Optional[int] = None,
+    ) -> str:
+        params = []
+        if video_id:
+            params.append(f"v={video_id}")
+        if playlist_id:
+            params.append(f"list={playlist_id}")
+        if isinstance(index, int) and index > 0:
+            params.append(f"index={index}")
+        if isinstance(start_seconds, int) and start_seconds > 0:
+            params.append(f"start={start_seconds}")
+        base = "https://www.youtube.com/watch"
+        if not video_id and playlist_id:
+            base = "https://www.youtube.com/playlist"
+            params = [f"list={playlist_id}"]
+            if isinstance(index, int) and index > 0:
+                params.append(f"index={index}")
+        if params:
+            return f"{base}?{'&'.join(params)}"
+        return base
+
+    def _normalize_playlist_entry(
+        self,
+        raw: Any,
+        *,
+        playlist_id: str,
+        fallback_index: int,
+    ) -> Optional[Dict[str, Any]]:
+        if not isinstance(raw, dict):
+            return None
+        video_id_raw = raw.get("id") or raw.get("url") or raw.get("video_id")
+        video_id = video_id_raw.strip() if isinstance(video_id_raw, str) else ""
+        if video_id and ("/" in video_id or "?" in video_id):
+            details = self.parse_youtube_url_details(video_id)
+            if details and details.get("video_id"):
+                video_id = str(details.get("video_id") or "").strip()
+        title_raw = raw.get("title")
+        title = title_raw.strip() if isinstance(title_raw, str) else ""
+        duration_raw = raw.get("duration")
+        try:
+            duration = int(duration_raw) if duration_raw is not None else None
+        except (TypeError, ValueError):
+            duration = None
+        thumbnail_raw = raw.get("thumbnail")
+        thumbnail = thumbnail_raw.strip() if isinstance(thumbnail_raw, str) else None
+        entry_index_raw = raw.get("playlist_index") or raw.get("playlist_autonumber") or raw.get("index")
+        try:
+            entry_index = int(entry_index_raw) if entry_index_raw is not None else fallback_index
+        except (TypeError, ValueError):
+            entry_index = fallback_index
+        if entry_index <= 0:
+            entry_index = fallback_index
+        if not title:
+            title = f"Video {entry_index}"
+        if not video_id:
+            webpage_url = raw.get("webpage_url") or raw.get("url")
+            details = self.parse_youtube_url_details(webpage_url) if isinstance(webpage_url, str) else None
+            if details and details.get("video_id"):
+                video_id = str(details.get("video_id") or "").strip()
+        if not video_id:
+            return None
+        entry = {
+            "index": entry_index,
+            "video_id": video_id,
+            "title": title,
+            "url": self.build_youtube_playlist_item_url(playlist_id=playlist_id, video_id=video_id, index=entry_index),
+        }
+        if thumbnail:
+            entry["thumbnail_url"] = thumbnail
+        if duration is not None and duration >= 0:
+            entry["duration"] = duration
+        return entry
+
+    def fetch_youtube_playlist(
+        self,
+        url: str,
+        details: Optional[Dict[str, Any]] = None,
+        *,
+        force: bool = False,
+    ) -> Optional[Dict[str, Any]]:
+        if self.youtube_dl_cls is None:
+            return None
+        resolved = details if isinstance(details, dict) else self.parse_youtube_url_details(url)
+        if not isinstance(resolved, dict):
+            return None
+        playlist_id = str(resolved.get("playlist_id") or "").strip()
+        if not playlist_id:
+            return None
+        cache_key = self.youtube_playlist_cache_key(resolved)
+        now = time.time()
+        with self.youtube_playlist_cache_lock:
+            cached = self.youtube_playlist_cache.get(cache_key)
+            if cached and not force and now - cached.get("timestamp", 0) < self.youtube_playlist_cache_ttl:
+                return dict(cached.get("data") or {})
+
+        info: Optional[Dict[str, Any]] = None
+        options = {
+            "quiet": True,
+            "skip_download": True,
+            "extract_flat": "in_playlist",
+            "lazy_playlist": False,
+            "noplaylist": False,
+        }
+        try:
+            with self.youtube_dl_cls(options) as ydl:
+                extracted = ydl.extract_info(url, download=False)
+            info = extracted if isinstance(extracted, dict) else None
+        except Exception as exc:
+            self.logger.debug("YouTube playlist fetch failed for %s: %s", url, exc)
+            return None
+        if not info:
+            return None
+        title_raw = info.get("title") or info.get("playlist_title")
+        title = title_raw.strip() if isinstance(title_raw, str) else ""
+        entries_raw = info.get("entries")
+        normalized_entries: List[Dict[str, Any]] = []
+        if isinstance(entries_raw, list):
+            for fallback_index, item in enumerate(entries_raw, start=1):
+                normalized = self._normalize_playlist_entry(item, playlist_id=playlist_id, fallback_index=fallback_index)
+                if normalized:
+                    normalized_entries.append(normalized)
+        normalized_entries.sort(key=lambda item: (int(item.get("index") or 0), item.get("title") or ""))
+        timestamp = datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+        payload: Dict[str, Any] = {
+            "playlist_id": playlist_id,
+            "title": title or "YouTube Playlist",
+            "entry_count": len(normalized_entries),
+            "entries": normalized_entries,
+            "fetched_at": timestamp,
+            "url": self.build_youtube_playlist_item_url(playlist_id=playlist_id),
+        }
+        with self.youtube_playlist_cache_lock:
+            self.youtube_playlist_cache[cache_key] = {"data": dict(payload), "timestamp": time.time()}
+        return payload
+
+    def resolve_youtube_playlist_current_item(
+        self,
+        playlist: Optional[Dict[str, Any]],
+        details: Optional[Dict[str, Any]],
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> Optional[Dict[str, Any]]:
+        if not isinstance(playlist, dict):
+            return None
+        entries = playlist.get("entries")
+        if not isinstance(entries, list) or not entries:
+            return None
+        metadata = metadata if isinstance(metadata, dict) else {}
+        desired_video_id = str((metadata.get("video_id") or (details or {}).get("video_id") or "")).strip()
+        desired_index_raw = metadata.get("start_index")
+        if desired_index_raw is None and isinstance(details, dict):
+            desired_index_raw = details.get("start_index")
+        try:
+            desired_index = int(desired_index_raw) if desired_index_raw is not None else None
+        except (TypeError, ValueError):
+            desired_index = None
+        for entry in entries:
+            if desired_video_id and str(entry.get("video_id") or "").strip() == desired_video_id:
+                return dict(entry)
+        for entry in entries:
+            if desired_index is not None and int(entry.get("index") or 0) == desired_index:
+                return dict(entry)
+        return dict(entries[0])
 
     def youtube_oembed_lookup(self, url: str, details: Dict[str, Any], *, force: bool = False) -> Optional[Dict[str, Any]]:
         cache_key = self.youtube_cache_key(details)

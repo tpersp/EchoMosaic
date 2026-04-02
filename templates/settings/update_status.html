@@ -3,7 +3,17 @@
 <head>
   <meta charset="UTF-8"/>
   <title>Update Status</title>
+  <script>
+    (function () {
+      try {
+        if (window.localStorage.getItem('sidebar-collapsed') === '1') {
+          document.documentElement.classList.add('sidebar-collapsed');
+        }
+      } catch (err) {}
+    })();
+  </script>
   <link rel="stylesheet" href="{{ url_for('static', filename='shared/style.css') }}">
+  <script src="{{ url_for('static', filename='shared/sidebar_shell.js') }}" defer></script>
   <style>
     .update-page-layout {
       width: min(820px, 100%);
@@ -30,14 +40,30 @@
   <div class="dashboard-shell">
     <aside class="dashboard-sidebar">
       <div class="dashboard-sidebar-brand">
-        <h1>EchoMosaic</h1>
-        <p>Update Status</p>
+        <div class="dashboard-sidebar-brand-head">
+          <div class="dashboard-sidebar-brand-copy">
+            <h1>EchoMosaic</h1>
+            <p>Update Status</p>
+          </div>
+          <button id="sidebar-toggle" class="sidebar-shell-toggle" type="button" aria-label="Collapse sidebar" title="Collapse sidebar" aria-pressed="false">
+            <span class="sidebar-shell-toggle-icon" aria-hidden="true">&laquo;</span>
+          </button>
+        </div>
       </div>
 
       <nav class="dashboard-sidebar-nav" aria-label="Primary">
-        <a class="sidebar-link" href="{{ url_for('dashboard_routes.dashboard') }}">Dashboard</a>
-        <a class="sidebar-link" href="{{ url_for('media_routes.media_management_page') }}">Media</a>
-        <a class="sidebar-link is-active" href="{{ url_for('settings_operations.app_settings') }}">Settings</a>
+        <a class="sidebar-link" href="{{ url_for('dashboard_routes.dashboard') }}" title="Dashboard">
+          <span class="sidebar-item-icon" aria-hidden="true">▦</span>
+          <span class="sidebar-item-label">Dashboard</span>
+        </a>
+        <a class="sidebar-link" href="{{ url_for('media_routes.media_management_page') }}" title="Media">
+          <span class="sidebar-item-icon" aria-hidden="true">🗂</span>
+          <span class="sidebar-item-label">Media</span>
+        </a>
+        <a class="sidebar-link is-active" href="{{ url_for('settings_operations.app_settings') }}" title="Settings">
+          <span class="sidebar-item-icon" aria-hidden="true">⚙</span>
+          <span class="sidebar-item-label">Settings</span>
+        </a>
       </nav>
 
       <div class="dashboard-sidebar-footer">

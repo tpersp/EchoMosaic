@@ -47,7 +47,7 @@ DEFAULT_CONFIG_FALLBACK: Dict[str, Any] = {
     "LIVE_HLS_ERROR_RETRY_SECS": 30,
     "MEDIA_PATHS": ["./media"],
     "MEDIA_MANAGEMENT_ALLOW_EDIT": True,
-    "MEDIA_UPLOAD_MAX_MB": 256,
+    "MEDIA_UPLOAD_MAX_MB": 2048,
     "MEDIA_ALLOWED_EXTS": [
         ".png",
         ".jpg",

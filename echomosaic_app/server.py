@@ -974,6 +974,8 @@ YOUTUBE_OEMBED_CACHE = YOUTUBE_RUNTIME.youtube_oembed_cache
 YOUTUBE_OEMBED_CACHE_LOCK = YOUTUBE_RUNTIME.youtube_oembed_cache_lock
 YOUTUBE_LIVE_PROBE_CACHE = YOUTUBE_RUNTIME.youtube_live_probe_cache
 YOUTUBE_LIVE_PROBE_CACHE_LOCK = YOUTUBE_RUNTIME.youtube_live_probe_cache_lock
+YOUTUBE_PLAYLIST_CACHE = YOUTUBE_RUNTIME.youtube_playlist_cache
+YOUTUBE_PLAYLIST_CACHE_LOCK = YOUTUBE_RUNTIME.youtube_playlist_cache_lock
 YOUTUBE_SYNC_STATE_LOCK = YOUTUBE_RUNTIME.youtube_sync_state_lock
 YOUTUBE_SYNC_STATE = YOUTUBE_RUNTIME.youtube_sync_state
 YOUTUBE_SYNC_SUBSCRIBERS = YOUTUBE_RUNTIME.youtube_sync_subscribers
@@ -983,6 +985,7 @@ _YOUTUBE_IN_FLIGHT_LOCK = YOUTUBE_RUNTIME.youtube_in_flight_lock
 
 YOUTUBE_EMBED_SERVICE = YouTubeEmbedService(
     requests_module=requests,
+    youtube_dl_cls=YoutubeDL,
     eventlet_module=eventlet,
     logger=logger,
     youtube_domains=YOUTUBE_DOMAINS,
@@ -995,6 +998,8 @@ YOUTUBE_EMBED_SERVICE = YouTubeEmbedService(
     youtube_oembed_cache_lock=YOUTUBE_OEMBED_CACHE_LOCK,
     youtube_live_probe_cache=YOUTUBE_LIVE_PROBE_CACHE,
     youtube_live_probe_cache_lock=YOUTUBE_LIVE_PROBE_CACHE_LOCK,
+    youtube_playlist_cache=YOUTUBE_PLAYLIST_CACHE,
+    youtube_playlist_cache_lock=YOUTUBE_PLAYLIST_CACHE_LOCK,
     youtube_sync_state_lock=YOUTUBE_SYNC_STATE_LOCK,
     youtube_sync_state=YOUTUBE_SYNC_STATE,
     youtube_sync_subscribers=YOUTUBE_SYNC_SUBSCRIBERS,
@@ -2929,6 +2934,7 @@ _media_blueprint = create_media_blueprint(
     media_allow_edit=MEDIA_MANAGEMENT_ALLOW_EDIT,
     media_allowed_exts=MEDIA_ALLOWED_EXTS,
     media_upload_max_mb=MEDIA_UPLOAD_MAX_MB,
+    media_upload_max_mb_getter=lambda: max(1, _as_int(load_config().get("MEDIA_UPLOAD_MAX_MB"), MEDIA_UPLOAD_MAX_MB)),
     media_preview_enabled=MEDIA_PREVIEW_ENABLED,
     media_preview_frames=MEDIA_PREVIEW_FRAMES,
     media_preview_width=MEDIA_PREVIEW_WIDTH,
@@ -3464,9 +3470,42 @@ def dashboard_update_status():
     )
 
 
+def get_youtube_playlist(stream_id: str):
+    conf = settings.get(stream_id)
+    if not isinstance(conf, dict):
+        return jsonify({"error": f"No stream '{stream_id}' found"}), 404
+    stream_url = str(conf.get("stream_url") or "").strip()
+    if not stream_url:
+        return jsonify({"error": "No YouTube URL configured for this stream"}), 400
+    details = _parse_youtube_url_details(stream_url)
+    if details is None or not details.get("playlist_id"):
+        return jsonify({"error": "This stream is not using a YouTube playlist"}), 400
+    force_refresh = str(request.args.get("refresh") or "").strip().lower() in {"1", "true", "yes", "on"}
+    playlist = YOUTUBE_EMBED_SERVICE.fetch_youtube_playlist(stream_url, details, force=force_refresh)
+    if not playlist:
+        return jsonify({"error": "Playlist details are unavailable"}), 503
+    current = YOUTUBE_EMBED_SERVICE.resolve_youtube_playlist_current_item(
+        playlist,
+        details,
+        conf.get("embed_metadata"),
+    )
+    current_index = int(current.get("index")) if isinstance(current, dict) and current.get("index") else None
+    current_video_id = str(current.get("video_id") or "").strip() if isinstance(current, dict) else ""
+    return jsonify(
+        {
+            "status": "success",
+            "playlist": playlist,
+            "current": current,
+            "current_index": current_index,
+            "current_video_id": current_video_id or None,
+        }
+    )
+
+
 _dashboard_blueprint = create_dashboard_blueprint(
     dashboard_handler=dashboard,
     update_status_handler=dashboard_update_status,
+    youtube_playlist_handler=get_youtube_playlist,
     mosaic_streams_handler=mosaic_streams,
     render_stream_handler=render_stream,
     add_stream_handler=add_stream,
@@ -3529,6 +3568,7 @@ def update_ai_defaults():
 _settings_operations_blueprint = create_settings_operations_blueprint(
     settings=settings,
     load_config=load_config,
+    media_settings_handler=lambda: api_media_settings(),
     default_ai_settings=default_ai_settings,
     ai_fallback_defaults=AI_FALLBACK_DEFAULTS,
     post_processors=STABLE_HORDE_POST_PROCESSORS,
@@ -4138,6 +4178,49 @@ def api_timer_settings():
     return jsonify({"timer_snap_enabled": requested, "streams": stream_summary})
 
 
+def api_media_settings():
+    global CONFIG, MEDIA_UPLOAD_MAX_MB, MEDIA_UPLOAD_MAX_BYTES
+
+    cfg = load_config()
+    upload_limit_mb = max(1, _as_int(cfg.get("MEDIA_UPLOAD_MAX_MB"), 2048))
+    if request.method == "GET":
+        return jsonify(
+            {
+                "media_upload_max_mb": upload_limit_mb,
+                "media_upload_max_bytes": upload_limit_mb * 1024 * 1024,
+            }
+        )
+
+    api_key = cfg.get("API_KEY")
+    if api_key and request.headers.get("X-API-Key") != api_key:
+        return jsonify({"error": "Unauthorized"}), 401
+
+    payload = request.get_json(silent=True) or {}
+    requested = max(1, _as_int(payload.get("media_upload_max_mb"), upload_limit_mb))
+    cfg["MEDIA_UPLOAD_MAX_MB"] = requested
+    try:
+        config_manager.save_config(cfg)
+    except Exception:
+        logger.exception("Failed to persist media upload setting")
+        return jsonify({"error": "Unable to save setting"}), 500
+
+    CONFIG["MEDIA_UPLOAD_MAX_MB"] = requested
+    MEDIA_UPLOAD_MAX_MB = requested
+    MEDIA_UPLOAD_MAX_BYTES = requested * 1024 * 1024
+    try:
+        MEDIA_MANAGER.set_max_upload_mb(requested)
+    except Exception:
+        logger.exception("Failed to apply media upload setting to runtime")
+        return jsonify({"error": "Unable to apply setting"}), 500
+
+    return jsonify(
+        {
+            "media_upload_max_mb": requested,
+            "media_upload_max_bytes": MEDIA_UPLOAD_MAX_BYTES,
+        }
+    )
+
+
 def _sync_timer_payload(timer_id: str, entry: Dict[str, Any]) -> Dict[str, Any]:
     return TIMER_SYNC_SERVICE.sync_timer_payload(timer_id, entry)
 
@@ -4228,13 +4311,29 @@ def stream_live():
                 content_type = "live"
             else:
                 content_type = "video"
+        resolved_video_id = youtube_details.get("video_id")
+        resolved_start_index = youtube_details.get("start_index")
+        if youtube_details.get("playlist_id") and content_type == "playlist" and not resolved_video_id:
+            playlist = YOUTUBE_EMBED_SERVICE.fetch_youtube_playlist(stream_url, youtube_details)
+            current_item = YOUTUBE_EMBED_SERVICE.resolve_youtube_playlist_current_item(
+                playlist,
+                youtube_details,
+                sanitized_meta,
+            )
+            if current_item:
+                resolved_video_id = current_item.get("video_id")
+                if current_item.get("index") is not None:
+                    resolved_start_index = current_item.get("index")
+                if sanitized_meta is not None:
+                    sanitized_meta["video_id"] = resolved_video_id
+                    sanitized_meta["start_index"] = resolved_start_index
         response_payload: Dict[str, Any] = {
             "embed_type": "youtube",
-            "embed_id": youtube_details.get("video_id"),
-            "video_id": youtube_details.get("video_id"),
+            "embed_id": resolved_video_id,
+            "video_id": resolved_video_id,
             "playlist_id": youtube_details.get("playlist_id"),
             "content_type": content_type,
-            "start_index": youtube_details.get("start_index"),
+            "start_index": resolved_start_index,
             "start_seconds": youtube_details.get("start_seconds"),
             "is_live": bool((sanitized_meta or {}).get("is_live") or youtube_details.get("is_live")),
             "embed_base": youtube_details.get("embed_base"),
@@ -4247,7 +4346,7 @@ def stream_live():
                 stream_id,
                 {
                     "playlist_id": youtube_details.get("playlist_id"),
-                    "video_id": youtube_details.get("video_id"),
+                    "video_id": resolved_video_id,
                     "content_type": content_type,
                 },
             )

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from io import BytesIO
+
 from flask import Flask
 
 from echomosaic_app.routes.media import create_media_blueprint
@@ -11,17 +13,32 @@ class _MediaManagerStub:
             super().__init__(message)
             self.code = code
 
+    def __init__(self) -> None:
+        self.upload_calls = []
+
+    def upload(self, destination, files, *, relative_paths=None):
+        self.upload_calls.append(
+            {
+                "destination": destination,
+                "filenames": [getattr(item, "filename", "") for item in files],
+                "relative_paths": list(relative_paths or []),
+            }
+        )
+        return []
+
 
 def test_media_blueprint_registers_expected_routes() -> None:
     app = Flask(__name__)
+    media_manager = _MediaManagerStub()
     app.register_blueprint(
         create_media_blueprint(
-            media_manager=_MediaManagerStub(),
+            media_manager=media_manager,
             media_error_type=_MediaManagerStub.error_type,
             media_thumb_width=320,
             media_allow_edit=True,
             media_allowed_exts=[".png"],
             media_upload_max_mb=256,
+            media_upload_max_mb_getter=lambda: 256,
             media_preview_enabled=True,
             media_preview_frames=8,
             media_preview_width=320,
@@ -51,3 +68,56 @@ def test_media_blueprint_registers_expected_routes() -> None:
     assert "/api/media/preview_frame" in endpoints
     assert "/folders" in endpoints
     assert "/media/manage" in endpoints
+
+
+def test_media_upload_passes_relative_paths_to_media_manager() -> None:
+    app = Flask(__name__)
+    media_manager = _MediaManagerStub()
+    app.register_blueprint(
+        create_media_blueprint(
+            media_manager=media_manager,
+            media_error_type=_MediaManagerStub.error_type,
+            media_thumb_width=320,
+            media_allow_edit=True,
+            media_allowed_exts=[".png"],
+            media_upload_max_mb=256,
+            media_upload_max_mb_getter=lambda: 256,
+            media_preview_enabled=True,
+            media_preview_frames=8,
+            media_preview_width=320,
+            media_preview_max_duration=300.0,
+            available_media_roots=[],
+            media_library_default="media",
+            media_error_response=lambda exc: ("error", 400),
+            require_media_edit=lambda: None,
+            invalidate_media_cache=lambda path: None,
+            parse_truthy=bool,
+            normalize_library_key=lambda value, default="media": default,
+            get_folder_inventory=lambda **kwargs: [],
+            as_int=lambda value, default=0: default,
+            virtual_leaf=lambda path: path,
+            logger=type("L", (), {"info": lambda *args, **kwargs: None})(),
+            app_response_class=app.response_class,
+        )
+    )
+
+    client = app.test_client()
+    response = client.post(
+        "/api/media/upload",
+        data={
+            "path": "media:/viewers",
+            "relative_paths": ["collection/image1.png", "collection/nested/image2.png"],
+            "files": [
+                (BytesIO(b"one"), "image1.png"),
+                (BytesIO(b"two"), "image2.png"),
+            ],
+        },
+        content_type="multipart/form-data",
+    )
+
+    assert response.status_code == 200
+    assert media_manager.upload_calls[0]["destination"] == "media:/viewers"
+    assert media_manager.upload_calls[0]["relative_paths"] == [
+        "collection/image1.png",
+        "collection/nested/image2.png",
+    ]

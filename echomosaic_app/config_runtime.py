@@ -199,7 +199,7 @@ def build_media_runtime(
     thumbnail_cache_dir = primary_media_root.path / thumbnail_subdir
 
     media_management_allow_edit = _as_bool(config.get("MEDIA_MANAGEMENT_ALLOW_EDIT"), True)
-    media_upload_max_mb = max(1, _as_int(config.get("MEDIA_UPLOAD_MAX_MB"), 256))
+    media_upload_max_mb = max(1, _as_int(config.get("MEDIA_UPLOAD_MAX_MB"), 2048))
     media_allowed_exts = _normalize_extensions(config.get("MEDIA_ALLOWED_EXTS"))
     media_thumb_width = max(64, _as_int(config.get("MEDIA_THUMB_WIDTH"), 320))
     media_preview_enabled = _as_bool(config.get("MEDIA_PREVIEW_ENABLED"), True)

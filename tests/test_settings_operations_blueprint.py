@@ -12,6 +12,7 @@ def test_settings_operations_blueprint_registers_expected_routes() -> None:
         create_settings_operations_blueprint(
             settings={},
             load_config=lambda: {"SERVICE_NAME": "echomosaic.service", "logging": {}},
+            media_settings_handler=lambda: ("ok", 200),
             default_ai_settings=lambda: {"model": "demo"},
             ai_fallback_defaults={"model": "fallback"},
             post_processors=[],
@@ -52,6 +53,7 @@ def test_settings_operations_blueprint_registers_expected_routes() -> None:
     assert "/settings/export" in endpoints
     assert "/settings/import" in endpoints
     assert "/settings/ai-defaults" in endpoints
+    assert "/api/settings/media" in endpoints
     assert "/settings" in endpoints
     assert "/restore_points" in endpoints
     assert "/restore_points/<point_id>" in endpoints

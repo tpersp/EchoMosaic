@@ -11,6 +11,7 @@ def test_dashboard_blueprint_registers_expected_routes() -> None:
         create_dashboard_blueprint(
             dashboard_handler=lambda: ("ok", 200),
             update_status_handler=lambda: ("ok", 200),
+            youtube_playlist_handler=lambda stream_id: ("ok", 200),
             mosaic_streams_handler=lambda: ("ok", 200),
             render_stream_handler=lambda name: ("ok", 200),
             add_stream_handler=lambda: ("ok", 200),
@@ -27,6 +28,7 @@ def test_dashboard_blueprint_registers_expected_routes() -> None:
     endpoints = {rule.rule for rule in app.url_map.iter_rules()}
     assert "/" in endpoints
     assert "/api/update_status" in endpoints
+    assert "/api/youtube_playlist/<stream_id>" in endpoints
     assert "/stream" in endpoints
     assert "/stream/<name>" in endpoints
     assert "/streams" in endpoints

@@ -3,7 +3,17 @@
 <head>
   <meta charset="UTF-8"/>
   <title>EchoMosaic Settings</title>
+  <script>
+    (function () {
+      try {
+        if (window.localStorage.getItem('sidebar-collapsed') === '1') {
+          document.documentElement.classList.add('sidebar-collapsed');
+        }
+      } catch (err) {}
+    })();
+  </script>
   <link rel="stylesheet" href="{{ url_for('static', filename='shared/style.css') }}">
+  <script src="{{ url_for('static', filename='shared/sidebar_shell.js') }}" defer></script>
   <script>
   const SETTINGS_API_KEY = {{ config.get("API_KEY", "")|tojson }};
   let latestUpdateInfo = null;
@@ -13,7 +23,7 @@
     if (info.update_available === false) {
       const remoteDesc = info.remote_desc || info.remote_commit || 'the current version';
       const proceed = confirm(
-        `EchoMosaic is already up to date.\n\nCurrent/latest: ${remoteDesc}\n\nDo you want to run the update tool anyway?`
+        `Status: current version matches latest available.\n\nCurrent/latest: ${remoteDesc}\n\nRun update tool anyway?`
       );
       if (!proceed) {
         return;
@@ -38,6 +48,13 @@
       .then(info => {
         latestUpdateInfo = info || {};
         const el = (id, v) => document.getElementById(id).textContent = v || '-';
+        const setOptionalText = (id, value) => {
+          const node = document.getElementById(id);
+          if (!node) return;
+          const text = (value || '').trim();
+          node.textContent = text;
+          node.hidden = !text;
+        };
         const splitVersionMeta = (value) => {
           const raw = (value || '').trim();
           if (!raw) {
@@ -55,7 +72,7 @@
         const setVersionField = (mainId, metaId, value) => {
           const parts = splitVersionMeta(value);
           el(mainId, parts.main);
-          el(metaId, parts.meta);
+          setOptionalText(metaId, parts.meta);
         };
         el('channel', info.channel);
         el('branch', info.branch);
@@ -70,8 +87,8 @@
           note.textContent = 'Update available';
         } else {
           btn.disabled = false;
-          btn.textContent = 'Run Update Anyway';
-          note.textContent = 'Already on the newest version';
+          btn.textContent = 'Run Update';
+          note.textContent = 'Current version matches latest available';
         }
         const rb = document.getElementById('rollback-btn');
         rb.disabled = !info.previous_commit;
@@ -81,7 +98,7 @@
         const note = document.getElementById('update-note');
         const btn = document.getElementById('update-btn');
         if (note) {
-          note.textContent = 'Unable to check update status';
+          note.textContent = 'Update status unavailable';
         }
         if (btn) {
           btn.disabled = false;
@@ -112,7 +129,7 @@
         list.appendChild(li);
       });
     } catch (e) {
-      list.innerHTML = '<li style="color:#f66; padding:6px 8px;">Failed to load history</li>';
+      list.innerHTML = '<li style="color:#f66; padding:6px 8px;">History unavailable</li>';
     }
   }
 
@@ -212,8 +229,8 @@
         list.appendChild(li);
       });
     } catch (err) {
-      list.innerHTML = '<li style="color:#f66; padding:6px 8px;">Failed to load restore points</li>';
-      setRestorePointStatus('Unable to load restore points.', false);
+      list.innerHTML = '<li style="color:#f66; padding:6px 8px;">Restore points unavailable</li>';
+      setRestorePointStatus('Restore points unavailable.', false);
     }
   }
 
@@ -222,7 +239,7 @@
     if (label === null) return;
     const trimmed = label.trim();
     if (!trimmed) {
-      alert('Please provide a name for the restore point.');
+      alert('Restore point name required.');
       return;
     }
     const btn = document.getElementById('create-restore-btn');
@@ -239,14 +256,14 @@
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        const msg = data && data.error ? data.error : 'Failed to create restore point';
+        const msg = data && data.error ? data.error : 'Restore point creation failed';
         setRestorePointStatus(msg, false);
         return;
       }
       setRestorePointStatus('Restore point created.');
       await loadRestorePoints();
     } catch (err) {
-      setRestorePointStatus('Failed to create restore point.', false);
+      setRestorePointStatus('Restore point creation failed.', false);
     } finally {
       if (btn) btn.disabled = false;
     }
@@ -254,7 +271,7 @@
 
   async function restoreNamedPoint(id, label, sourceButton) {
     const name = label || id;
-    if (!confirm('Are you sure you want to roll back to "' + name + '"? This will replace current files.')) return;
+    if (!confirm('Roll back to "' + name + '"?\n\nCurrent files will be replaced.')) return;
     if (sourceButton) sourceButton.disabled = true;
     setRestorePointStatus('Restoring "' + name + '"...');
     try {
@@ -269,7 +286,7 @@
       const html = await res.text();
       document.body.innerHTML = html;
     } catch (err) {
-      setRestorePointStatus('Restore failed. Please try again.', false);
+      setRestorePointStatus('Restore failed.', false);
       if (sourceButton) sourceButton.disabled = false;
     }
   }
@@ -286,7 +303,7 @@
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        const msg = data && data.error ? data.error : 'Failed to delete restore point';
+        const msg = data && data.error ? data.error : 'Restore point deletion failed';
         setRestorePointStatus(msg, false);
         if (sourceButton) sourceButton.disabled = false;
         return;
@@ -294,7 +311,7 @@
       setRestorePointStatus('Deleted "' + name + '".');
       await loadRestorePoints();
     } catch (err) {
-      setRestorePointStatus('Failed to delete restore point.', false);
+      setRestorePointStatus('Restore point deletion failed.', false);
       if (sourceButton) sourceButton.disabled = false;
     }
   }
@@ -327,7 +344,7 @@
       toggle.checked = !!data.timer_snap_enabled;
       setTimerSnapStatus('');
     } catch (err) {
-      setTimerSnapStatus('Unable to load timer settings.', false);
+      setTimerSnapStatus('Timer settings unavailable.', false);
     }
   }
 
@@ -348,7 +365,7 @@
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        const msg = data && data.error ? data.error : 'Failed to update setting';
+        const msg = data && data.error ? data.error : 'Setting update failed';
         throw new Error(msg);
       }
       const resolved = !!data.timer_snap_enabled;
@@ -356,7 +373,7 @@
       setTimerSnapStatus(resolved ? 'Snap to full increments enabled.' : 'Snap to full increments disabled.');
     } catch (err) {
       toggle.checked = !desired;
-      setTimerSnapStatus(err.message || 'Failed to update setting.', false);
+      setTimerSnapStatus(err.message || 'Setting update failed.', false);
     } finally {
       toggle.disabled = false;
     }
@@ -370,20 +387,108 @@
   }
 
   document.addEventListener('DOMContentLoaded', initTimerSettingsControls);
+
+  function setMediaSettingsStatus(message, ok = true) {
+    const note = document.getElementById('media-settings-note');
+    if (!note) return;
+    if (!message) {
+      note.textContent = '';
+      note.style.display = 'none';
+      return;
+    }
+    note.textContent = message;
+    note.style.display = 'block';
+    note.style.color = ok ? 'inherit' : '#f66';
+    note.style.opacity = ok ? 0.85 : 1;
+  }
+
+  async function loadMediaSettings() {
+    const input = document.getElementById('media-upload-max-mb');
+    if (!input) return;
+    setMediaSettingsStatus('Loading…');
+    try {
+      const res = await fetch('/api/settings/media', { cache: 'no-store' });
+      if (!res.ok) {
+        throw new Error('Request failed');
+      }
+      const data = await res.json();
+      input.value = data.media_upload_max_mb || 2048;
+      setMediaSettingsStatus('');
+    } catch (err) {
+      setMediaSettingsStatus('Media settings unavailable.', false);
+    }
+  }
+
+  async function saveMediaSettings() {
+    const input = document.getElementById('media-upload-max-mb');
+    if (!input) return;
+    const parsed = Number(input.value);
+    if (!Number.isFinite(parsed) || parsed < 1) {
+      setMediaSettingsStatus('Enter a valid upload limit in MB.', false);
+      return;
+    }
+    setMediaSettingsStatus('Saving…');
+    input.disabled = true;
+    try {
+      const res = await fetch('/api/settings/media', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-API-Key': SETTINGS_API_KEY
+        },
+        body: JSON.stringify({ media_upload_max_mb: Math.floor(parsed) })
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(data.error || 'Media settings update failed');
+      }
+      input.value = data.media_upload_max_mb || Math.floor(parsed);
+      setMediaSettingsStatus(`Upload limit saved at ${input.value} MB.`);
+    } catch (err) {
+      setMediaSettingsStatus(err.message || 'Media settings update failed.', false);
+    } finally {
+      input.disabled = false;
+    }
+  }
+
+  function initMediaSettingsControls() {
+    const saveButton = document.getElementById('media-settings-save');
+    if (!saveButton) return;
+    saveButton.addEventListener('click', saveMediaSettings);
+    loadMediaSettings();
+  }
+
+  document.addEventListener('DOMContentLoaded', initMediaSettingsControls);
 </script>
 </head>
 <body class="dashboard-page">
   <div class="dashboard-shell">
     <aside class="dashboard-sidebar">
       <div class="dashboard-sidebar-brand">
-        <h1>EchoMosaic</h1>
-        <p>Application Settings</p>
+        <div class="dashboard-sidebar-brand-head">
+          <div class="dashboard-sidebar-brand-copy">
+            <h1>EchoMosaic</h1>
+            <p>Application Settings</p>
+          </div>
+          <button id="sidebar-toggle" class="sidebar-shell-toggle" type="button" aria-label="Collapse sidebar" title="Collapse sidebar" aria-pressed="false">
+            <span class="sidebar-shell-toggle-icon" aria-hidden="true">&laquo;</span>
+          </button>
+        </div>
       </div>
 
       <nav class="dashboard-sidebar-nav" aria-label="Primary">
-        <a class="sidebar-link" href="{{ url_for('dashboard_routes.dashboard') }}">Dashboard</a>
-        <a class="sidebar-link" href="{{ url_for('media_routes.media_management_page') }}">Media</a>
-        <a class="sidebar-link is-active" href="{{ url_for('settings_operations.app_settings') }}" aria-current="page">Settings</a>
+        <a class="sidebar-link" href="{{ url_for('dashboard_routes.dashboard') }}" title="Dashboard">
+          <span class="sidebar-item-icon" aria-hidden="true">▦</span>
+          <span class="sidebar-item-label">Dashboard</span>
+        </a>
+        <a class="sidebar-link" href="{{ url_for('media_routes.media_management_page') }}" title="Media">
+          <span class="sidebar-item-icon" aria-hidden="true">🗂</span>
+          <span class="sidebar-item-label">Media</span>
+        </a>
+        <a class="sidebar-link is-active" href="{{ url_for('settings_operations.app_settings') }}" aria-current="page" title="Settings">
+          <span class="sidebar-item-icon" aria-hidden="true">⚙</span>
+          <span class="sidebar-item-label">Settings</span>
+        </a>
       </nav>
 
       <div class="dashboard-sidebar-footer">
@@ -476,7 +581,7 @@
             <p class="settings-kicker">Recovery</p>
             <h3>Restore Points</h3>
           </div>
-          <p class="settings-card-copy">Save a known good state so you can roll back even after additional updates.</p>
+          <p class="settings-card-copy">Stored rollback points for restoring a previously saved application state.</p>
         </div>
         <div class="settings-scroll-panel">
           <ul id="restore-point-list" class="settings-list-reset"></ul>
@@ -512,6 +617,27 @@
         <span class="toggle-label">Snap Timers to Full Increments</span>
       </label>
       <p id="timer-snap-note" class="settings-status-line" style="display:none;"></p>
+    </section>
+
+    <section class="settings-card">
+      <div class="settings-card-header">
+        <div>
+          <p class="settings-kicker">Media Settings</p>
+          <h3>Uploads</h3>
+        </div>
+        <p class="settings-card-copy">Control the maximum size allowed for file and folder uploads in the Media manager.</p>
+      </div>
+      <div class="settings-inline-form">
+        <label class="settings-advanced-field settings-advanced-field-inline" for="media-upload-max-mb">
+          <span>Max Upload Size</span>
+          <div class="settings-inline-input-wrap">
+            <input id="media-upload-max-mb" type="number" min="1" step="1">
+            <span class="settings-inline-suffix">MB</span>
+          </div>
+        </label>
+        <button id="media-settings-save" type="button">Save Media Setting</button>
+      </div>
+      <p id="media-settings-note" class="settings-status-line" style="display:none;"></p>
     </section>
 
     <section class="settings-card settings-card-wide">
@@ -1079,7 +1205,7 @@
         if (loraResultsList) {
           const error = document.createElement('div');
           error.className = 'ai-lora-result-error';
-          error.textContent = err && err.message ? err.message : 'Unable to load LoRAs';
+          error.textContent = err && err.message ? err.message : 'LoRA list unavailable';
           loraResultsList.appendChild(error);
         }
         setStatus('LoRA search failed', false);
@@ -1101,7 +1227,7 @@
           .then(data => Array.isArray(data.models) ? data.models : [])
           .catch(err => {
             console.error('Failed to fetch Stable Horde models', err);
-            setStatus('Unable to load Stable Horde models', false);
+            setStatus('Stable Horde model list unavailable', false);
             return [];
           })
           .finally(() => {

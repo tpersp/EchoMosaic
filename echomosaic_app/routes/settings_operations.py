@@ -17,6 +17,7 @@ def create_settings_operations_blueprint(
     *,
     settings,
     load_config: Callable[[], Dict[str, Any]],
+    media_settings_handler: Callable[[], Any],
     default_ai_settings: Callable[[], Dict[str, Any]],
     ai_fallback_defaults: Dict[str, Any],
     post_processors,
@@ -72,6 +73,10 @@ def create_settings_operations_blueprint(
     @blueprint.route("/settings/ai-defaults", methods=["POST"])
     def update_ai_defaults():
         return update_ai_defaults_handler()
+
+    @blueprint.route("/api/settings/media", methods=["GET", "POST"])
+    def media_settings():
+        return media_settings_handler()
 
     @blueprint.route("/settings")
     def app_settings():
