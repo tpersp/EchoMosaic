@@ -142,6 +142,7 @@ from echomosaic_app.services.asset_delivery import AssetDeliveryService
 from echomosaic_app.services.auto_schedulers import build_auto_schedulers
 from echomosaic_app.services.groups import GroupService
 from echomosaic_app.services.live_hls import HLSCacheEntry, LiveHLSService
+from echomosaic_app.services.links_service import GlobalLinksService
 from echomosaic_app.services.media_catalog import MediaCatalogService
 from echomosaic_app.services.media_library import MediaLibraryService
 from echomosaic_app.services.operations import OperationsService
@@ -518,6 +519,7 @@ STREAM_ORDER_KEY = "_stream_order"
 
 TAG_KEY = "tags"
 GLOBAL_TAGS_KEY = "_tags"
+LINKS_KEY = "_links"
 TAG_MAX_LENGTH = 48
 
 AI_DEFAULT_MODEL = "stable_diffusion"
@@ -1013,7 +1015,6 @@ YOUTUBE_EMBED_SERVICE = YouTubeEmbedService(
     youtube_sync_max_age_seconds=YOUTUBE_SYNC_MAX_AGE_SECONDS,
     media_mode_livestream=MEDIA_MODE_LIVESTREAM,
 )
-
 
 def _youtube_sync_source_signature(details: Optional[Dict[str, Any]]) -> Tuple[str, str, str]:
     return YOUTUBE_EMBED_SERVICE.youtube_sync_source_signature(details)
@@ -2195,6 +2196,7 @@ def _prepare_settings_import(data: Dict[str, Any]) -> Tuple[Dict[str, Any], List
     valid_streams = set(stream_ids)
     tags_raw = data.get(GLOBAL_TAGS_KEY)
     sanitized[GLOBAL_TAGS_KEY] = _normalize_tag_collection(tags_raw)
+    sanitized[LINKS_KEY] = LINKS_SERVICE.sanitize_collection(data.get(LINKS_KEY))
     notes_raw = data.get('_notes')
     sanitized['_notes'] = notes_raw if isinstance(notes_raw, str) else ''
     defaults_raw = data.get('_ai_defaults')
@@ -2211,7 +2213,7 @@ def _prepare_settings_import(data: Dict[str, Any]) -> Tuple[Dict[str, Any], List
     for key, value in data.items():
         if not isinstance(key, str) or not key.startswith('_'):
             continue
-        if key in {GLOBAL_TAGS_KEY, '_notes', '_ai_defaults', '_groups', AI_PRESETS_KEY, SYNC_TIMERS_KEY, STREAM_ORDER_KEY}:
+        if key in {GLOBAL_TAGS_KEY, LINKS_KEY, '_notes', '_ai_defaults', '_groups', AI_PRESETS_KEY, SYNC_TIMERS_KEY, STREAM_ORDER_KEY}:
             continue
         sanitized[key] = deepcopy(value)
     return sanitized, warnings
@@ -2328,6 +2330,7 @@ def import_settings():
     settings.clear()
     settings.update(snapshot)
     settings.setdefault(GLOBAL_TAGS_KEY, [])
+    settings.setdefault(LINKS_KEY, [])
     settings.setdefault("_notes", "")
     settings.setdefault("_groups", {})
     settings.setdefault("_ai_defaults", deepcopy(AI_FALLBACK_DEFAULTS))
@@ -2336,6 +2339,7 @@ def import_settings():
     settings["_ai_defaults"] = _sanitize_ai_settings(settings.get("_ai_defaults", {}), defaults=AI_FALLBACK_DEFAULTS)
     settings[AI_PRESETS_KEY] = _sorted_presets(_sanitize_ai_presets(settings.get(AI_PRESETS_KEY, {})))
     settings["_groups"] = _sanitize_group_collection_for_import(settings.get("_groups", {}), new_streams)
+    settings[LINKS_KEY] = LINKS_SERVICE.sanitize_collection(settings.get(LINKS_KEY, []))
 
     for stream_id in new_streams:
         conf = settings[stream_id]
@@ -2672,6 +2676,11 @@ def _run_ai_generation(
 
 
 settings = load_settings()
+LINKS_SERVICE = GlobalLinksService(
+    settings=settings,
+    save_settings_debounced=save_settings_debounced,
+    parse_youtube_url_details=YOUTUBE_EMBED_SERVICE.parse_youtube_url_details,
+)
 SETTINGS_INTEGRITY_CHANGED_ON_BOOT = ensure_settings_integrity(settings)
 # Normalize embed metadata placeholders for existing streams
 for stream_id, conf in list(settings.items()):
@@ -2899,6 +2908,8 @@ for k, v in list(settings.items()):
 
 # Ensure notes key exists
 settings.setdefault("_notes", "")
+settings.setdefault(LINKS_KEY, [])
+settings[LINKS_KEY] = LINKS_SERVICE.sanitize_collection(settings.get(LINKS_KEY, []))
 
 # Ensure groups key exists
 settings.setdefault("_groups", {})
@@ -4588,6 +4599,31 @@ def notes():
     return jsonify({"status": "saved"})
 
 
+def links_collection():
+    if request.method == "GET":
+        return jsonify(LINKS_SERVICE.list_links_payload())
+    payload = request.get_json(silent=True) or {}
+    try:
+        return jsonify(LINKS_SERVICE.create_link(payload))
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+
+
+def link_item(link_id: str):
+    if request.method == "DELETE":
+        try:
+            return jsonify(LINKS_SERVICE.delete_link(link_id))
+        except KeyError:
+            return jsonify({"error": "Link not found"}), 404
+    payload = request.get_json(silent=True) or {}
+    try:
+        return jsonify(LINKS_SERVICE.update_link(link_id, payload))
+    except KeyError:
+        return jsonify({"error": "Link not found"}), 404
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+
+
 def _acquire_resized_image_lock(path: Path) -> threading.Lock:
     return ASSET_DELIVERY_SERVICE.acquire_resized_image_lock(path)
 
@@ -4652,6 +4688,8 @@ _library_blueprint = create_library_blueprint(
     list_tags_handler=list_tags,
     create_tag_handler=create_tag,
     delete_tag_handler=delete_tag,
+    links_collection_handler=links_collection,
+    link_item_handler=link_item,
     timer_settings_handler=api_timer_settings,
     sync_timers_collection_handler=sync_timers_collection,
     sync_timer_item_handler=sync_timer_item,
@@ -4665,6 +4703,8 @@ register_blueprint_with_legacy_aliases(app, _library_blueprint, {
     "list_tags": "library_routes.list_tags",
     "create_tag": "library_routes.create_tag",
     "delete_tag": "library_routes.delete_tag",
+    "links_collection": "library_routes.links_collection",
+    "link_item": "library_routes.link_item",
     "api_timer_settings": "library_routes.api_timer_settings",
     "sync_timers_collection": "library_routes.sync_timers_collection",
     "sync_timer_item": "library_routes.sync_timer_item",
