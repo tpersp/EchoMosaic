@@ -1311,6 +1311,9 @@ a {
   gap: 0.85rem;
   padding-top: 0.1rem;
 }
+.tile-body[hidden] {
+  display: none !important;
+}
 .group-card-section {
   display: grid;
   gap: 0.75rem;
