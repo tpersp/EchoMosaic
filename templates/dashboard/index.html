@@ -308,7 +308,7 @@
           <label>Playback Controls</label>
           <div class="playback-controls" data-stream="{{ stream_id }}">
             <button type="button" class="playback-btn playback-prev" data-stream="{{ stream_id }}" data-action="skip_prev" title="Previous">&#9664;</button>
-            <button type="button" class="playback-btn playback-toggle" data-stream="{{ stream_id }}" data-action="play" title="Play" aria-label="Play">&#9654;</button>
+            <button type="button" class="playback-btn playback-toggle" data-stream="{{ stream_id }}" data-action="" title="Loading playback state" aria-label="Loading playback state" disabled>…</button>
             <button type="button" class="playback-btn playback-next" data-stream="{{ stream_id }}" data-action="skip_next" title="Next">&#9654;&#9654;</button>
             <label class="volume-control">
               <span>Vol.</span>
@@ -852,12 +852,51 @@
   const socket = io();
   let currentSocketId = null;
   const watchedStreams = new Set();
+  const playbackSubscribedStreams = new Set();
+  function setCardPlaybackToggleState(card, playbackState) {
+    if (!card) return;
+    const playbackToggle = card.querySelector('.playback-controls .playback-toggle');
+    if (!playbackToggle) return;
+    const status = String((playbackState && playbackState.status) || '').toLowerCase();
+    let paused = null;
+    if (playbackState && typeof playbackState.is_paused === 'boolean') {
+      paused = playbackState.is_paused;
+    } else if (status === 'playing') {
+      paused = false;
+    } else if (status === 'paused') {
+      paused = true;
+    }
+    if (paused === null) {
+      playbackToggle.dataset.action = '';
+      playbackToggle.innerHTML = '…';
+      playbackToggle.title = 'Loading playback state';
+      playbackToggle.setAttribute('aria-label', 'Loading playback state');
+      playbackToggle.disabled = true;
+      return;
+    }
+    playbackToggle.dataset.action = paused ? 'play' : 'pause';
+    playbackToggle.innerHTML = paused ? '&#9654;' : '&#10074;&#10074;';
+    const label = paused ? 'Play' : 'Pause';
+    playbackToggle.title = label;
+    playbackToggle.setAttribute('aria-label', label);
+    playbackToggle.disabled = false;
+  }
+  function subscribeToPlaybackStream(streamId) {
+    if (!streamId) return;
+    playbackSubscribedStreams.add(streamId);
+    if (currentSocketId) {
+      socket.emit('stream_subscribe', { stream_id: streamId });
+    }
+  }
   socket.on('connect', () => {
     currentSocketId = socket.id;
     watchedStreams.forEach(streamId => {
       socket.emit('ai_watch', { stream_id: streamId });
       const card = findStreamCard(streamId);
       if (card) syncLatestAiJob(streamId, card);
+    });
+    playbackSubscribedStreams.forEach(streamId => {
+      socket.emit('stream_subscribe', { stream_id: streamId });
     });
   });
   socket.on('reconnect', () => {
@@ -867,9 +906,26 @@
       const card = findStreamCard(streamId);
       if (card) syncLatestAiJob(streamId, card);
     });
+    playbackSubscribedStreams.forEach(streamId => {
+      socket.emit('stream_subscribe', { stream_id: streamId });
+    });
   });
   socket.on('disconnect', () => {
     currentSocketId = null;
+  });
+  socket.on('stream_init', (data) => {
+    const streamId = data && data.stream_id;
+    if (!streamId) return;
+    const card = findStreamCard(streamId);
+    if (!card) return;
+    setCardPlaybackToggleState(card, data);
+  });
+  socket.on('stream_update', (data) => {
+    const streamId = data && data.stream_id;
+    if (!streamId) return;
+    const card = findStreamCard(streamId);
+    if (!card) return;
+    setCardPlaybackToggleState(card, data);
   });
   let openAiCard = null;
   const aiSummaryUpdaters = new WeakMap();
@@ -6835,27 +6891,12 @@ function applyPicsumSettings(card, settings, opts = {}) {
         });
       }
       const playbackButtons = card.querySelectorAll('.playback-controls .playback-btn');
-      const playbackToggle = card.querySelector('.playback-controls .playback-toggle');
-      const setPlaybackToggleState = isPaused => {
-        if (!playbackToggle) return;
-        const paused = !!isPaused;
-        playbackToggle.dataset.action = paused ? 'play' : 'pause';
-        playbackToggle.innerHTML = paused ? '&#9654;' : '&#10074;&#10074;';
-        const label = paused ? 'Play' : 'Pause';
-        playbackToggle.title = label;
-        playbackToggle.setAttribute('aria-label', label);
-      };
-      setPlaybackToggleState(true);
+      subscribeToPlaybackStream(streamId);
       playbackButtons.forEach(btn => {
         btn.addEventListener('click', () => {
           const action = btn.dataset.action;
           if (!action) return;
           socket.emit('video_control', { stream_id: streamId, action });
-          if (btn === playbackToggle) {
-            setPlaybackToggleState(action === 'pause');
-          } else if (action === 'skip_prev' || action === 'skip_next') {
-            setPlaybackToggleState(false);
-          }
         });
       });
       const volumeSlider = card.querySelector('.video-volume-slider');
