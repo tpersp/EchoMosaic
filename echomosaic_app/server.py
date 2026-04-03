@@ -695,14 +695,12 @@ SYNC_SWITCH_LEAD_SECONDS = 0.25
 SYNC_SUPPORTED_MEDIA_MODES = {MEDIA_MODE_IMAGE}
 
 CONFIG: Dict[str, Any] = config_manager.load_config()
-NSFW_KEYWORD = "nsfw"
 MEDIA_RUNTIME = build_media_runtime(
     config=CONFIG,
     media_library_default=MEDIA_LIBRARY_DEFAULT,
     ai_media_library=AI_MEDIA_LIBRARY,
     thumbnail_subdir=THUMBNAIL_SUBDIR,
     internal_media_dirs=INTERNAL_MEDIA_DIRS,
-    nsfw_keyword=NSFW_KEYWORD,
 )
 STANDARD_MEDIA_ROOTS = MEDIA_RUNTIME.standard_media_roots
 AI_MEDIA_ROOTS = MEDIA_RUNTIME.ai_media_roots
@@ -1099,11 +1097,10 @@ def _directory_markers_changed(markers: Dict[str, Tuple[int, int]]) -> bool:
     return MEDIA_CATALOG_SERVICE.directory_markers_changed(markers)
 
 
-def refresh_image_cache(folder: str = "all", hide_nsfw: bool = False, *, force: bool = False, library: str = MEDIA_LIBRARY_DEFAULT) -> List[str]:
+def refresh_image_cache(folder: str = "all", *, force: bool = False, library: str = MEDIA_LIBRARY_DEFAULT) -> List[str]:
     """Return the cached image list for a folder, refreshing if anything changed."""
     return MEDIA_CATALOG_SERVICE.refresh_image_cache(
         folder,
-        hide_nsfw=hide_nsfw,
         force=force,
         library=library,
     )
@@ -1987,7 +1984,6 @@ def default_stream_config():
         "video_playback_mode": "duration",
         "video_volume": 1.0,
         "shuffle": True,
-        "hide_nsfw": False,
         "stream_url": None,
         "yt_cc": False,
         "yt_mute": True,
@@ -2013,6 +2009,8 @@ def _sanitize_imported_stream_config(stream_id: str, raw_conf: Any) -> Dict[str,
         raise ValueError(f"Stream '{stream_id}' configuration must be an object.")
     conf = default_stream_config()
     for key, value in raw_conf.items():
+        if key == "hide_nsfw":
+            continue
         conf[key] = deepcopy(value) if isinstance(value, (dict, list)) else value
     mode_raw = conf.get('mode')
     mode = mode_raw.strip().lower() if isinstance(mode_raw, str) else conf['mode']
@@ -2023,7 +2021,6 @@ def _sanitize_imported_stream_config(stream_id: str, raw_conf: Any) -> Dict[str,
     conf['folder'] = folder_raw.strip() if isinstance(folder_raw, str) and folder_raw.strip() else 'all'
     conf['duration'] = max(1, _coerce_int(conf.get('duration'), 5))
     conf['shuffle'] = _coerce_bool(conf.get('shuffle'), True)
-    conf['hide_nsfw'] = _coerce_bool(conf.get('hide_nsfw'), False)
     conf['yt_cc'] = _coerce_bool(conf.get('yt_cc'), False)
     conf['yt_mute'] = _coerce_bool(conf.get('yt_mute'), True)
     conf['background_blur_enabled'] = _coerce_bool(conf.get('background_blur_enabled'), False)
@@ -2841,9 +2838,9 @@ ensure_ai_presets_storage()
 # Backfill defaults for existing stream entries
 for k, v in list(settings.items()):
     if not k.startswith("_") and isinstance(v, dict):
+        v.pop("hide_nsfw", None)
         v.setdefault("label", k.capitalize())
         v.setdefault("shuffle", True)
-        v.setdefault("hide_nsfw", False)
         if v.get("image_quality") not in IMAGE_QUALITY_CHOICES:
             v["image_quality"] = "auto"
         ensure_ai_defaults(v)
@@ -2915,28 +2912,18 @@ settings[LINKS_KEY] = LINKS_SERVICE.sanitize_collection(settings.get(LINKS_KEY, 
 # Ensure groups key exists
 settings.setdefault("_groups", {})
 
-def _path_contains_nsfw(value: Optional[str]) -> bool:
-    return bool(value and NSFW_KEYWORD in value.lower())
-
-
-def _filter_nsfw_images(paths: List[str], hide_nsfw: bool) -> List[str]:
-    if not hide_nsfw:
-        return paths
-    return [p for p in paths if not _path_contains_nsfw(p)]
-
-
 def _parse_truthy(value: Any) -> bool:
     if isinstance(value, str):
         return value.strip().lower() in ("1", "true", "yes", "on")
     return bool(value)
 
 
-def get_subfolders(hide_nsfw: bool = False, *, library: str = MEDIA_LIBRARY_DEFAULT) -> List[str]:
-    return MEDIA_CATALOG_SERVICE.get_subfolders(hide_nsfw=hide_nsfw, library=library)
+def get_subfolders(*, library: str = MEDIA_LIBRARY_DEFAULT) -> List[str]:
+    return MEDIA_CATALOG_SERVICE.get_subfolders(library=library)
 
 
-def get_folder_inventory(hide_nsfw: bool = False, *, library: str = MEDIA_LIBRARY_DEFAULT) -> List[Dict[str, Any]]:
-    return MEDIA_CATALOG_SERVICE.get_folder_inventory(hide_nsfw=hide_nsfw, library=library)
+def get_folder_inventory(*, library: str = MEDIA_LIBRARY_DEFAULT) -> List[Dict[str, Any]]:
+    return MEDIA_CATALOG_SERVICE.get_folder_inventory(library=library)
 
 
 _media_blueprint = create_media_blueprint(
@@ -2956,7 +2943,6 @@ _media_blueprint = create_media_blueprint(
     media_error_response=_media_error_response,
     require_media_edit=_require_media_edit,
     invalidate_media_cache=_invalidate_media_cache,
-    parse_truthy=_parse_truthy,
     normalize_library_key=_normalize_library_key,
     get_folder_inventory=get_folder_inventory,
     as_int=_as_int,
@@ -2977,13 +2963,13 @@ register_blueprint_with_legacy_aliases(app, _media_blueprint, {
 })
 
 
-def list_images(folder="all", hide_nsfw: bool = False, *, library: str = MEDIA_LIBRARY_DEFAULT):
+def list_images(folder="all", *, library: str = MEDIA_LIBRARY_DEFAULT):
     """Return cached image paths for the folder, refreshing when necessary."""
-    return MEDIA_CATALOG_SERVICE.list_images(folder, hide_nsfw=hide_nsfw, library=library)
+    return MEDIA_CATALOG_SERVICE.list_images(folder, library=library)
 
-def list_media(folder="all", hide_nsfw: bool = False, *, library: str = MEDIA_LIBRARY_DEFAULT) -> List[Dict[str, Any]]:
+def list_media(folder="all", *, library: str = MEDIA_LIBRARY_DEFAULT) -> List[Dict[str, Any]]:
     """Return cached media entries (images and videos) for the folder."""
-    return MEDIA_CATALOG_SERVICE.list_media(folder, hide_nsfw=hide_nsfw, library=library)
+    return MEDIA_CATALOG_SERVICE.list_media(folder, library=library)
 
 if playback_manager is None:
     playback_manager = StreamPlaybackManager(
@@ -3157,7 +3143,6 @@ def render_stream(name):
     _refresh_embed_metadata(key, conf)
     images = list_images(
         conf.get("folder", "all"),
-        hide_nsfw=conf.get("hide_nsfw", False),
         library=_library_for_media_mode(conf.get("media_mode")),
     )
     requested_quality = (request.args.get("size") or "").strip().lower()
@@ -4025,7 +4010,6 @@ MEDIA_CATALOG_SERVICE = MediaCatalogService(
     build_virtual_media_path=_build_virtual_media_path,
     resolve_virtual_media_path=_resolve_virtual_media_path,
     library_roots=_library_roots,
-    path_contains_nsfw=_path_contains_nsfw,
     should_ignore_media_name=_should_ignore_media_name,
     media_root_lookup=MEDIA_ROOT_LOOKUP,
     media_extensions=MEDIA_EXTENSIONS,
@@ -4041,7 +4025,6 @@ if PLAYBACK_RUNTIME.playback_manager is playback_manager:
 
 MEDIA_LIBRARY_SERVICE = MediaLibraryService(
     settings=settings,
-    parse_truthy=_parse_truthy,
     normalize_library_key=_normalize_library_key,
     list_images=list_images,
     list_media=list_media,
@@ -4532,7 +4515,6 @@ def get_images():
     return jsonify(
         MEDIA_LIBRARY_SERVICE.get_images_payload(
             folder=folder,
-            hide_nsfw=request.args.get("hide_nsfw"),
             library=request.args.get("library"),
             offset=offset,
             limit=limit,
@@ -4545,7 +4527,6 @@ def get_random_image():
         return jsonify(
             MEDIA_LIBRARY_SERVICE.get_random_image_payload(
                 folder=request.args.get("folder", "all"),
-                hide_nsfw=request.args.get("hide_nsfw"),
                 library=request.args.get("library"),
             )
         )
@@ -4567,7 +4548,6 @@ def get_media_entries():
     return jsonify(
         MEDIA_LIBRARY_SERVICE.get_media_entries_payload(
             folder=folder,
-            hide_nsfw=request.args.get("hide_nsfw"),
             kind=request.args.get("kind"),
             library=request.args.get("library"),
             offset=offset,
@@ -4581,7 +4561,6 @@ def get_random_media():
         return jsonify(
             MEDIA_LIBRARY_SERVICE.get_random_media_payload(
                 folder=request.args.get("folder", "all"),
-                hide_nsfw=request.args.get("hide_nsfw"),
                 kind=request.args.get("kind"),
                 library=request.args.get("library"),
                 stream_id=(request.args.get("stream_id") or "").strip(),

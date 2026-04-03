@@ -44,7 +44,6 @@ class StreamPlaybackState:
         self.mode: str = "random"
         self.media_mode: str = media_mode_image
         self.folder: str = "all"
-        self.hide_nsfw: bool = False
         self.shuffle: bool = True
         self.duration_setting: float = 5.0
         self.video_playback_mode: str = "duration"
@@ -132,7 +131,6 @@ class StreamPlaybackState:
         self.mode = new_mode
         self.media_mode = new_media_mode
         self.folder = new_folder
-        self.hide_nsfw = False
         self.shuffle = new_shuffle
         self.duration_setting = new_duration
         self.video_playback_mode = new_playback_mode
@@ -666,7 +664,6 @@ class StreamPlaybackManager:
     def _next_media(self, state: StreamPlaybackState) -> Optional[Dict[str, Any]]:
         entries = self.list_media(
             state.folder,
-            hide_nsfw=state.hide_nsfw,
             library=self.library_for_media_mode(state.media_mode),
         )
         if state.media_mode in (self.media_mode_image, self.media_mode_ai):

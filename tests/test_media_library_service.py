@@ -7,10 +7,9 @@ def _build_service(settings=None):
     runtime_updates = []
     service = MediaLibraryService(
         settings=settings or {},
-        parse_truthy=lambda value: str(value).lower() in {"1", "true", "yes", "on"},
         normalize_library_key=lambda value, default="media": value or default,
-        list_images=lambda folder="all", hide_nsfw=False, library="media": ["a.jpg", "b.jpg", "c.jpg"],
-        list_media=lambda folder="all", hide_nsfw=False, library="media": [
+        list_images=lambda folder="all", library="media": ["a.jpg", "b.jpg", "c.jpg"],
+        list_media=lambda folder="all", library="media": [
             {"path": "a.jpg", "kind": "image"},
             {"path": "b.mp4", "kind": "video"},
         ],

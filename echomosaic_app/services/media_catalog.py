@@ -26,7 +26,6 @@ class MediaCatalogService:
         resolve_virtual_media_path,
         build_virtual_media_path,
         should_ignore_media_name,
-        path_contains_nsfw,
     ) -> None:
         self.logger = logger
         self.image_cache = image_cache
@@ -42,7 +41,6 @@ class MediaCatalogService:
         self.resolve_virtual_media_path = resolve_virtual_media_path
         self.build_virtual_media_path = build_virtual_media_path
         self.should_ignore_media_name = should_ignore_media_name
-        self.path_contains_nsfw = path_contains_nsfw
 
     def normalize_folder_key(self, folder: Optional[str]) -> str:
         if folder is None:
@@ -151,7 +149,7 @@ class MediaCatalogService:
                 return True
         return False
 
-    def refresh_image_cache(self, folder: str = "all", hide_nsfw: bool = False, *, force: bool = False, library: str) -> List[str]:
+    def refresh_image_cache(self, folder: str = "all", *, force: bool = False, library: str) -> List[str]:
         folder_key = self.normalize_folder_key(folder)
         normalized_library = self.normalize_library_key(library)
         cache_key = self.cache_scope_key(folder_key, normalized_library)
@@ -173,8 +171,6 @@ class MediaCatalogService:
             return cached_images
 
         media, dir_markers = self.scan_folder_for_cache(folder_key, library=normalized_library)
-        if hide_nsfw:
-            media = [item for item in media if not self.path_contains_nsfw(item.get("path"))]
         images = [item["path"] for item in media if item.get("kind") == "image"]
         entry = {"images": images, "media": media, "dir_markers": dir_markers, "last_updated": time.time()}
         with self.image_cache_lock:
@@ -214,13 +210,13 @@ class MediaCatalogService:
         self.refresh_image_cache("all", force=True, library=self.media_library_default)
         self.refresh_image_cache("all", force=True, library=self.ai_media_library)
 
-    def list_images(self, folder: str = "all", hide_nsfw: bool = False, *, library: str) -> List[str]:
-        return self.refresh_image_cache(folder, hide_nsfw=hide_nsfw, library=library)
+    def list_images(self, folder: str = "all", *, library: str) -> List[str]:
+        return self.refresh_image_cache(folder, library=library)
 
-    def list_media(self, folder: str = "all", hide_nsfw: bool = False, *, library: str) -> List[Dict[str, Any]]:
+    def list_media(self, folder: str = "all", *, library: str) -> List[Dict[str, Any]]:
         folder_key = self.normalize_folder_key(folder)
         normalized_library = self.normalize_library_key(library)
-        self.refresh_image_cache(folder, hide_nsfw=hide_nsfw, library=normalized_library)
+        self.refresh_image_cache(folder, library=normalized_library)
         cache_key = self.cache_scope_key(folder_key, normalized_library)
         with self.image_cache_lock:
             cached_entry = self.image_cache.get(cache_key)
@@ -230,7 +226,7 @@ class MediaCatalogService:
                 media = []
         return media
 
-    def get_subfolders(self, hide_nsfw: bool = False, *, library: str) -> List[str]:
+    def get_subfolders(self, *, library: str) -> List[str]:
         subfolders: List[str] = []
         seen: Set[str] = set()
         normalized_library = self.normalize_library_key(library)
@@ -242,8 +238,6 @@ class MediaCatalogService:
 
         _add("all")
         for root in self.library_roots(normalized_library):
-            if hide_nsfw and self.path_contains_nsfw(root.alias):
-                continue
             try:
                 for walk_root, dirnames, _ in os.walk(root.path):
                     dirnames[:] = [name for name in dirnames if not self.should_ignore_media_name(name)]
@@ -254,18 +248,16 @@ class MediaCatalogService:
                         except ValueError:
                             continue
                         folder_key = self.build_virtual_media_path(root.alias, relative.as_posix())
-                        if hide_nsfw and self.path_contains_nsfw(folder_key):
-                            continue
                         _add(folder_key)
             except OSError:
                 continue
         return subfolders
 
-    def get_folder_inventory(self, hide_nsfw: bool = False, *, library: str) -> List[Dict[str, Any]]:
+    def get_folder_inventory(self, *, library: str) -> List[Dict[str, Any]]:
         inventory: List[Dict[str, Any]] = []
         normalized_library = self.normalize_library_key(library)
-        for name in self.get_subfolders(hide_nsfw=hide_nsfw, library=normalized_library):
-            media_entries = self.list_media(name, hide_nsfw=hide_nsfw, library=normalized_library)
+        for name in self.get_subfolders(library=normalized_library):
+            media_entries = self.list_media(name, library=normalized_library)
             has_images = any(entry.get("kind") == "image" for entry in media_entries)
             has_videos = any(entry.get("kind") == "video" for entry in media_entries)
             display_name = name.split("/", 1)[1] if "/" in name else name

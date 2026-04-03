@@ -113,7 +113,6 @@ def build_media_runtime(
     ai_media_library: str,
     thumbnail_subdir: str,
     internal_media_dirs: Iterable[str],
-    nsfw_keyword: str = "nsfw",
 ) -> MediaRuntime:
     default_media_root_path = Path(os.path.abspath("./media")).resolve()
     default_ai_media_root_path = Path(os.path.abspath("./ai_media")).resolve()
@@ -224,7 +223,6 @@ def build_media_runtime(
         allowed_exts=media_allowed_exts,
         max_upload_mb=media_upload_max_mb,
         thumb_width=media_thumb_width,
-        nsfw_keyword=nsfw_keyword,
         internal_dirs=internal_media_dirs,
         preview_enabled=media_preview_enabled,
         preview_frames=media_preview_frames,

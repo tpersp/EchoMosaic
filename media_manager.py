@@ -153,7 +153,6 @@ class MediaManager:
         allowed_exts: Sequence[str],
         max_upload_mb: int,
         thumb_width: int = 320,
-        nsfw_keyword: str = "nsfw",
         internal_dirs: Optional[Iterable[str]] = None,
         preview_enabled: bool = True,
         preview_frames: int = 8,
@@ -170,7 +169,6 @@ class MediaManager:
             self._allowed_exts = set(IMAGE_EXTENSIONS | VIDEO_EXTENSIONS)
         self._max_upload_bytes = max_upload_mb * 1024 * 1024
         self._thumb_width = thumb_width
-        self._nsfw_keyword = nsfw_keyword.lower().strip() or "nsfw"
         self._internal_dirs = {d.strip() for d in internal_dirs or set()}
         self._cache_dirs: Dict[str, Path] = {}
         self._lock = threading.Lock()
@@ -272,9 +270,6 @@ class MediaManager:
             return True
         return False
 
-    def _is_nsfw(self, candidate: str) -> bool:
-        return self._nsfw_keyword and candidate and self._nsfw_keyword in candidate.lower()
-
     # ----------------------------------------------------------------------
     # Listing
     # ----------------------------------------------------------------------
@@ -282,7 +277,6 @@ class MediaManager:
         self,
         path: Optional[ListablePath],
         *,
-        hide_nsfw: bool = True,
         page: int = 1,
         page_size: int = 100,
         sort: str = "name",
@@ -297,8 +291,6 @@ class MediaManager:
             folders = []
             for alias in self._order:
                 root = self._roots[alias]
-                if hide_nsfw and self._is_nsfw(alias):
-                    continue
                 entry_path = self._virtualize(alias, root.path)
                 folders.append(
                     {
@@ -334,15 +326,13 @@ class MediaManager:
                         continue
                     entry_path = Path(entry.path)
                     virtual_child = self._virtualize(root.alias, entry_path)
-                    if hide_nsfw and self._is_nsfw(virtual_child):
-                        continue
                     try:
                         stat_info = entry.stat()
                     except OSError:
                         continue
                     if entry.is_dir():
                         try:
-                            subcount = self._count_visible_entries(Path(entry.path), hide_nsfw=hide_nsfw)
+                            subcount = self._count_visible_entries(Path(entry.path))
                         except OSError:
                             subcount = 0
                         folder_items.append(
@@ -400,15 +390,12 @@ class MediaManager:
             "total_folders": len(folder_items),
         }
 
-    def _count_visible_entries(self, folder: Path, *, hide_nsfw: bool) -> int:
+    def _count_visible_entries(self, folder: Path) -> int:
         count = 0
         try:
             with os.scandir(folder) as scan:
                 for entry in scan:
                     if self._hidden(entry.name):
-                        continue
-                    candidate = (folder / entry.name).as_posix()
-                    if hide_nsfw and self._is_nsfw(candidate):
                         continue
                     count += 1
         except OSError:

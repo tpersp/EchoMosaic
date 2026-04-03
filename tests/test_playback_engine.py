@@ -8,7 +8,7 @@ def test_playback_engine_can_bootstrap_and_emit_initial_media() -> None:
     runtime_updates = []
     manager = StreamPlaybackManager(
         safe_emit=lambda event, payload, to=None: emitted.append((event, payload, to)),
-        list_media=lambda folder, hide_nsfw=False, library="media": [{"path": "root/photo.jpg", "kind": "image"}],
+        list_media=lambda folder, library="media": [{"path": "root/photo.jpg", "kind": "image"}],
         library_for_media_mode=lambda mode: "media",
         update_stream_runtime_state=lambda stream_id, **kwargs: runtime_updates.append((stream_id, kwargs)) or {"url": "thumb"},
         get_runtime_thumbnail_payload=lambda stream_id: {"url": "thumb"},

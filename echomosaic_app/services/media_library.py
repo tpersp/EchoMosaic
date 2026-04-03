@@ -11,7 +11,6 @@ class MediaLibraryService:
         self,
         *,
         settings,
-        parse_truthy,
         normalize_library_key,
         list_images,
         list_media,
@@ -20,7 +19,6 @@ class MediaLibraryService:
         media_library_default: str,
     ) -> None:
         self.settings = settings
-        self.parse_truthy = parse_truthy
         self.normalize_library_key = normalize_library_key
         self.list_images = list_images
         self.list_media = list_media
@@ -32,13 +30,12 @@ class MediaLibraryService:
         self,
         *,
         folder: str = "all",
-        hide_nsfw: Any = False,
         library: Optional[str] = None,
         offset: int = 0,
         limit: Optional[int] = None,
     ) -> List[str]:
         normalized_library = self.normalize_library_key(library, self.media_library_default)
-        images = self.list_images(folder, hide_nsfw=self.parse_truthy(hide_nsfw), library=normalized_library)
+        images = self.list_images(folder, library=normalized_library)
         if offset or limit is not None:
             end = offset + limit if limit is not None else None
             images = images[offset:end]
@@ -48,10 +45,9 @@ class MediaLibraryService:
         self,
         *,
         folder: str = "all",
-        hide_nsfw: Any = False,
         library: Optional[str] = None,
     ) -> Dict[str, str]:
-        images = self.get_images_payload(folder=folder, hide_nsfw=hide_nsfw, library=library)
+        images = self.get_images_payload(folder=folder, library=library)
         if not images:
             raise LookupError("No images found")
         return {"path": random.choice(images)}
@@ -60,14 +56,13 @@ class MediaLibraryService:
         self,
         *,
         folder: str = "all",
-        hide_nsfw: Any = False,
         kind: Optional[str] = None,
         library: Optional[str] = None,
         offset: int = 0,
         limit: Optional[int] = None,
     ) -> List[Dict[str, Any]]:
         normalized_library = self.normalize_library_key(library, self.media_library_default)
-        media = self.list_media(folder, hide_nsfw=self.parse_truthy(hide_nsfw), library=normalized_library)
+        media = self.list_media(folder, library=normalized_library)
         kind_filter = (kind or "").strip().lower()
         if kind_filter in ("image", "video"):
             media = [item for item in media if item.get("kind") == kind_filter]
@@ -80,12 +75,11 @@ class MediaLibraryService:
         self,
         *,
         folder: str = "all",
-        hide_nsfw: Any = False,
         kind: Optional[str] = None,
         library: Optional[str] = None,
         stream_id: str = "",
     ) -> Dict[str, Any]:
-        entries = self.get_media_entries_payload(folder=folder, hide_nsfw=hide_nsfw, kind=kind, library=library)
+        entries = self.get_media_entries_payload(folder=folder, kind=kind, library=library)
         if not entries:
             raise LookupError("No media found")
         choice = dict(random.choice(entries))
