@@ -4053,16 +4053,21 @@
       thumb.textContent = 'URL';
     }
 
+    const mediaMeta = document.createElement('div');
+    mediaMeta.className = 'settings-links-media-meta';
+    const category = document.createElement('span');
+    category.className = 'settings-links-category';
+    category.textContent = link.category || 'Uncategorized';
+    mediaMeta.appendChild(category);
+
     const head = document.createElement('div');
     head.className = 'settings-links-item-head';
     const titleWrap = document.createElement('div');
     titleWrap.className = 'settings-links-item-title';
     const title = document.createElement('strong');
     title.textContent = link.label || 'Untitled link';
-    const category = document.createElement('span');
-    category.className = 'settings-links-category';
-    category.textContent = link.category || 'Uncategorized';
-    titleWrap.append(title, category);
+    title.title = link.label || 'Untitled link';
+    titleWrap.append(title);
     head.appendChild(titleWrap);
 
     const badges = document.createElement('div');
@@ -4079,12 +4084,13 @@
       badges.appendChild(badge);
     });
     if (badges.childNodes.length) {
-      head.appendChild(badges);
+      mediaMeta.appendChild(badges);
     }
 
     const url = document.createElement('div');
     url.className = 'settings-links-url';
     url.textContent = link.url || '';
+    url.title = link.url || '';
 
     const actionsWrap = document.createElement('div');
     actionsWrap.className = 'settings-links-summary-actions';
@@ -4098,7 +4104,10 @@
     editToggle.textContent = 'Edit';
     actionsWrap.append(copyButton, editToggle);
 
-    summary.append(thumb);
+    const mediaColumn = document.createElement('div');
+    mediaColumn.className = 'settings-links-media-column';
+    mediaColumn.append(thumb, mediaMeta);
+    summary.append(mediaColumn);
     const summaryBody = document.createElement('div');
     summaryBody.className = 'settings-links-summary-body';
     summaryBody.append(head, url);
