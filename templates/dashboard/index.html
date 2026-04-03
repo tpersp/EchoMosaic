@@ -4053,13 +4053,6 @@
       thumb.textContent = 'URL';
     }
 
-    const mediaMeta = document.createElement('div');
-    mediaMeta.className = 'settings-links-media-meta';
-    const category = document.createElement('span');
-    category.className = 'settings-links-category';
-    category.textContent = link.category || 'Uncategorized';
-    mediaMeta.appendChild(category);
-
     const head = document.createElement('div');
     head.className = 'settings-links-item-head';
     const titleWrap = document.createElement('div');
@@ -4067,8 +4060,10 @@
     const title = document.createElement('strong');
     title.textContent = link.label || 'Untitled link';
     title.title = link.label || 'Untitled link';
-    titleWrap.append(title);
-    head.appendChild(titleWrap);
+    const category = document.createElement('span');
+    category.className = 'settings-links-category';
+    category.textContent = link.category || 'Uncategorized';
+    titleWrap.append(title, category);
 
     const badges = document.createElement('div');
     badges.className = 'settings-links-badges';
@@ -4083,8 +4078,9 @@
       badge.textContent = label;
       badges.appendChild(badge);
     });
+    head.append(titleWrap);
     if (badges.childNodes.length) {
-      mediaMeta.appendChild(badges);
+      head.appendChild(badges);
     }
 
     const url = document.createElement('div');
@@ -4106,7 +4102,7 @@
 
     const mediaColumn = document.createElement('div');
     mediaColumn.className = 'settings-links-media-column';
-    mediaColumn.append(thumb, mediaMeta);
+    mediaColumn.append(thumb);
     summary.append(mediaColumn);
     const summaryBody = document.createElement('div');
     summaryBody.className = 'settings-links-summary-body';
