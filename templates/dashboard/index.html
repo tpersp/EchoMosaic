@@ -365,7 +365,7 @@
         <div class="form-row stream-url-container" {% if media_mode != 'livestream' %} style="display:none;" {% endif %}>
           <label for="stream-url-{{ stream_id }}">URL</label>
           <div>
-            <div style="display:flex; align-items:center; gap:8px; flex-wrap: wrap;">
+            <div class="stream-url-controls">
               <input id="stream-url-{{ stream_id }}" type="text" class="stream-url-input" data-stream="{{ stream_id }}" value="{{ conf.stream_url if conf.stream_url else '' }}" placeholder="https://example.com/">
               <span class="url-type-badge" aria-live="polite"></span>
               <span class="embed-status-badge" aria-live="polite"></span>
