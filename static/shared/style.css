@@ -709,10 +709,9 @@ body.dashboard-page.dashboard-panel-open {
 }
 
 .settings-links-item-head {
-  display: flex;
-  justify-content: space-between;
-  gap: 0.75rem;
-  align-items: flex-start;
+  display: grid;
+  gap: 0.4rem;
+  align-items: start;
 }
 
 .settings-links-item-title {
@@ -723,10 +722,14 @@ body.dashboard-page.dashboard-panel-open {
 
 .settings-links-item-title strong {
   font-size: 1rem;
-  display: block;
-  white-space: nowrap;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
   overflow: hidden;
   text-overflow: ellipsis;
+  line-height: 1.24;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 .settings-links-category {
@@ -734,7 +737,7 @@ body.dashboard-page.dashboard-panel-open {
   font-weight: 600;
   opacity: 0.72;
   display: block;
-  white-space: nowrap;
+  white-space: normal;
   overflow: hidden;
   text-overflow: ellipsis;
 }
