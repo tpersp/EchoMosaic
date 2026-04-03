@@ -1200,7 +1200,7 @@ a {
 .group-section { margin-bottom: 0.5rem; }
 .group-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 6px; }
 .group-item { border: 1px solid var(--border); padding: 6px; border-radius: 4px; background: var(--surface); }
-.group-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 12px; align-items: start; }
+.group-tiles { display: grid; grid-template-columns: 1fr; gap: 12px; align-items: start; }
 .group-tile {
   border: 1px solid var(--border);
   border-radius: 16px;
