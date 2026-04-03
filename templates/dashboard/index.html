@@ -308,12 +308,11 @@
           <label>Playback Controls</label>
           <div class="playback-controls" data-stream="{{ stream_id }}">
             <button type="button" class="playback-btn playback-prev" data-stream="{{ stream_id }}" data-action="skip_prev" title="Previous">&#9664;</button>
-            <button type="button" class="playback-btn playback-play" data-stream="{{ stream_id }}" data-action="play" title="Play">&#9654;</button>
-            <button type="button" class="playback-btn playback-pause" data-stream="{{ stream_id }}" data-action="pause" title="Pause">&#10074;&#10074;</button>
+            <button type="button" class="playback-btn playback-toggle" data-stream="{{ stream_id }}" data-action="play" title="Play" aria-label="Play">&#9654;</button>
             <button type="button" class="playback-btn playback-next" data-stream="{{ stream_id }}" data-action="skip_next" title="Next">&#9654;&#9654;</button>
             <label class="volume-control">
               <span>Vol.</span>
-              <input type="range" min="0" max="100" value="{{ video_volume_pct }}" class="video-volume-slider" data-stream="{{ stream_id }}">
+              <input type="range" min="0" max="100" value="{{ video_volume_pct }}" class="video-volume-slider" data-stream="{{ stream_id }}" title="{{ video_volume_pct }}%" aria-label="Volume {{ video_volume_pct }}%">
             </label>
           </div>
         </div>
@@ -5883,6 +5882,8 @@
             if (volumeSlider) {
               const pct = Math.max(0, Math.min(1, Number.isFinite(volumeValue) ? volumeValue : 1)) * 100;
               volumeSlider.value = String(Math.round(pct));
+              volumeSlider.title = `${Math.round(pct)}%`;
+              volumeSlider.setAttribute('aria-label', `Volume ${Math.round(pct)}%`);
             }
           }
           if (data.new_config && data.new_config.sync !== undefined) {
@@ -6834,15 +6835,36 @@ function applyPicsumSettings(card, settings, opts = {}) {
         });
       }
       const playbackButtons = card.querySelectorAll('.playback-controls .playback-btn');
+      const playbackToggle = card.querySelector('.playback-controls .playback-toggle');
+      const setPlaybackToggleState = isPaused => {
+        if (!playbackToggle) return;
+        const paused = !!isPaused;
+        playbackToggle.dataset.action = paused ? 'play' : 'pause';
+        playbackToggle.innerHTML = paused ? '&#9654;' : '&#10074;&#10074;';
+        const label = paused ? 'Play' : 'Pause';
+        playbackToggle.title = label;
+        playbackToggle.setAttribute('aria-label', label);
+      };
+      setPlaybackToggleState(true);
       playbackButtons.forEach(btn => {
         btn.addEventListener('click', () => {
           const action = btn.dataset.action;
           if (!action) return;
           socket.emit('video_control', { stream_id: streamId, action });
+          if (btn === playbackToggle) {
+            setPlaybackToggleState(action === 'pause');
+          } else if (action === 'skip_prev' || action === 'skip_next') {
+            setPlaybackToggleState(false);
+          }
         });
       });
       const volumeSlider = card.querySelector('.video-volume-slider');
       if (volumeSlider) {
+        const updateVolumeSliderUi = value => {
+          const pct = Math.max(0, Math.min(100, Math.round(Number(value) || 0)));
+          volumeSlider.title = `${pct}%`;
+          volumeSlider.setAttribute('aria-label', `Volume ${pct}%`);
+        };
         const fromSlider = value => {
           const num = Number(value);
           if (!Number.isFinite(num)) return 1;
@@ -6852,19 +6874,23 @@ function applyPicsumSettings(card, settings, opts = {}) {
         const datasetVol = (datasetAttr !== undefined && datasetAttr !== '') ? Number(datasetAttr) : NaN;
         const initialVol = Number.isFinite(datasetVol) ? Math.max(0, Math.min(1, datasetVol)) : fromSlider(volumeSlider.value);
         volumeSlider.value = String(Math.round(initialVol * 100));
+        updateVolumeSliderUi(volumeSlider.value);
         card.dataset.videoVolume = String(initialVol);
         card.dataset.videoVolumePersisted = card.dataset.videoVolumePersisted || String(initialVol);
         volumeSlider.addEventListener('input', e => {
           const normalized = fromSlider(e.target.value);
           card.dataset.videoVolume = String(normalized);
+          updateVolumeSliderUi(e.target.value);
           socket.emit('video_control', { stream_id: streamId, action: 'set_volume', volume: normalized });
         });
         volumeSlider.addEventListener('change', e => {
           const normalized = fromSlider(e.target.value);
           card.dataset.videoVolume = String(normalized);
+          updateVolumeSliderUi(e.target.value);
           const persisted = Number(card.dataset.videoVolumePersisted);
           if (Number.isFinite(persisted) && Math.abs(normalized - persisted) <= 0.005) {
             volumeSlider.value = String(Math.round(Math.max(0, Math.min(1, persisted)) * 100));
+            updateVolumeSliderUi(volumeSlider.value);
             return;
           }
           saveSettings(streamId, { video_volume: normalized });
