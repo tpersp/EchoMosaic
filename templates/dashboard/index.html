@@ -376,17 +376,17 @@
               <div class="picsum-field picsum-size-preset-field">
                 <label for="picsum-size-preset-{{ stream_id }}">Size</label>
                 <select id="picsum-size-preset-{{ stream_id }}" class="picsum-size-preset">
-                  <option value="1280x720">HD 1280x720</option>
-                  <option value="1366x768">WXGA 1366x768</option>
-                  <option value="1600x900">HD+ 1600x900</option>
-                  <option value="1920x1080">Full HD 1920x1080</option>
-                  <option value="2560x1440">QHD 2560x1440</option>
-                  <option value="3840x2160">4K 3840x2160</option>
-                  <option value="1080x1920">Portrait 1080x1920</option>
+                  <option value="1280x720">1280x720</option>
+                  <option value="1366x768">1366x768</option>
+                  <option value="1600x900">1600x900</option>
+                  <option value="1920x1080">1920x1080</option>
+                  <option value="2560x1440">2560x1440</option>
+                  <option value="3840x2160">3840x2160</option>
+                  <option value="1080x1920">1080x1920</option>
                   <option value="custom">Custom</option>
                 </select>
               </div>
-              <div class="picsum-size-custom-row">
+              <div class="picsum-size-custom-row" hidden>
                 <div class="picsum-field">
                 <label for="picsum-width-{{ stream_id }}">Width</label>
                 <input id="picsum-width-{{ stream_id }}" type="number" class="picsum-width" min="16" max="4096" step="1" data-default="1920" value="{{ picsum.width|default(1920) }}">
@@ -6878,17 +6878,25 @@ function applyPicsumSettings(card, settings, opts = {}) {
               setPicsumStatus(card, 'Failed to save Picsum settings', true);
             });
         };
+        applyPicsumSettings(card, collectPicsumSettings(card), { preserveSeedDisplay: true });
         if (presetSelect) {
           presetSelect.addEventListener('change', () => {
             const selected = presetSelect.value || 'custom';
             const customRow = picsumConfig.querySelector('.picsum-size-custom-row');
             const preset = PICSUM_SIZE_PRESETS.find(entry => entry.value === selected);
+            if (selected === 'custom') {
+              if (customRow) {
+                customRow.hidden = false;
+              }
+              if (widthInput) widthInput.focus();
+              return;
+            }
             if (preset) {
               if (widthInput) widthInput.value = String(preset.width);
               if (heightInput) heightInput.value = String(preset.height);
             }
             if (customRow) {
-              customRow.hidden = selected !== 'custom';
+              customRow.hidden = true;
             }
             maybeSave();
           });
