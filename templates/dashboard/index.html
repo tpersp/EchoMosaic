@@ -373,13 +373,28 @@
           <label for="picsum-width-{{ stream_id }}">Picsum</label>
           <div class="picsum-config" data-stream="{{ stream_id }}" data-current-seed="{{ picsum.seed|default('') }}">
             <div class="picsum-grid">
-              <div class="picsum-field">
+              <div class="picsum-field picsum-size-preset-field">
+                <label for="picsum-size-preset-{{ stream_id }}">Size</label>
+                <select id="picsum-size-preset-{{ stream_id }}" class="picsum-size-preset">
+                  <option value="1280x720">HD 1280x720</option>
+                  <option value="1366x768">WXGA 1366x768</option>
+                  <option value="1600x900">HD+ 1600x900</option>
+                  <option value="1920x1080">Full HD 1920x1080</option>
+                  <option value="2560x1440">QHD 2560x1440</option>
+                  <option value="3840x2160">4K 3840x2160</option>
+                  <option value="1080x1920">Portrait 1080x1920</option>
+                  <option value="custom">Custom</option>
+                </select>
+              </div>
+              <div class="picsum-size-custom-row">
+                <div class="picsum-field">
                 <label for="picsum-width-{{ stream_id }}">Width</label>
                 <input id="picsum-width-{{ stream_id }}" type="number" class="picsum-width" min="16" max="4096" step="1" data-default="1920" value="{{ picsum.width|default(1920) }}">
               </div>
               <div class="picsum-field">
                 <label for="picsum-height-{{ stream_id }}">Height</label>
                 <input id="picsum-height-{{ stream_id }}" type="number" class="picsum-height" min="16" max="4096" step="1" data-default="1080" value="{{ picsum.height|default(1080) }}">
+              </div>
               </div>
               <div class="picsum-field">
                 <label for="picsum-blur-{{ stream_id }}">Blur</label>
@@ -6184,6 +6199,35 @@
     last_auto_trigger: null,
   });
 
+  const PICSUM_SIZE_PRESETS = Object.freeze([
+    { value: '1280x720', width: 1280, height: 720 },
+    { value: '1366x768', width: 1366, height: 768 },
+    { value: '1600x900', width: 1600, height: 900 },
+    { value: '1920x1080', width: 1920, height: 1080 },
+    { value: '2560x1440', width: 2560, height: 1440 },
+    { value: '3840x2160', width: 3840, height: 2160 },
+    { value: '1080x1920', width: 1080, height: 1920 },
+  ]);
+
+  function matchPicsumPreset(width, height) {
+    const widthValue = Number(width);
+    const heightValue = Number(height);
+    const preset = PICSUM_SIZE_PRESETS.find(entry => entry.width === widthValue && entry.height === heightValue);
+    return preset ? preset.value : 'custom';
+  }
+
+  function syncPicsumPresetUi(config, normalized) {
+    if (!config) return;
+    const presetSelect = config.querySelector('.picsum-size-preset');
+    const customRow = config.querySelector('.picsum-size-custom-row');
+    if (presetSelect) {
+      presetSelect.value = matchPicsumPreset(normalized.width, normalized.height);
+    }
+    if (customRow) {
+      customRow.hidden = !presetSelect || presetSelect.value !== 'custom';
+    }
+  }
+
   function clamp(value, min, max) {
     if (!Number.isFinite(value)) {
       return min;
@@ -6294,6 +6338,7 @@ function applyPicsumSettings(card, settings, opts = {}) {
   if (heightInput) heightInput.value = normalized.height;
   if (blurInput) blurInput.value = normalized.blur;
   if (grayscaleInput) grayscaleInput.checked = normalized.grayscale;
+  syncPicsumPresetUi(config, normalized);
 
   if (seedDisplay) {
     if (displaySeed) {
@@ -6812,6 +6857,7 @@ function applyPicsumSettings(card, settings, opts = {}) {
       }
       const picsumConfig = card.querySelector('.picsum-config');
       if (picsumConfig) {
+        const presetSelect = picsumConfig.querySelector('.picsum-size-preset');
         const widthInput = picsumConfig.querySelector('.picsum-width');
         const heightInput = picsumConfig.querySelector('.picsum-height');
         const blurInput = picsumConfig.querySelector('.picsum-blur');
@@ -6832,6 +6878,21 @@ function applyPicsumSettings(card, settings, opts = {}) {
               setPicsumStatus(card, 'Failed to save Picsum settings', true);
             });
         };
+        if (presetSelect) {
+          presetSelect.addEventListener('change', () => {
+            const selected = presetSelect.value || 'custom';
+            const customRow = picsumConfig.querySelector('.picsum-size-custom-row');
+            const preset = PICSUM_SIZE_PRESETS.find(entry => entry.value === selected);
+            if (preset) {
+              if (widthInput) widthInput.value = String(preset.width);
+              if (heightInput) heightInput.value = String(preset.height);
+            }
+            if (customRow) {
+              customRow.hidden = selected !== 'custom';
+            }
+            maybeSave();
+          });
+        }
         if (widthInput) widthInput.addEventListener('change', maybeSave);
         if (heightInput) heightInput.addEventListener('change', maybeSave);
         if (blurInput) blurInput.addEventListener('change', maybeSave);

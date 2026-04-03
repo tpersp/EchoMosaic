@@ -3795,13 +3795,13 @@ body.ai-preset-manager-open {
 .picsum-config {
   display: flex;
   flex-direction: column;
-  gap: 0.5rem;
+  gap: 0.65rem;
 }
 
 .picsum-grid {
   display: grid;
-  gap: 0.5rem;
-  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: 0.55rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 .picsum-field label {
@@ -3809,6 +3809,42 @@ body.ai-preset-manager-open {
   flex-direction: column;
   font-size: 0.85rem;
   gap: 0.25rem;
+}
+
+.picsum-size-preset-field,
+.picsum-seed-display {
+  grid-column: 1 / -1;
+}
+
+.picsum-size-custom-row {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.55rem;
+}
+
+.picsum-size-custom-row[hidden] {
+  display: none !important;
+}
+
+.picsum-checkbox {
+  align-self: end;
+}
+
+.picsum-seed-value {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.45rem;
+  min-width: 0;
+}
+
+.picsum-current-seed {
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .picsum-actions {
@@ -3836,4 +3872,11 @@ body.ai-preset-manager-open {
 .picsum-current-seed {
   font-size: 0.8rem;
   opacity: 0.75;
+}
+
+@media (max-width: 520px) {
+  .picsum-grid,
+  .picsum-size-custom-row {
+    grid-template-columns: 1fr;
+  }
 }
