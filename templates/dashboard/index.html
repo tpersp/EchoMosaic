@@ -286,7 +286,7 @@
             <label class="toggle inline">
               <input id="background-toggle-{{ stream_id }}" type="checkbox" class="background-toggle" data-stream="{{ stream_id }}" {% if blur_enabled %}checked{% endif %}>
               <span class="toggle-switch" aria-hidden="true"></span>
-              <span class="toggle-label">Blur current media</span>
+              <span class="toggle-label">Blur background</span>
             </label>
             <div class="background-blur-slider-wrap{% if not blur_enabled %} is-disabled{% endif %}">
               <input type="range" min="0" max="100" class="background-blur-slider" data-stream="{{ stream_id }}" value="{{ blur_amount }}" {% if not blur_enabled %}disabled{% endif %}>
