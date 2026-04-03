@@ -3978,12 +3978,14 @@
         if (provider) {
           const badge = document.createElement('span');
           badge.className = 'stream-links-badge';
+          badge.dataset.type = String(link.provider || '').toLowerCase();
           badge.textContent = provider;
           badges.appendChild(badge);
         }
         if (type && type !== provider) {
           const badge = document.createElement('span');
           badge.className = 'stream-links-badge';
+          badge.dataset.type = String(link.content_type || '').toLowerCase();
           badge.textContent = type;
           badges.appendChild(badge);
         }
@@ -4072,6 +4074,7 @@
       if (index === 1 && label === provider) return;
       const badge = document.createElement('span');
       badge.className = 'settings-links-badge';
+      badge.dataset.type = index === 0 ? String(link.provider || '').toLowerCase() : String(link.content_type || '').toLowerCase();
       badge.textContent = label;
       badges.appendChild(badge);
     });

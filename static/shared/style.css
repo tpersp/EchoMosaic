@@ -695,13 +695,13 @@ body.dashboard-page.dashboard-panel-open {
 .settings-links-badge {
   display: inline-flex;
   align-items: center;
-  border: 1px solid var(--accent);
+  border: 1px solid var(--border);
   border-radius: 999px;
   padding: 0.18rem 0.55rem;
   font-size: 0.74rem;
   font-weight: 700;
-  color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  color: var(--text);
+  background: color-mix(in srgb, var(--surface) 65%, transparent);
 }
 
 .settings-links-url {
@@ -2396,6 +2396,7 @@ a {
   border-radius: 4px;
   opacity: 0;
   transition: opacity 0.3s;
+  z-index: 1100;
 }
 .notification.show {
   opacity: 1;
@@ -2529,6 +2530,19 @@ a {
   border: 1px solid var(--border);
   background: color-mix(in srgb, var(--surface) 65%, transparent);
 }
+
+.settings-links-badge[data-type="youtube"],
+.stream-links-badge[data-type="youtube"] { color: #f1c40f; border-color: #6b5d12; }
+.settings-links-badge[data-type="website"],
+.stream-links-badge[data-type="website"] { color: var(--accent); }
+.settings-links-badge[data-type="hls"],
+.stream-links-badge[data-type="hls"] { color: #2ecc71; border-color: #1d6b45; }
+.settings-links-badge[data-type="live"],
+.stream-links-badge[data-type="live"] { color: #e74c3c; border-color: #7e2a22; }
+.settings-links-badge[data-type="playlist"],
+.stream-links-badge[data-type="playlist"] { color: #9b59b6; border-color: #4d2e5a; }
+.settings-links-badge[data-type="video"],
+.stream-links-badge[data-type="video"] { color: #3498db; border-color: #1f618d; }
 
 .stream-links-item.is-active {
   border-color: var(--accent);
