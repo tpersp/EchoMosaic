@@ -1039,13 +1039,13 @@ a {
   justify-self: stretch;
 }
 
-@media (max-width: 1600px) {
+@media (max-width: 1760px) {
   .dashboard-grid {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 }
 
-@media (max-width: 1380px) {
+@media (max-width: 1520px) {
   .dashboard-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -1464,7 +1464,7 @@ a {
 /* Stream card adjustments */
 .stream-card {
   border: 1px solid color-mix(in srgb, var(--border) 88%, transparent);
-  padding: 0.95rem;
+  padding: 0.82rem;
   position: relative;
   overflow: hidden; /* prevent child overflow spill */
   z-index: 0;
@@ -1945,8 +1945,8 @@ a {
   align-items: flex-start;
   justify-content: space-between;
   gap: 0.85rem;
-  margin-bottom: 0.85rem;
-  padding-bottom: 0.8rem;
+  margin-bottom: 0.72rem;
+  padding-bottom: 0.65rem;
   border-bottom: 1px solid color-mix(in srgb, var(--border) 72%, transparent);
 }
 
@@ -1963,14 +1963,14 @@ a {
 }
 
 .stream-card .thumbnail-wrapper {
-  margin-bottom: 0.95rem;
-  padding: 0.85rem;
+  margin-bottom: 0.78rem;
+  padding: 0.68rem;
   border-radius: 16px;
   border: 1px solid color-mix(in srgb, var(--border) 72%, transparent);
   background: color-mix(in srgb, var(--surface-alt) 44%, var(--surface));
 }
 .stream-card .thumbnail-area {
-  max-width: 172px;
+  max-width: 160px;
   margin: 0 auto;
   position: relative;
   width: 100%;
@@ -2373,12 +2373,12 @@ a {
 /* Card form layout */
 .form-grid {
   display: grid;
-  grid-template-columns: minmax(120px, max-content) minmax(0, 1fr);
-  column-gap: 1.1rem;
-  row-gap: 0.9rem;
+  grid-template-columns: minmax(92px, 0.4fr) minmax(0, 1fr);
+  column-gap: 0.9rem;
+  row-gap: 0.72rem;
   align-items: start;
   width: 100%;
-  padding: 0.95rem;
+  padding: 0.78rem;
   border: 1px solid color-mix(in srgb, var(--border) 72%, transparent);
   border-radius: 16px;
   background: color-mix(in srgb, var(--surface-alt) 36%, var(--surface));
@@ -2408,7 +2408,7 @@ a {
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: color-mix(in srgb, var(--text) 66%, transparent);
-  padding-top: 0.5rem;
+  padding-top: 0.38rem;
 }
 .form-row > input,
 .form-row > select,
@@ -2436,7 +2436,7 @@ a {
 .stream-card .background-controls,
 .picsum-config,
 .playing-field {
-  padding: 0.7rem 0.85rem;
+  padding: 0.52rem 0.62rem;
   border: 1px solid color-mix(in srgb, var(--border) 72%, transparent);
   background: color-mix(in srgb, var(--surface) 82%, var(--surface-alt));
 }
@@ -2467,6 +2467,24 @@ a {
 }
 .playback-controls {
   gap: 0.65rem;
+}
+.playback-controls .volume-control {
+  flex: 1 1 100%;
+  justify-content: space-between;
+}
+.playback-controls .video-volume-slider {
+  flex: 1 1 120px;
+  max-width: 150px;
+}
+.stream-card .sync-controls {
+  grid-template-columns: 1fr;
+}
+.stream-card .sync-offset-control {
+  justify-content: flex-start;
+  flex-wrap: wrap;
+}
+.stream-card .sync-offset-input {
+  max-width: 88px;
 }
 .playing-field {
   min-height: 2.6rem;
