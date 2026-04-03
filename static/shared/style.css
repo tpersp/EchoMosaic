@@ -820,7 +820,7 @@ body.dashboard-page.dashboard-panel-open {
   font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
-  color: rgba(238, 238, 238, 0.6);
+  color: var(--sidebar-title);
 }
 
 .dashboard-toolbar {
@@ -1365,7 +1365,7 @@ a {
   z-index: 45;
   display: flex;
   flex-direction: column;
-  background: #171717;
+  background: var(--surface);
   border-right: 1px solid var(--border);
   box-shadow: 12px 0 40px rgba(0, 0, 0, 0.35);
 }
