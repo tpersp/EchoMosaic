@@ -4083,16 +4083,23 @@
     url.className = 'settings-links-url';
     url.textContent = link.url || '';
 
+    const actionsWrap = document.createElement('div');
+    actionsWrap.className = 'settings-links-summary-actions';
+    const copyButton = document.createElement('button');
+    copyButton.type = 'button';
+    copyButton.className = 'settings-links-copy-toggle';
+    copyButton.textContent = 'Copy';
     const editToggle = document.createElement('button');
     editToggle.type = 'button';
     editToggle.className = 'settings-links-edit-toggle';
     editToggle.textContent = 'Edit';
+    actionsWrap.append(copyButton, editToggle);
 
     summary.append(thumb);
     const summaryBody = document.createElement('div');
     summaryBody.className = 'settings-links-summary-body';
     summaryBody.append(head, url);
-    summary.append(summaryBody, editToggle);
+    summary.append(summaryBody, actionsWrap);
 
     const form = document.createElement('form');
     form.className = 'settings-links-edit-form';
@@ -4120,11 +4127,18 @@
     form.querySelector('[name="url"]').value = link.url || '';
     const saveButton = form.querySelector('button[type="submit"]');
     const deleteButton = form.querySelector('button[type="button"]');
+    copyButton.addEventListener('click', async () => {
+      const copied = await copyTextToClipboard(link.url || '');
+      if (copied) {
+        showNotification(`Copied link URL for ${link.label}`);
+      } else {
+        showNotification(link.url || 'Link URL unavailable');
+      }
+    });
     editToggle.addEventListener('click', () => {
-      const nextHidden = !form.hidden;
-      form.hidden = nextHidden;
-      item.classList.toggle('is-expanded', !nextHidden);
-      editToggle.textContent = nextHidden ? 'Edit' : 'Done';
+      const nextExpanded = !item.classList.contains('is-expanded');
+      item.classList.toggle('is-expanded', nextExpanded);
+      editToggle.textContent = nextExpanded ? 'Done' : 'Edit';
     });
 
     form.addEventListener('submit', async (event) => {
