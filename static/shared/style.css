@@ -326,7 +326,7 @@ body.dashboard-page.dashboard-panel-open {
 
   html.sidebar-collapsed body.dashboard-page #group-manager-panel,
   body.dashboard-page.sidebar-collapsed #group-manager-panel {
-    width: min(860px, calc(100vw - 88px));
+    width: min(980px, calc(100vw - 88px));
   }
 }
 
@@ -1134,7 +1134,7 @@ a {
   }
 
   #group-manager-panel {
-    width: min(860px, 100vw);
+    width: min(980px, 100vw);
   }
 }
 
@@ -1332,7 +1332,7 @@ a {
   display: none !important;
 }
 .group-tile.expanded .tile-body {
-  grid-template-columns: minmax(0, 1.05fr) minmax(320px, 0.95fr);
+  grid-template-columns: minmax(0, 1.18fr) minmax(340px, 0.82fr);
   align-items: start;
 }
 .group-tile.expanded .group-basics-section,
@@ -1627,7 +1627,7 @@ a {
 }
 
 #group-manager-panel {
-  width: min(860px, calc(100vw - 260px));
+  width: min(980px, calc(100vw - 260px));
 }
 
 .dashboard-panel-header {
