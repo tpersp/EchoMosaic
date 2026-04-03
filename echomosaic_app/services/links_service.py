@@ -15,10 +15,12 @@ class GlobalLinksService:
         settings: Dict[str, Any],
         save_settings_debounced: Callable[[], None],
         parse_youtube_url_details: Callable[[str], Optional[Dict[str, Any]]],
+        youtube_metadata_lookup: Optional[Callable[[str, Dict[str, Any]], Optional[Dict[str, Any]]]] = None,
     ) -> None:
         self.settings = settings
         self.save_settings_debounced = save_settings_debounced
         self.parse_youtube_url_details = parse_youtube_url_details
+        self.youtube_metadata_lookup = youtube_metadata_lookup
         self.links_key = "_links"
 
     @staticmethod
@@ -29,11 +31,37 @@ class GlobalLinksService:
         lowered = url.lower()
         youtube = self.parse_youtube_url_details(url)
         if youtube:
+            oembed = None
+            if self.youtube_metadata_lookup is not None:
+                try:
+                    oembed = self.youtube_metadata_lookup(url, youtube)
+                except Exception:
+                    oembed = None
+            video_id = str((oembed or {}).get("video_id") or youtube.get("video_id") or "").strip() or None
+            thumbnail_url = str((oembed or {}).get("thumbnail_url") or "").strip() or None
+            if not thumbnail_url and video_id:
+                thumbnail_url = f"https://i.ytimg.com/vi/{video_id}/hqdefault.jpg"
+            content_type = str((oembed or {}).get("content_type") or "").strip().lower()
             if youtube.get("playlist_id"):
-                return {"provider": "youtube", "content_type": "playlist"}
-            if youtube.get("is_live"):
-                return {"provider": "youtube", "content_type": "live"}
-            return {"provider": "youtube", "content_type": "video"}
+                return {
+                    "provider": "youtube",
+                    "content_type": "playlist",
+                    "thumbnail_url": thumbnail_url,
+                    "video_id": video_id,
+                }
+            if youtube.get("is_live") or content_type == "live":
+                return {
+                    "provider": "youtube",
+                    "content_type": "live",
+                    "thumbnail_url": thumbnail_url,
+                    "video_id": video_id,
+                }
+            return {
+                "provider": "youtube",
+                "content_type": "video",
+                "thumbnail_url": thumbnail_url,
+                "video_id": video_id,
+            }
         if lowered.endswith(".m3u8") or lowered.endswith(".mpd"):
             return {"provider": "hls", "content_type": "live"}
         parsed = urlparse(url if "://" in url else f"https://{url}")
@@ -63,6 +91,12 @@ class GlobalLinksService:
             sanitized["provider"] = provider
         if content_type:
             sanitized["content_type"] = content_type
+        thumbnail_url = self._trimmed(raw.get("thumbnail_url")) or str(detected.get("thumbnail_url") or "").strip()
+        video_id = self._trimmed(raw.get("video_id")) or str(detected.get("video_id") or "").strip()
+        if thumbnail_url:
+            sanitized["thumbnail_url"] = thumbnail_url
+        if video_id:
+            sanitized["video_id"] = video_id
         return sanitized
 
     def sanitize_collection(self, raw: Any) -> List[Dict[str, Any]]:

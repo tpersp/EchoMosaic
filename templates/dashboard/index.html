@@ -4036,6 +4036,21 @@
     item.className = 'settings-links-item';
     item.dataset.linkId = link.id || '';
 
+    const summary = document.createElement('div');
+    summary.className = 'settings-links-summary';
+    const thumb = document.createElement('div');
+    thumb.className = 'settings-links-thumb';
+    if (link.thumbnail_url) {
+      const image = document.createElement('img');
+      image.src = link.thumbnail_url;
+      image.alt = link.label || 'Link thumbnail';
+      image.loading = 'lazy';
+      image.decoding = 'async';
+      thumb.appendChild(image);
+    } else {
+      thumb.textContent = 'URL';
+    }
+
     const head = document.createElement('div');
     head.className = 'settings-links-item-head';
     const titleWrap = document.createElement('div');
@@ -4068,8 +4083,20 @@
     url.className = 'settings-links-url';
     url.textContent = link.url || '';
 
+    const editToggle = document.createElement('button');
+    editToggle.type = 'button';
+    editToggle.className = 'settings-links-edit-toggle';
+    editToggle.textContent = 'Edit';
+
+    summary.append(thumb);
+    const summaryBody = document.createElement('div');
+    summaryBody.className = 'settings-links-summary-body';
+    summaryBody.append(head, url);
+    summary.append(summaryBody, editToggle);
+
     const form = document.createElement('form');
     form.className = 'settings-links-edit-form';
+    form.hidden = true;
     form.innerHTML = `
       <label>
         <span>Label</span>
@@ -4093,6 +4120,12 @@
     form.querySelector('[name="url"]').value = link.url || '';
     const saveButton = form.querySelector('button[type="submit"]');
     const deleteButton = form.querySelector('button[type="button"]');
+    editToggle.addEventListener('click', () => {
+      const nextHidden = !form.hidden;
+      form.hidden = nextHidden;
+      item.classList.toggle('is-expanded', !nextHidden);
+      editToggle.textContent = nextHidden ? 'Edit' : 'Done';
+    });
 
     form.addEventListener('submit', async (event) => {
       event.preventDefault();
@@ -4159,7 +4192,7 @@
       }
     });
 
-    item.append(head, url, form);
+    item.append(summary, form);
     return item;
   }
 
@@ -4198,6 +4231,11 @@
         if (urlInput) {
           urlInput.value = nextUrl;
         }
+        updateNowPlaying(openStreamLinksCard, {
+          title: link.label || '',
+          content_type: link.content_type || '',
+          provider: link.provider ? linkProviderLabel(link.provider) : '',
+        });
         saveSettings(streamId, { stream_url: nextUrl });
         closeStreamLinksPopover();
       }

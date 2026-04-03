@@ -2680,6 +2680,7 @@ LINKS_SERVICE = GlobalLinksService(
     settings=settings,
     save_settings_debounced=save_settings_debounced,
     parse_youtube_url_details=YOUTUBE_EMBED_SERVICE.parse_youtube_url_details,
+    youtube_metadata_lookup=YOUTUBE_EMBED_SERVICE.youtube_oembed_lookup,
 )
 SETTINGS_INTEGRITY_CHANGED_ON_BOOT = ensure_settings_integrity(settings)
 # Normalize embed metadata placeholders for existing streams

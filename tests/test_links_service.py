@@ -20,6 +20,11 @@ def _service(settings=None):
         settings=state,
         save_settings_debounced=lambda: saved.__setitem__("calls", saved["calls"] + 1),
         parse_youtube_url_details=parse_youtube,
+        youtube_metadata_lookup=lambda url, details: {
+            "content_type": "live" if "/live/" in url else ("playlist" if "playlist?list=" in url else "video"),
+            "thumbnail_url": "https://i.ytimg.com/vi/live1/hqdefault.jpg" if "/live/" in url else "https://i.ytimg.com/vi/vid1/hqdefault.jpg",
+            "video_id": details.get("video_id"),
+        } if "youtube" in url else None,
     )
     return service, state, saved
 
@@ -40,6 +45,23 @@ def test_links_service_sanitizes_required_fields_and_detects_type() -> None:
     assert link["category"] == "Cartoons"
     assert link["provider"] == "youtube"
     assert link["content_type"] == "playlist"
+
+
+def test_links_service_marks_youtube_live_urls_as_live_and_keeps_thumbnail() -> None:
+    service, _, _ = _service()
+
+    link = service.sanitize_link(
+        {
+            "label": "Live Channel",
+            "url": "https://www.youtube.com/live/live1",
+            "category": "Live",
+        }
+    )
+
+    assert link is not None
+    assert link["provider"] == "youtube"
+    assert link["content_type"] == "live"
+    assert "thumbnail_url" in link
 
 
 def test_links_service_create_update_delete_roundtrip() -> None:
