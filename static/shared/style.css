@@ -665,7 +665,7 @@ body.dashboard-page.dashboard-panel-open {
   display: grid;
   grid-template-columns: 92px minmax(0, 1fr) auto;
   gap: 0.7rem;
-  align-items: start;
+  align-items: center;
 }
 
 .settings-links-media-column {
@@ -678,8 +678,6 @@ body.dashboard-page.dashboard-panel-open {
   gap: 0.5rem;
   align-items: start;
   justify-content: flex-end;
-  align-self: start;
-  flex-shrink: 0;
 }
 
 .settings-links-thumb {
@@ -707,12 +705,14 @@ body.dashboard-page.dashboard-panel-open {
 .settings-links-summary-body {
   min-width: 0;
   display: grid;
-  gap: 0.22rem;
+  gap: 0.3rem;
 }
 
 .settings-links-item-head {
-  display: block;
-  min-width: 0;
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  align-items: flex-start;
 }
 
 .settings-links-item-title {
@@ -723,14 +723,10 @@ body.dashboard-page.dashboard-panel-open {
 
 .settings-links-item-title strong {
   font-size: 1rem;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
+  display: block;
+  white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  line-height: 1.2;
-  white-space: normal;
-  overflow-wrap: anywhere;
 }
 
 .settings-links-category {
@@ -738,7 +734,7 @@ body.dashboard-page.dashboard-panel-open {
   font-weight: 600;
   opacity: 0.72;
   display: block;
-  white-space: normal;
+  white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
@@ -748,7 +744,6 @@ body.dashboard-page.dashboard-panel-open {
   flex-wrap: wrap;
   justify-content: flex-start;
   gap: 0.4rem;
-  min-width: 0;
 }
 
 .settings-links-badge {

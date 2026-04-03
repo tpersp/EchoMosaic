@@ -4159,6 +4159,9 @@
       badges.appendChild(badge);
     });
     head.append(titleWrap);
+    if (badges.childNodes.length) {
+      head.appendChild(badges);
+    }
 
     const url = document.createElement('div');
     url.className = 'settings-links-url';
@@ -4183,11 +4186,7 @@
     summary.append(mediaColumn);
     const summaryBody = document.createElement('div');
     summaryBody.className = 'settings-links-summary-body';
-    summaryBody.append(head);
-    if (badges.childNodes.length) {
-      summaryBody.appendChild(badges);
-    }
-    summaryBody.append(url);
+    summaryBody.append(head, url);
     summary.append(summaryBody, actionsWrap);
 
     const form = document.createElement('form');
