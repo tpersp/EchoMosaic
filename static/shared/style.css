@@ -13,6 +13,9 @@
   --sidebar-muted: rgba(238, 238, 238, 0.65);
   --sidebar-title: rgba(238, 238, 238, 0.55);
   --sidebar-active-text: #fff;
+  --scrollbar-track: #181818;
+  --scrollbar-thumb: #565656;
+  --scrollbar-thumb-hover: #6e6e6e;
 }
 
 /* Light theme overrides */
@@ -29,6 +32,9 @@
   --sidebar-muted: rgba(17, 17, 17, 0.68);
   --sidebar-title: rgba(17, 17, 17, 0.56);
   --sidebar-active-text: #111;
+  --scrollbar-track: #ece9e4;
+  --scrollbar-thumb: #b2b2b2;
+  --scrollbar-thumb-hover: #989898;
 }
 
 *, *::before, *::after {
@@ -40,6 +46,36 @@ body {
   color: var(--text);
   font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
   margin: 0;
+  scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
+  scrollbar-width: thin;
+}
+
+* {
+  scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
+  scrollbar-width: thin;
+}
+
+*::-webkit-scrollbar {
+  width: 12px;
+  height: 12px;
+}
+
+*::-webkit-scrollbar-track {
+  background: var(--scrollbar-track);
+}
+
+*::-webkit-scrollbar-thumb {
+  background: var(--scrollbar-thumb);
+  border-radius: 999px;
+  border: 3px solid var(--scrollbar-track);
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background: var(--scrollbar-thumb-hover);
+}
+
+*::-webkit-scrollbar-corner {
+  background: var(--scrollbar-track);
 }
 
 body.dashboard-page {
