@@ -2347,24 +2347,30 @@ a {
   padding: 0;
 }
 
-.stream-links-panel {
+.stream-links-popover {
+  position: fixed;
+  z-index: 55;
   display: grid;
   gap: 0.7rem;
-  margin-top: 0.6rem;
   padding: 0.75rem;
   border: 1px solid var(--border);
   border-radius: 12px;
-  background: var(--surface-alt);
+  background: color-mix(in srgb, var(--surface-alt) 92%, black 8%);
+  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.38);
 }
 
-.stream-links-panel-head {
+.stream-links-popover[hidden] {
+  display: none !important;
+}
+
+.stream-links-popover-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 0.5rem;
 }
 
-.stream-links-close {
+.stream-links-popover-close {
   min-width: 2rem;
 }
 
@@ -2449,6 +2455,11 @@ a {
   font-weight: 700;
   border: 1px solid var(--border);
   background: color-mix(in srgb, var(--surface) 65%, transparent);
+}
+
+.stream-links-item.is-active {
+  border-color: var(--accent);
+  box-shadow: inset 0 0 0 1px rgba(79, 163, 255, 0.28);
 }
 
 .group-tile input,

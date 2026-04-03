@@ -61,6 +61,10 @@
           <span class="sidebar-item-icon" aria-hidden="true">⏱</span>
           <span class="sidebar-item-label">Sync Timers</span>
         </button>
+        <button type="button" class="sidebar-action" data-dashboard-panel="links-manager-panel" title="Links">
+          <span class="sidebar-item-icon" aria-hidden="true">🔗</span>
+          <span class="sidebar-item-label">Links</span>
+        </button>
       </div>
     </section>
 
@@ -364,20 +368,6 @@
               {% set show_embed_type_badge = embed_type and embed_provider and embed_provider|lower == 'youtube' %}
               <span class="embed-type-badge" aria-live="polite" {% if not show_embed_type_badge %}hidden{% endif %}{% if show_embed_type_badge %} data-type="{{ embed_type }}"{% endif %}>{% if show_embed_type_badge %}{{ embed_type|capitalize }}{% endif %}</span>
               <button type="button" class="stream-links-toggle" data-stream="{{ stream_id }}">Links</button>
-            </div>
-            <div class="stream-links-panel" data-stream="{{ stream_id }}" hidden>
-              <div class="stream-links-panel-head">
-                <strong>Links</strong>
-                <button type="button" class="stream-links-close" aria-label="Close links picker">&times;</button>
-              </div>
-              <div class="stream-links-toolbar">
-                <input type="text" class="stream-links-search" placeholder="Search links">
-                <select class="stream-links-category-filter">
-                  <option value="">All categories</option>
-                </select>
-              </div>
-              <div class="stream-links-status" aria-live="polite" hidden></div>
-              <div class="stream-links-list"></div>
             </div>
           </div>
         </div>
@@ -746,6 +736,65 @@
     </div>
   </div>
 </section>
+
+<section id="links-manager-panel" class="dashboard-panel" role="dialog" aria-modal="true" aria-labelledby="links-manager-title" hidden>
+  <div class="dashboard-panel-header">
+    <div>
+      <span class="dashboard-panel-kicker">Manager</span>
+      <h2 id="links-manager-title">Links</h2>
+    </div>
+    <button type="button" class="dashboard-panel-close" data-close-dashboard-panel aria-label="Close">&times;</button>
+  </div>
+  <div class="dashboard-panel-body">
+    <div id="links-manager">
+      <form id="links-manager-create-form" class="settings-links-create-form">
+        <label>
+          <span>Label</span>
+          <input type="text" name="label" placeholder="Bob Ross Playlist">
+        </label>
+        <label>
+          <span>Category</span>
+          <input type="text" name="category" placeholder="Cartoons">
+        </label>
+        <label class="settings-links-create-url">
+          <span>URL</span>
+          <input type="text" name="url" placeholder="https://example.com/stream">
+        </label>
+        <button type="submit">Add Link</button>
+      </form>
+      <div class="settings-links-toolbar">
+        <label class="settings-links-filter">
+          <span>Search</span>
+          <input id="links-manager-search" type="text" placeholder="Search links">
+        </label>
+        <label class="settings-links-filter">
+          <span>Category</span>
+          <select id="links-manager-category-filter">
+            <option value="">All categories</option>
+          </select>
+        </label>
+      </div>
+      <div id="links-manager-list" class="settings-links-list"></div>
+      <p id="links-manager-empty" class="settings-muted-note"></p>
+      <p id="links-manager-note" class="settings-status-line" style="display:none;"></p>
+    </div>
+  </div>
+</section>
+
+<div id="stream-links-popover" class="stream-links-popover" role="dialog" aria-modal="false" aria-labelledby="stream-links-popover-title" hidden>
+  <div class="stream-links-popover-head">
+    <strong id="stream-links-popover-title">Links</strong>
+    <button type="button" id="stream-links-popover-close" class="stream-links-popover-close" aria-label="Close links picker">&times;</button>
+  </div>
+  <div class="stream-links-toolbar">
+    <input type="text" id="stream-links-popover-search" placeholder="Search links">
+    <select id="stream-links-popover-category">
+      <option value="">All categories</option>
+    </select>
+  </div>
+  <div id="stream-links-popover-status" class="stream-links-status" aria-live="polite" hidden></div>
+  <div id="stream-links-popover-list" class="stream-links-list"></div>
+</div>
 
 <!-- Notification -->
 <div id="notification" class="notification">Settings updated!</div>
@@ -1256,6 +1305,21 @@
       }
       document.body.classList.add('dashboard-panel-open');
       syncDashboardLauncherState();
+      if (panelId === 'links-manager-panel') {
+        fetchGlobalLinks(true)
+          .then(() => {
+            populateLinkCategories(linksManagerCategoryFilter, linksManagerCategoryFilter ? linksManagerCategoryFilter.value : '');
+            renderLinksManager();
+            setLinksManagerStatus('');
+          })
+          .catch((err) => {
+            if (linksManagerEmpty) {
+              linksManagerEmpty.hidden = false;
+              linksManagerEmpty.textContent = 'Links are unavailable.';
+            }
+            setLinksManagerStatus(err && err.message ? err.message : 'Links are unavailable.', true);
+          });
+      }
       const focusTarget = panel.querySelector('[data-close-dashboard-panel], input, button, select, textarea, a[href]');
       if (focusTarget && typeof focusTarget.focus === 'function') {
         window.setTimeout(() => focusTarget.focus(), 0);
@@ -3748,6 +3812,19 @@
     loaded: false,
     loading: false,
   };
+  let openStreamLinksCard = null;
+  const linksManagerList = document.getElementById('links-manager-list');
+  const linksManagerEmpty = document.getElementById('links-manager-empty');
+  const linksManagerNote = document.getElementById('links-manager-note');
+  const linksManagerSearch = document.getElementById('links-manager-search');
+  const linksManagerCategoryFilter = document.getElementById('links-manager-category-filter');
+  const linksManagerCreateForm = document.getElementById('links-manager-create-form');
+  const streamLinksPopover = document.getElementById('stream-links-popover');
+  const streamLinksPopoverClose = document.getElementById('stream-links-popover-close');
+  const streamLinksPopoverSearch = document.getElementById('stream-links-popover-search');
+  const streamLinksPopoverCategory = document.getElementById('stream-links-popover-category');
+  const streamLinksPopoverStatus = document.getElementById('stream-links-popover-status');
+  const streamLinksPopoverList = document.getElementById('stream-links-popover-list');
 
   const LINK_PROVIDER_LABELS = {
     youtube: 'YouTube',
@@ -3795,8 +3872,17 @@
     return globalLinksState;
   }
 
-  function setStreamLinksStatus(card, message, isError = false) {
-    const el = card ? card.querySelector('.stream-links-status') : null;
+  function setLinksManagerStatus(message, isError = false) {
+    const el = linksManagerNote;
+    if (!el) return;
+    const text = String(message || '').trim();
+    el.textContent = text;
+    el.style.display = text ? 'block' : 'none';
+    el.style.color = isError ? '#f66' : 'inherit';
+  }
+
+  function setStreamLinksStatus(message, isError = false) {
+    const el = streamLinksPopoverStatus;
     if (!el) return;
     const text = String(message || '').trim();
     el.textContent = text;
@@ -3804,11 +3890,8 @@
     el.dataset.error = isError ? 'true' : 'false';
   }
 
-  function populateStreamLinksCategories(card) {
-    if (!card) return;
-    const select = card.querySelector('.stream-links-category-filter');
+  function populateLinkCategories(select, current = '') {
     if (!select) return;
-    const current = select.value || '';
     select.innerHTML = '<option value="">All categories</option>';
     globalLinksState.categories.forEach((category) => {
       const option = document.createElement('option');
@@ -3819,20 +3902,15 @@
     select.value = globalLinksState.categories.includes(current) ? current : '';
   }
 
-  function renderStreamLinksList(card) {
-    if (!card) return;
-    const list = card.querySelector('.stream-links-list');
-    const search = card.querySelector('.stream-links-search');
-    const category = card.querySelector('.stream-links-category-filter');
-    if (!list) return;
-    const query = String(search ? search.value : '').trim().toLowerCase();
-    const selectedCategory = String(category ? category.value : '').trim().toLowerCase();
-    const filtered = globalLinksState.links.filter((link) => {
+  function collectFilteredLinks(query, selectedCategory) {
+    const loweredQuery = String(query || '').trim().toLowerCase();
+    const loweredCategory = String(selectedCategory || '').trim().toLowerCase();
+    return globalLinksState.links.filter((link) => {
       const linkCategory = String(link.category || '').trim().toLowerCase();
-      if (selectedCategory && linkCategory !== selectedCategory) {
+      if (loweredCategory && linkCategory !== loweredCategory) {
         return false;
       }
-      if (!query) {
+      if (!loweredQuery) {
         return true;
       }
       return [
@@ -3841,14 +3919,23 @@
         link.category,
         linkProviderLabel(link.provider),
         linkTypeLabel(link.content_type),
-      ].some((value) => String(value || '').toLowerCase().includes(query));
+      ].some((value) => String(value || '').toLowerCase().includes(loweredQuery));
     });
+  }
+
+  function renderLinksCollection(list, filtered, options = {}) {
+    if (!list) return;
+    const {
+      emptyMessage = 'No saved links are available.',
+      onSelect = null,
+      activeUrl = '',
+    } = options;
 
     list.innerHTML = '';
     if (!filtered.length) {
       const empty = document.createElement('div');
       empty.className = 'stream-links-empty';
-      empty.textContent = globalLinksState.links.length ? 'No links match the current filters.' : 'No saved links are available.';
+      empty.textContent = emptyMessage;
       list.appendChild(empty);
       return;
     }
@@ -3874,7 +3961,7 @@
         button.type = 'button';
         button.className = 'stream-links-item';
         button.dataset.linkId = link.id || '';
-        const currentUrl = String(card.querySelector('.stream-url-input')?.value || '').trim();
+        const currentUrl = String(activeUrl || '').trim();
         if (currentUrl && currentUrl === String(link.url || '').trim()) {
           button.classList.add('is-active');
         }
@@ -3908,56 +3995,245 @@
         url.className = 'stream-links-item-url';
         url.textContent = link.url || '';
         button.append(top, url);
-        button.addEventListener('click', () => {
-          const streamId = card.dataset.stream;
-          const urlInput = card.querySelector('.stream-url-input');
-          const nextUrl = String(link.url || '').trim();
-          const current = String(urlInput ? urlInput.value : '').trim();
-          if (!streamId || !nextUrl) return;
-          if (current && current !== nextUrl) {
-            const confirmed = window.confirm(`Replace the current URL on ${streamId} with "${link.label}"?`);
-            if (!confirmed) return;
-          }
-          if (urlInput) {
-            urlInput.value = nextUrl;
-          }
-          saveSettings(streamId, { stream_url: nextUrl });
-          closeStreamLinksPanel(card);
-        });
+        if (typeof onSelect === 'function') {
+          button.addEventListener('click', () => onSelect(link));
+        }
         section.appendChild(button);
       });
       list.appendChild(section);
     });
   }
 
-  function closeStreamLinksPanel(card) {
-    if (!card) return;
-    const panel = card.querySelector('.stream-links-panel');
-    const toggle = card.querySelector('.stream-links-toggle');
-    const search = card.querySelector('.stream-links-search');
-    const category = card.querySelector('.stream-links-category-filter');
-    if (panel) panel.hidden = true;
-    if (toggle) toggle.setAttribute('aria-expanded', 'false');
-    if (search) search.value = '';
-    if (category) category.value = '';
-    setStreamLinksStatus(card, '');
+  function renderLinksManager() {
+    if (!linksManagerList || !linksManagerEmpty) return;
+    populateLinkCategories(linksManagerCategoryFilter, linksManagerCategoryFilter ? linksManagerCategoryFilter.value : '');
+    const filtered = collectFilteredLinks(
+      linksManagerSearch ? linksManagerSearch.value : '',
+      linksManagerCategoryFilter ? linksManagerCategoryFilter.value : ''
+    );
+    if (!filtered.length) {
+      linksManagerEmpty.hidden = false;
+      linksManagerEmpty.textContent = globalLinksState.links.length ? 'No links match the current filters.' : 'No saved links available.';
+    } else {
+      linksManagerEmpty.hidden = true;
+      linksManagerEmpty.textContent = '';
+    }
+    renderLinksCollection(linksManagerList, filtered, {
+      emptyMessage: globalLinksState.links.length ? 'No links match the current filters.' : 'No saved links available.',
+      activeUrl: '',
+    });
+
+    Array.from(linksManagerList.querySelectorAll('.stream-links-item')).forEach((item) => {
+      const linkId = item.dataset.linkId;
+      const link = globalLinksState.links.find((entry) => String(entry.id) === String(linkId));
+      if (!link) return;
+      item.replaceWith(buildLinksManagerItem(link));
+    });
   }
 
-  async function openStreamLinksPanel(card) {
-    if (!card) return;
-    const panel = card.querySelector('.stream-links-panel');
+  function buildLinksManagerItem(link) {
+    const item = document.createElement('article');
+    item.className = 'settings-links-item';
+    item.dataset.linkId = link.id || '';
+
+    const head = document.createElement('div');
+    head.className = 'settings-links-item-head';
+    const titleWrap = document.createElement('div');
+    titleWrap.className = 'settings-links-item-title';
+    const title = document.createElement('strong');
+    title.textContent = link.label || 'Untitled link';
+    const category = document.createElement('span');
+    category.className = 'settings-links-category';
+    category.textContent = link.category || 'Uncategorized';
+    titleWrap.append(title, category);
+    head.appendChild(titleWrap);
+
+    const badges = document.createElement('div');
+    badges.className = 'settings-links-badges';
+    const provider = linkProviderLabel(link.provider);
+    const type = linkTypeLabel(link.content_type);
+    [provider, type].forEach((label, index) => {
+      if (!label) return;
+      if (index === 1 && label === provider) return;
+      const badge = document.createElement('span');
+      badge.className = 'settings-links-badge';
+      badge.textContent = label;
+      badges.appendChild(badge);
+    });
+    if (badges.childNodes.length) {
+      head.appendChild(badges);
+    }
+
+    const url = document.createElement('div');
+    url.className = 'settings-links-url';
+    url.textContent = link.url || '';
+
+    const form = document.createElement('form');
+    form.className = 'settings-links-edit-form';
+    form.innerHTML = `
+      <label>
+        <span>Label</span>
+        <input type="text" name="label" value="">
+      </label>
+      <label>
+        <span>Category</span>
+        <input type="text" name="category" value="">
+      </label>
+      <label class="settings-links-edit-url">
+        <span>URL</span>
+        <input type="text" name="url" value="">
+      </label>
+      <div class="settings-links-item-actions">
+        <button type="submit">Save</button>
+        <button type="button" class="danger">Delete</button>
+      </div>
+    `;
+    form.querySelector('[name="label"]').value = link.label || '';
+    form.querySelector('[name="category"]').value = link.category || '';
+    form.querySelector('[name="url"]').value = link.url || '';
+    const saveButton = form.querySelector('button[type="submit"]');
+    const deleteButton = form.querySelector('button[type="button"]');
+
+    form.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const payload = {
+        label: String(form.querySelector('[name="label"]').value || '').trim(),
+        category: String(form.querySelector('[name="category"]').value || '').trim(),
+        url: String(form.querySelector('[name="url"]').value || '').trim(),
+      };
+      if (!payload.label || !payload.category || !payload.url) {
+        setLinksManagerStatus('Label, URL, and category are required.', true);
+        return;
+      }
+      saveButton.disabled = true;
+      deleteButton.disabled = true;
+      setLinksManagerStatus('Saving link...');
+      try {
+        const response = await fetch(`/api/links/${encodeURIComponent(link.id)}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          throw new Error(data.error || `Unable to save link (${response.status})`);
+        }
+        globalLinksState.links = Array.isArray(data.links) ? data.links : [];
+        globalLinksState.categories = Array.isArray(data.categories) ? data.categories : [];
+        populateLinkCategories(linksManagerCategoryFilter, linksManagerCategoryFilter ? linksManagerCategoryFilter.value : '');
+        populateLinkCategories(streamLinksPopoverCategory, streamLinksPopoverCategory ? streamLinksPopoverCategory.value : '');
+        renderLinksManager();
+        renderStreamLinksPopover();
+        setLinksManagerStatus(`Saved "${payload.label}".`);
+      } catch (err) {
+        setLinksManagerStatus(err && err.message ? err.message : 'Link update failed.', true);
+      } finally {
+        saveButton.disabled = false;
+        deleteButton.disabled = false;
+      }
+    });
+
+    deleteButton.addEventListener('click', async () => {
+      if (!window.confirm(`Delete "${link.label}" from Links?`)) return;
+      saveButton.disabled = true;
+      deleteButton.disabled = true;
+      setLinksManagerStatus('Deleting link...');
+      try {
+        const response = await fetch(`/api/links/${encodeURIComponent(link.id)}`, { method: 'DELETE' });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          throw new Error(data.error || `Unable to delete link (${response.status})`);
+        }
+        globalLinksState.links = Array.isArray(data.links) ? data.links : [];
+        globalLinksState.categories = Array.isArray(data.categories) ? data.categories : [];
+        populateLinkCategories(linksManagerCategoryFilter, linksManagerCategoryFilter ? linksManagerCategoryFilter.value : '');
+        populateLinkCategories(streamLinksPopoverCategory, streamLinksPopoverCategory ? streamLinksPopoverCategory.value : '');
+        renderLinksManager();
+        renderStreamLinksPopover();
+        setLinksManagerStatus(`Deleted "${link.label}".`);
+      } catch (err) {
+        setLinksManagerStatus(err && err.message ? err.message : 'Link deletion failed.', true);
+      } finally {
+        saveButton.disabled = false;
+        deleteButton.disabled = false;
+      }
+    });
+
+    item.append(head, url, form);
+    return item;
+  }
+
+  function closeStreamLinksPopover() {
+    if (streamLinksPopover) streamLinksPopover.hidden = true;
+    if (openStreamLinksCard) {
+      const toggle = openStreamLinksCard.querySelector('.stream-links-toggle');
+      if (toggle) toggle.setAttribute('aria-expanded', 'false');
+    }
+    openStreamLinksCard = null;
+    if (streamLinksPopoverSearch) streamLinksPopoverSearch.value = '';
+    if (streamLinksPopoverCategory) streamLinksPopoverCategory.value = '';
+    setStreamLinksStatus('');
+  }
+
+  function renderStreamLinksPopover() {
+    if (!streamLinksPopoverList || !openStreamLinksCard) return;
+    const currentUrl = String(openStreamLinksCard.querySelector('.stream-url-input')?.value || '').trim();
+    const filtered = collectFilteredLinks(
+      streamLinksPopoverSearch ? streamLinksPopoverSearch.value : '',
+      streamLinksPopoverCategory ? streamLinksPopoverCategory.value : ''
+    );
+    renderLinksCollection(streamLinksPopoverList, filtered, {
+      emptyMessage: globalLinksState.links.length ? 'No links match the current filters.' : 'No saved links are available.',
+      activeUrl: currentUrl,
+      onSelect: (link) => {
+        const streamId = openStreamLinksCard.dataset.stream;
+        const urlInput = openStreamLinksCard.querySelector('.stream-url-input');
+        const nextUrl = String(link.url || '').trim();
+        const current = String(urlInput ? urlInput.value : '').trim();
+        if (!streamId || !nextUrl) return;
+        if (current && current !== nextUrl) {
+          const confirmed = window.confirm(`Replace the current URL on ${streamId} with "${link.label}"?`);
+          if (!confirmed) return;
+        }
+        if (urlInput) {
+          urlInput.value = nextUrl;
+        }
+        saveSettings(streamId, { stream_url: nextUrl });
+        closeStreamLinksPopover();
+      }
+    });
+  }
+
+  function positionStreamLinksPopover(anchor) {
+    if (!streamLinksPopover || !anchor) return;
+    const rect = anchor.getBoundingClientRect();
+    const margin = 12;
+    const desiredWidth = Math.min(420, Math.max(320, window.innerWidth * 0.32));
+    const maxLeft = Math.max(margin, window.innerWidth - desiredWidth - margin);
+    const left = Math.min(Math.max(margin, rect.left), maxLeft);
+    const top = Math.min(rect.bottom + 8, window.innerHeight - margin - 320);
+    streamLinksPopover.style.left = `${left}px`;
+    streamLinksPopover.style.top = `${Math.max(margin, top)}px`;
+    streamLinksPopover.style.width = `${desiredWidth}px`;
+  }
+
+  async function openStreamLinksPopover(card, trigger) {
+    if (!card || !streamLinksPopover) return;
+    openStreamLinksCard = card;
+    if (trigger) {
+      positionStreamLinksPopover(trigger);
+    }
+    streamLinksPopover.hidden = false;
     const toggle = card.querySelector('.stream-links-toggle');
-    if (!panel) return;
-    panel.hidden = false;
     if (toggle) toggle.setAttribute('aria-expanded', 'true');
-    setStreamLinksStatus(card, 'Loading links...');
+    setStreamLinksStatus('Loading links...');
     try {
       await fetchGlobalLinks(true);
-      populateStreamLinksCategories(card);
-      renderStreamLinksList(card);
-      setStreamLinksStatus(card, '');
+      populateLinkCategories(streamLinksPopoverCategory, streamLinksPopoverCategory ? streamLinksPopoverCategory.value : '');
+      renderStreamLinksPopover();
+      setStreamLinksStatus('');
     } catch (err) {
-      setStreamLinksStatus(card, err && err.message ? err.message : 'Links are unavailable.', true);
+      setStreamLinksStatus(err && err.message ? err.message : 'Links are unavailable.', true);
     }
   }
 
@@ -6578,8 +6854,8 @@ function applyPicsumSettings(card, settings, opts = {}) {
             payload.picsum_settings = collectPicsumSettings(card);
             setPicsumStatus(card, '');
           }
-          if (mediaMode !== 'livestream') {
-            closeStreamLinksPanel(card);
+          if (mediaMode !== 'livestream' && openStreamLinksCard === card) {
+            closeStreamLinksPopover();
           }
           saveSettings(streamId, payload);
           applyModeState(card, mediaMode, nextMode, getStreamUrl());
@@ -6746,9 +7022,6 @@ function applyPicsumSettings(card, settings, opts = {}) {
         });
       }
       const streamLinksToggle = card.querySelector('.stream-links-toggle');
-      const streamLinksClose = card.querySelector('.stream-links-close');
-      const streamLinksSearch = card.querySelector('.stream-links-search');
-      const streamLinksCategory = card.querySelector('.stream-links-category-filter');
       if (streamLinksToggle) {
         streamLinksToggle.setAttribute('aria-expanded', 'false');
         streamLinksToggle.addEventListener('click', async (event) => {
@@ -6759,35 +7032,12 @@ function applyPicsumSettings(card, settings, opts = {}) {
             showNotification('Switch this stream to URL / Embed mode to use Links');
             return;
           }
-          const panel = card.querySelector('.stream-links-panel');
-          const isOpen = panel && !panel.hidden;
-          document.querySelectorAll('.stream-card .stream-links-panel').forEach((otherPanel) => {
-            const otherCard = otherPanel.closest('.stream-card');
-            if (otherCard && otherCard !== card) {
-              closeStreamLinksPanel(otherCard);
-            }
-          });
+          const isOpen = openStreamLinksCard === card && streamLinksPopover && !streamLinksPopover.hidden;
           if (isOpen) {
-            closeStreamLinksPanel(card);
+            closeStreamLinksPopover();
             return;
           }
-          await openStreamLinksPanel(card);
-        });
-      }
-      if (streamLinksClose) {
-        streamLinksClose.addEventListener('click', (event) => {
-          event.preventDefault();
-          closeStreamLinksPanel(card);
-        });
-      }
-      if (streamLinksSearch) {
-        streamLinksSearch.addEventListener('input', () => {
-          renderStreamLinksList(card);
-        });
-      }
-      if (streamLinksCategory) {
-        streamLinksCategory.addEventListener('change', () => {
-          renderStreamLinksList(card);
+          await openStreamLinksPopover(card, streamLinksToggle);
         });
       }
       // YT settings changes
@@ -6886,22 +7136,77 @@ function applyPicsumSettings(card, settings, opts = {}) {
         loadMediaFor(streamId, effectiveFolder);
       }
     });
-    document.addEventListener('click', (event) => {
-      document.querySelectorAll('.stream-card .stream-links-panel').forEach((panel) => {
-        const card = panel.closest('.stream-card');
-        if (!card || panel.hidden) return;
-        if (card.contains(event.target)) return;
-        closeStreamLinksPanel(card);
-      });
-    });
-    document.addEventListener('keydown', (event) => {
-      if (event.key !== 'Escape') return;
-      document.querySelectorAll('.stream-card .stream-links-panel').forEach((panel) => {
-        const card = panel.closest('.stream-card');
-        if (card && !panel.hidden) {
-          closeStreamLinksPanel(card);
+    if (linksManagerCreateForm) {
+      linksManagerCreateForm.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        const payload = {
+          label: String(linksManagerCreateForm.querySelector('[name="label"]').value || '').trim(),
+          category: String(linksManagerCreateForm.querySelector('[name="category"]').value || '').trim(),
+          url: String(linksManagerCreateForm.querySelector('[name="url"]').value || '').trim(),
+        };
+        if (!payload.label || !payload.category || !payload.url) {
+          setLinksManagerStatus('Label, URL, and category are required.', true);
+          return;
+        }
+        const submit = linksManagerCreateForm.querySelector('button[type="submit"]');
+        if (submit) submit.disabled = true;
+        setLinksManagerStatus('Saving link...');
+        try {
+          const response = await fetch('/api/links', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+          });
+          const data = await response.json().catch(() => ({}));
+          if (!response.ok) {
+            throw new Error(data.error || `Unable to save link (${response.status})`);
+          }
+          globalLinksState.links = Array.isArray(data.links) ? data.links : [];
+          globalLinksState.categories = Array.isArray(data.categories) ? data.categories : [];
+          globalLinksState.loaded = true;
+          linksManagerCreateForm.reset();
+          populateLinkCategories(linksManagerCategoryFilter, linksManagerCategoryFilter ? linksManagerCategoryFilter.value : '');
+          populateLinkCategories(streamLinksPopoverCategory, streamLinksPopoverCategory ? streamLinksPopoverCategory.value : '');
+          renderLinksManager();
+          renderStreamLinksPopover();
+          setLinksManagerStatus(`Saved "${payload.label}".`);
+        } catch (err) {
+          setLinksManagerStatus(err && err.message ? err.message : 'Link creation failed.', true);
+        } finally {
+          if (submit) submit.disabled = false;
         }
       });
+    }
+    if (linksManagerSearch) {
+      linksManagerSearch.addEventListener('input', renderLinksManager);
+    }
+    if (linksManagerCategoryFilter) {
+      linksManagerCategoryFilter.addEventListener('change', renderLinksManager);
+    }
+    if (streamLinksPopoverSearch) {
+      streamLinksPopoverSearch.addEventListener('input', renderStreamLinksPopover);
+    }
+    if (streamLinksPopoverCategory) {
+      streamLinksPopoverCategory.addEventListener('change', renderStreamLinksPopover);
+    }
+    if (streamLinksPopoverClose) {
+      streamLinksPopoverClose.addEventListener('click', closeStreamLinksPopover);
+    }
+    window.addEventListener('resize', () => {
+      if (!openStreamLinksCard || !streamLinksPopover || streamLinksPopover.hidden) return;
+      const toggle = openStreamLinksCard.querySelector('.stream-links-toggle');
+      if (toggle) positionStreamLinksPopover(toggle);
+    });
+    document.addEventListener('click', (event) => {
+      if (!streamLinksPopover || streamLinksPopover.hidden) return;
+      if (streamLinksPopover.contains(event.target)) return;
+      if (event.target.closest('.stream-links-toggle')) return;
+      closeStreamLinksPopover();
+    });
+    document.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape' && streamLinksPopover && !streamLinksPopover.hidden) {
+        closeStreamLinksPopover();
+      }
     });
     syncMinimizedGridState();
     defaultCardOrder = Array.from(cardTagsMap.keys());
