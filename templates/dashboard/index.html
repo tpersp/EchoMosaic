@@ -3066,28 +3066,14 @@
     return '';
   }
   // Persist expanded/collapsed tile state
-  function getOpenSet() {
-    try { return new Set(JSON.parse(localStorage.getItem('gmOpen') || '[]')); } catch { return new Set(); }
-  }
-  function setOpenSet(s) { try { localStorage.setItem('gmOpen', JSON.stringify(Array.from(s))); } catch {} }
-  function markOpen(name, open) {
-    if (!name) return; // only persist named groups
-    const s = getOpenSet();
-    if (open) s.add(name); else s.delete(name);
-    setOpenSet(s);
-  }
   let gmOpenSet = new Set();
   let gmCurrentGroups = {};
   function loadOpenSet() {
-    try { gmOpenSet = new Set(JSON.parse(localStorage.getItem('gmOpen') || '[]')); } catch (e) { gmOpenSet = new Set(); }
-  }
-  function persistOpenSet() {
-    try { localStorage.setItem('gmOpen', JSON.stringify(Array.from(gmOpenSet))); } catch (e) {}
+    gmOpenSet = new Set();
   }
   function markOpen(name, open) {
     if (!name) return;
     if (open) gmOpenSet.add(name); else gmOpenSet.delete(name);
-    persistOpenSet();
   }
   function isOpen(name) { return name && gmOpenSet.has(name); }
 
@@ -3618,6 +3604,7 @@
       body.hidden = !body.hidden;
       tile.classList.toggle('expanded', !body.hidden);
       markOpen(name, !body.hidden);
+      edit.textContent = body.hidden ? 'Edit' : 'Close';
     });
     if (del) {
       del.addEventListener('click', async () => {
@@ -3666,11 +3653,17 @@
         alert(msg);
       }
     });
-    cancel.addEventListener('click', () => { body.hidden = true; tile.classList.remove('expanded'); });
+    cancel.addEventListener('click', () => {
+      body.hidden = true;
+      tile.classList.remove('expanded');
+      markOpen(name, false);
+      edit.textContent = 'Edit';
+    });
     // Keep count/title in sync with name edits
     const nameInputEl = nameRow.querySelector('.tile-name');
     if (nameInputEl) nameInputEl.addEventListener('input', () => { refreshTitleCount(); });
     refreshSummary();
+    edit.textContent = body.hidden ? 'Edit' : 'Close';
     return tile;
   }
 

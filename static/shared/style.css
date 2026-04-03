@@ -1127,6 +1127,10 @@ a {
     border-left: 1px solid var(--border);
     box-shadow: -12px 0 40px rgba(0, 0, 0, 0.35);
   }
+
+  #group-manager-panel {
+    width: min(680px, 100vw);
+  }
 }
 
 @media (max-width: 760px) {
@@ -1169,6 +1173,10 @@ a {
     right: 0;
     width: 100vw;
   }
+
+  #group-manager-panel {
+    width: 100vw;
+  }
 }
 
 /* Group manager styles */
@@ -1199,15 +1207,13 @@ a {
   display: flex;
   align-items: center;
   justify-content: center;
-  min-height: 124px;
+  min-height: 92px;
   color: var(--accent);
   border-style: dashed;
-  background:
-    linear-gradient(135deg, color-mix(in srgb, var(--accent) 10%, transparent), transparent 55%),
-    var(--surface);
+  background: color-mix(in srgb, var(--surface-alt) 46%, var(--surface));
 }
 .group-tile.add .tile-header {
-  font-size: 1.02rem;
+  font-size: 0.96rem;
   font-weight: 700;
   letter-spacing: 0.01em;
 }
@@ -1335,6 +1341,10 @@ a {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 0.75rem;
+}
+.tile-cols-wrap,
+.tile-rows-wrap {
+  max-width: 150px;
 }
 .group-layout-grid {
   align-items: start;
@@ -1579,6 +1589,10 @@ a {
   background: var(--surface);
   border-right: 1px solid var(--border);
   box-shadow: 12px 0 40px rgba(0, 0, 0, 0.35);
+}
+
+#group-manager-panel {
+  width: min(680px, calc(100vw - 260px));
 }
 
 .dashboard-panel-header {
