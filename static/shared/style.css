@@ -323,6 +323,11 @@ body.dashboard-page.dashboard-panel-open {
     left: 88px;
     width: min(520px, calc(100vw - 88px));
   }
+
+  html.sidebar-collapsed body.dashboard-page #group-manager-panel,
+  body.dashboard-page.sidebar-collapsed #group-manager-panel {
+    width: min(860px, calc(100vw - 88px));
+  }
 }
 
 .page-section-header {
@@ -1623,10 +1628,6 @@ a {
 
 #group-manager-panel {
   width: min(860px, calc(100vw - 260px));
-}
-
-#group-manager-panel {
-  width: min(680px, calc(100vw - 260px));
 }
 
 .dashboard-panel-header {
