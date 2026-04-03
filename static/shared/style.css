@@ -1929,6 +1929,54 @@ a {
   flex: 1 1 auto;
 }
 
+.stream-card .background-blur-slider,
+.playback-controls .video-volume-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  background: transparent;
+  border: 0;
+  padding: 0;
+  margin: 0;
+  height: 18px;
+}
+
+.stream-card .background-blur-slider::-webkit-slider-runnable-track,
+.playback-controls .video-volume-slider::-webkit-slider-runnable-track {
+  height: 6px;
+  background: color-mix(in srgb, var(--surface-alt) 78%, var(--border));
+  border-radius: 999px;
+}
+
+.stream-card .background-blur-slider::-webkit-slider-thumb,
+.playback-controls .video-volume-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--accent);
+  border: 2px solid color-mix(in srgb, var(--surface) 82%, white 18%);
+  margin-top: -6px;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.28);
+}
+
+.stream-card .background-blur-slider::-moz-range-track,
+.playback-controls .video-volume-slider::-moz-range-track {
+  height: 6px;
+  background: color-mix(in srgb, var(--surface-alt) 78%, var(--border));
+  border-radius: 999px;
+}
+
+.stream-card .background-blur-slider::-moz-range-thumb,
+.playback-controls .video-volume-slider::-moz-range-thumb {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--accent);
+  border: 2px solid color-mix(in srgb, var(--surface) 82%, white 18%);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.28);
+}
+
 .stream-card .background-blur-value {
   min-width: 2.8rem;
   text-align: right;
