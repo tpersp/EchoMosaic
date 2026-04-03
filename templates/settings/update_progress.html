@@ -9,6 +9,10 @@
         if (window.localStorage.getItem('sidebar-collapsed') === '1') {
           document.documentElement.classList.add('sidebar-collapsed');
         }
+        const savedTheme = window.localStorage.getItem('theme');
+        if (savedTheme === 'light' || savedTheme === 'dark') {
+          document.documentElement.setAttribute('data-theme', savedTheme);
+        }
       } catch (err) {}
     })();
   </script>
