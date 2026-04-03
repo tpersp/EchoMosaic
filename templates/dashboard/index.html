@@ -161,7 +161,7 @@
     {% set embed_title = embed_meta.title if embed_meta and embed_meta.title else '' %}
     {% set embed_type = embed_meta.content_type if embed_meta and embed_meta.content_type else '' %}
     {% set embed_provider = embed_meta.provider if embed_meta and embed_meta.provider else '' %}
-    <div class="stream-card" data-stream="{{ stream_id }}" data-hide-nsfw="{{ "true" if conf.hide_nsfw|default(False) else "false" }}" data-tags='{{ (conf.tags|default([]))|tojson }}' data-selected-path="{{ conf.selected_image or '' }}" data-selected-kind="{{ conf.selected_media_kind or '' }}" data-video-mode="{{ conf.video_playback_mode|default('duration') }}" data-video-volume="{{ conf.video_volume|default(1.0) }}" data-media-mode="{{ conf.media_mode|default('image') }}" data-mode="{{ conf.mode|default('random') }}" data-picsum-seed="{{ conf.picsum_settings.seed if conf.picsum_settings and conf.picsum_settings.seed is not none else '' }}" data-sync-timer="{{ conf.sync.timer_id if conf.sync and conf.sync.timer_id else '' }}" data-sync-offset="{{ conf.sync.offset if conf.sync and conf.sync.offset is not none else 0 }}" data-embed-title="{{ embed_title }}" data-embed-type="{{ embed_type }}" data-embed-provider="{{ embed_provider }}" data-embed-video-id="{{ embed_meta.video_id or '' }}" data-embed-playlist-id="{{ embed_meta.playlist_id or '' }}" data-embed-start-index="{{ embed_meta.start_index if embed_meta.start_index is not none else '' }}">
+    <div class="stream-card" data-stream="{{ stream_id }}" data-tags='{{ (conf.tags|default([]))|tojson }}' data-selected-path="{{ conf.selected_image or '' }}" data-selected-kind="{{ conf.selected_media_kind or '' }}" data-video-mode="{{ conf.video_playback_mode|default('duration') }}" data-video-volume="{{ conf.video_volume|default(1.0) }}" data-media-mode="{{ conf.media_mode|default('image') }}" data-mode="{{ conf.mode|default('random') }}" data-picsum-seed="{{ conf.picsum_settings.seed if conf.picsum_settings and conf.picsum_settings.seed is not none else '' }}" data-sync-timer="{{ conf.sync.timer_id if conf.sync and conf.sync.timer_id else '' }}" data-sync-offset="{{ conf.sync.offset if conf.sync and conf.sync.offset is not none else 0 }}" data-embed-title="{{ embed_title }}" data-embed-type="{{ embed_type }}" data-embed-provider="{{ embed_provider }}" data-embed-video-id="{{ embed_meta.video_id or '' }}" data-embed-playlist-id="{{ embed_meta.playlist_id or '' }}" data-embed-start-index="{{ embed_meta.start_index if embed_meta.start_index is not none else '' }}">
       <div class="card-header">
         <div class="card-header-info">
           <div class="title-row">
@@ -246,26 +246,13 @@
         <div class="form-row folder-row" {% if media_mode == 'livestream' or (media_mode == 'ai' and mode_value in ['generate', 'ai']) %} style="display:none;" {% endif %}>
           <label for="folder-{{ stream_id }}">Folder</label>
           {% set current_folder = conf.folder if conf.folder else 'all' %}
-          {% set hide_nsfw = conf.hide_nsfw|default(False) %}
           <select id="folder-{{ stream_id }}" class="folder-select" data-stream="{{ stream_id }}" data-current-folder="{{ current_folder }}" title="{{ current_folder }}">
-            {% if hide_nsfw and current_folder and 'nsfw' in current_folder|lower %}
-              <option value="__filtered__" data-filtered="true" title="{{ current_folder }}" selected>Filtered ({{ current_folder }})</option>
-            {% endif %}
             {% for entry in folder_options %}
               {% set name = entry.name %}
               {% set display_name = entry.display_name if entry.display_name is defined and entry.display_name else name %}
-              {% if not (hide_nsfw and 'nsfw' in name|lower) %}
-                <option value="{{ name }}" title="{{ name }}" data-display-name="{{ display_name }}" data-has-images="{{ 'true' if entry.has_images else 'false' }}" data-has-videos="{{ 'true' if entry.has_videos else 'false' }}"{% if current_folder == name %} selected{% endif %}>{{ display_name }}</option>
-              {% endif %}
+              <option value="{{ name }}" title="{{ name }}" data-display-name="{{ display_name }}" data-has-images="{{ 'true' if entry.has_images else 'false' }}" data-has-videos="{{ 'true' if entry.has_videos else 'false' }}"{% if current_folder == name %} selected{% endif %}>{{ display_name }}</option>
             {% endfor %}
           </select>
-        </div>
-        <div class="form-row nsfw-row" {% if media_mode == 'livestream' %} style="display:none;" {% endif %}>
-          <label for="hide-nsfw-{{ stream_id }}">Hide NSFW</label>
-          <label class="toggle inline" title="Hide folders and files containing 'nsfw'">
-            <input id="hide-nsfw-{{ stream_id }}" type="checkbox" class="hide-nsfw-toggle" data-stream="{{ stream_id }}" {% if hide_nsfw %}checked{% endif %}>
-            <span class="toggle-switch" aria-hidden="true"></span>
-          </label>
         </div>
         <div class="form-row tag-row">
           <label for="tags-{{ stream_id }}">Tags</label>
@@ -4876,9 +4863,9 @@
     if (!streamId) return;
     const folderSelect = card.querySelector('.folder-select');
     const currentFolder = folderSelect
-      ? (folderSelect.value === '__filtered__' ? (folderSelect.dataset.currentFolder || 'all') : (folderSelect.value || folderSelect.dataset.currentFolder || 'all'))
+      ? (folderSelect.value || folderSelect.dataset.currentFolder || 'all')
       : 'all';
-    const refreshResult = refreshFoldersForCard(card, card.dataset.hideNsfw === 'true');
+    const refreshResult = refreshFoldersForCard(card);
     if (refreshResult && typeof refreshResult.then === 'function') {
       refreshResult.then(folder => {
         loadMediaFor(streamId, folder || currentFolder || 'all');
@@ -5920,13 +5907,6 @@
               qualitySelect.value = (data.new_config.image_quality || 'auto');
             }
           }
-          if (data.new_config && data.new_config.hide_nsfw !== undefined) {
-            card.dataset.hideNsfw = data.new_config.hide_nsfw ? 'true' : 'false';
-            const hideToggle = card.querySelector('.hide-nsfw-toggle');
-            if (hideToggle) {
-              hideToggle.checked = !!data.new_config.hide_nsfw;
-            }
-          }
           if (data.new_config && data.new_config.background_blur_enabled !== undefined) {
             const enabled = !!data.new_config.background_blur_enabled;
             const bgToggle = card.querySelector('.background-toggle');
@@ -6338,7 +6318,7 @@ function applyPicsumSettings(card, settings, opts = {}) {
     return data;
   }
 
-  async function refreshFoldersForCard(card, hideNsfw) {
+  async function refreshFoldersForCard(card) {
     const folderSelect = card.querySelector('.folder-select');
     if (!folderSelect) {
       return null;
@@ -6358,9 +6338,6 @@ function applyPicsumSettings(card, settings, opts = {}) {
     };
     const library = currentLibraryForMode(card.dataset.mediaMode || 'image');
     const params = new URLSearchParams({ library });
-    if (hideNsfw) {
-      params.set('hide_nsfw', '1');
-    }
     const url = `/folders?${params.toString()}`;
     try {
       const response = await fetch(url);
@@ -6373,16 +6350,14 @@ function applyPicsumSettings(card, settings, opts = {}) {
       }
       const assigned = folderSelect.dataset.currentFolder || 'all';
       const assignedLabel = toDisplayName(assigned);
-      const assignedLower = (assigned || '').toLowerCase();
       const hasAssigned = items.some(entry => entry && entry.name === assigned);
-      const shouldShowPlaceholder = Boolean(hideNsfw) && assigned && assignedLower.includes('nsfw') && !hasAssigned;
+      const shouldShowPlaceholder = assigned && !hasAssigned;
       const frag = document.createDocumentFragment();
       if (shouldShowPlaceholder) {
         const placeholder = document.createElement('option');
-        placeholder.value = '__filtered__';
-        placeholder.textContent = `Filtered (${assignedLabel})`;
+        placeholder.value = assigned;
+        placeholder.textContent = assignedLabel;
         placeholder.title = assigned;
-        placeholder.dataset.filtered = 'true';
         placeholder.dataset.displayName = placeholder.textContent;
         placeholder.selected = true;
         frag.appendChild(placeholder);
@@ -6393,9 +6368,6 @@ function applyPicsumSettings(card, settings, opts = {}) {
         }
         const name = String(entry.name);
         const displayName = entry.display_name ? String(entry.display_name) : name;
-        if (hideNsfw && name.toLowerCase().includes('nsfw')) {
-          return;
-        }
         const opt = document.createElement('option');
         opt.value = name;
         opt.title = name;
@@ -6411,7 +6383,7 @@ function applyPicsumSettings(card, settings, opts = {}) {
       folderSelect.replaceChildren(frag);
       let currentSelection = folderSelect.dataset.currentFolder || 'all';
       if (shouldShowPlaceholder) {
-        folderSelect.value = '__filtered__';
+        folderSelect.value = assigned;
         folderSelect.title = assignedLabel;
         folderSelect.dataset.currentFolder = assigned;
         currentSelection = assigned || 'all';
@@ -6491,7 +6463,6 @@ function applyPicsumSettings(card, settings, opts = {}) {
     const selectedRow = card.querySelector('.selected-image-row');
     const folderRow = card.querySelector('.folder-row');
     const qualityRow = card.querySelector('.image-quality-row');
-    const nsfwRow = card.querySelector('.nsfw-row');
     const backgroundRow = card.querySelector('.background-row');
     const aiSection = card.querySelector('.ai-generator');
     const aiSummary = card.querySelector('.ai-summary');
@@ -6537,7 +6508,6 @@ function applyPicsumSettings(card, settings, opts = {}) {
       selectedRow.style.display = showSelected ? '' : 'none';
     }
     if (folderRow) folderRow.style.display = (isImage || isVideo || isAiRandom || isAiSpecific) ? '' : 'none';
-    if (nsfwRow) nsfwRow.style.display = (isLivestream || isPicsum) ? 'none' : '';
     if (qualityRow) qualityRow.style.display = (isLivestream || isVideo || isPicsum) ? 'none' : '';
     if (backgroundRow) backgroundRow.style.display = (isLivestream || isVideo) ? 'none' : '';
     if (picsumRow) {
@@ -6573,12 +6543,8 @@ function applyPicsumSettings(card, settings, opts = {}) {
     const grid = card.querySelector('.image-picker .image-grid');
     if (!grid) return;
     const mediaMode = (card.dataset.mediaMode || 'image').toLowerCase();
-    const hideNsfw = card.dataset.hideNsfw === 'true';
     const params = new URLSearchParams({ folder });
     params.set('library', currentLibraryForMode(mediaMode));
-    if (hideNsfw) {
-      params.set('hide_nsfw', '1');
-    }
     if (mediaMode === 'image' || mediaMode === 'ai') {
       params.set('kind', 'image');
     } else if (mediaMode === 'video') {
@@ -6742,20 +6708,8 @@ function applyPicsumSettings(card, settings, opts = {}) {
         }
         folderSelect.addEventListener('change', e => {
           const selectEl = e.target;
-          if (selectEl.value === '__filtered__') {
-            const filteredOption = selectEl.options[selectEl.selectedIndex];
-            if (filteredOption) {
-              const label = filteredOption.dataset.displayName || filteredOption.textContent || filteredOption.title || selectEl.title;
-              selectEl.title = label;
-            }
-            return;
-          }
           const folder = selectEl.value || 'all';
           selectEl.dataset.currentFolder = folder;
-          const filteredOption = selectEl.querySelector('option[data-filtered="true"]');
-          if (filteredOption) {
-            filteredOption.remove();
-          }
           const selectedOption = selectEl.options[selectEl.selectedIndex];
           if (selectedOption) {
             const label = selectedOption.dataset.displayName || selectedOption.textContent || selectedOption.title || folder;
@@ -6769,29 +6723,6 @@ function applyPicsumSettings(card, settings, opts = {}) {
           if (display) display.textContent = 'None';
           saveSettings(streamId, { folder, selected_image: null, selected_media_kind: null });
           loadMediaFor(streamId, folder);
-        });
-      }
-      const hideNsfwToggle = card.querySelector('.hide-nsfw-toggle');
-      if (hideNsfwToggle) {
-        hideNsfwToggle.addEventListener('change', e => {
-          const enabled = e.target.checked;
-          hideNsfwToggle.disabled = true;
-          saveSettings(streamId, { hide_nsfw: enabled }, {
-            onSuccess: () => {
-              const refreshResult = refreshFoldersForCard(card, enabled);
-              if (refreshResult && typeof refreshResult.then === 'function') {
-                refreshResult.finally(() => {
-                  hideNsfwToggle.disabled = false;
-                });
-              } else {
-                hideNsfwToggle.disabled = false;
-              }
-            },
-            onError: () => {
-              hideNsfwToggle.checked = !enabled;
-              hideNsfwToggle.disabled = false;
-            }
-          });
         });
       }
       const imageQualitySelect = card.querySelector('.image-quality-select');
@@ -6999,9 +6930,9 @@ function applyPicsumSettings(card, settings, opts = {}) {
           }
           saveSettings(streamId, payload);
           applyModeState(card, mediaMode, nextMode, getStreamUrl());
-          refreshFoldersForCard(card, card.dataset.hideNsfw === 'true');
+          refreshFoldersForCard(card);
           if ((nextMode === 'specific' && (mediaMode === 'image' || mediaMode === 'video')) || (mediaMode === 'ai' && nextMode === 'specific')) {
-            const effectiveFolder = folderSelect ? (folderSelect.value === '__filtered__' ? (folderSelect.dataset.currentFolder || 'all') : folderSelect.value) : 'all';
+            const effectiveFolder = folderSelect ? (folderSelect.value || folderSelect.dataset.currentFolder || 'all') : 'all';
             loadMediaFor(streamId, effectiveFolder);
           }
         });
@@ -7027,7 +6958,7 @@ function applyPicsumSettings(card, settings, opts = {}) {
           saveSettings(streamId, payload);
           applyModeState(card, mediaMode, mode, getStreamUrl());
           if ((mode === 'specific' && (mediaMode === 'image' || mediaMode === 'video')) || (mediaMode === 'ai' && mode === 'specific')) {
-            const effectiveFolder = folderSelect ? (folderSelect.value === '__filtered__' ? (folderSelect.dataset.currentFolder || 'all') : folderSelect.value) : 'all';
+            const effectiveFolder = folderSelect ? (folderSelect.value || folderSelect.dataset.currentFolder || 'all') : 'all';
             loadMediaFor(streamId, effectiveFolder);
           }
         });
@@ -7259,7 +7190,7 @@ function applyPicsumSettings(card, settings, opts = {}) {
       const reloadBtn = card.querySelector('.reload-images-btn');
       if (reloadBtn) {
         reloadBtn.addEventListener('click', () => {
-          const folder = folderSelect ? (folderSelect.value === '__filtered__' ? (folderSelect.dataset.currentFolder || 'all') : folderSelect.value) : 'all';
+          const folder = folderSelect ? (folderSelect.value || folderSelect.dataset.currentFolder || 'all') : 'all';
           loadMediaFor(streamId, folder);
         });
       }
@@ -7270,9 +7201,9 @@ function applyPicsumSettings(card, settings, opts = {}) {
         String(card.dataset.mode || getModeValue(card, initialMediaMode) || (initialMediaMode === 'livestream' ? 'livestream' : (initialMediaMode === 'ai' ? 'generate' : 'random'))).toLowerCase()
       );
       applyModeState(card, initialMediaMode, initialModeValue, urlInput ? urlInput.value : '');
-      refreshFoldersForCard(card, card.dataset.hideNsfw === 'true');
+      refreshFoldersForCard(card);
       if (((initialMediaMode === 'image' || initialMediaMode === 'video') && initialModeValue === 'specific') || (initialMediaMode === 'ai' && initialModeValue === 'specific')) {
-        const effectiveFolder = folderSelect ? (folderSelect.value === '__filtered__' ? (folderSelect.dataset.currentFolder || 'all') : (folderSelect.value || folderSelect.dataset.currentFolder || 'all')) : 'all';
+        const effectiveFolder = folderSelect ? (folderSelect.value || folderSelect.dataset.currentFolder || 'all') : 'all';
         loadMediaFor(streamId, effectiveFolder);
       }
     });

@@ -45,7 +45,7 @@ def create_media_blueprint(
         sort = request.args.get("sort", "name")
         order = request.args.get("order") or request.args.get("direction") or "asc"
         hide_nsfw_raw = request.args.get("hide_nsfw")
-        hide_nsfw = True if hide_nsfw_raw is None else parse_truthy(hide_nsfw_raw)
+        hide_nsfw = False if hide_nsfw_raw is None else parse_truthy(hide_nsfw_raw)
         try:
             payload = media_manager.list_directory(
                 path,
@@ -234,7 +234,7 @@ def create_media_blueprint(
 
     @blueprint.route("/folders", methods=["GET"])
     def folders_collection():
-        hide_nsfw = parse_truthy(request.args.get("hide_nsfw"))
+        hide_nsfw = False if request.args.get("hide_nsfw") is None else parse_truthy(request.args.get("hide_nsfw"))
         library = normalize_library_key(request.args.get("library"), media_library_default)
         inventory = get_folder_inventory(hide_nsfw=hide_nsfw, library=library)
         return jsonify(inventory)

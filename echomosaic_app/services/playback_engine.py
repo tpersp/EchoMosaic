@@ -89,7 +89,6 @@ class StreamPlaybackState:
         folder_raw = conf.get("folder")
         new_folder = folder_raw.strip() if isinstance(folder_raw, str) and folder_raw.strip() else "all"
 
-        new_hide_nsfw = bool(conf.get("hide_nsfw"))
         shuffle_value = conf.get("shuffle")
         new_shuffle = False if shuffle_value is False else True
 
@@ -133,7 +132,7 @@ class StreamPlaybackState:
         self.mode = new_mode
         self.media_mode = new_media_mode
         self.folder = new_folder
-        self.hide_nsfw = new_hide_nsfw
+        self.hide_nsfw = False
         self.shuffle = new_shuffle
         self.duration_setting = new_duration
         self.video_playback_mode = new_playback_mode
@@ -141,7 +140,7 @@ class StreamPlaybackState:
         self.sync_timer_id = new_sync_timer_id
         self.sync_offset = new_sync_offset
 
-        new_source_signature = (self.mode, self.media_mode, self.folder, self.hide_nsfw, self.shuffle)
+        new_source_signature = (self.mode, self.media_mode, self.folder, self.shuffle)
         new_duration_signature = (self.duration_setting, self.video_playback_mode)
 
         self._source_signature = new_source_signature

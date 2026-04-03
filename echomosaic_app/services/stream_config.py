@@ -237,7 +237,7 @@ class StreamConfigService:
 
         for key in [
             "mode", "folder", "selected_image", "duration", "shuffle", "stream_url",
-            "image_quality", "yt_cc", "yt_mute", "yt_quality", "label", "hide_nsfw",
+            "image_quality", "yt_cc", "yt_mute", "yt_quality", "label",
             "background_blur_enabled", "background_blur_amount", "video_playback_mode",
             "video_volume", "selected_media_kind", "media_mode", self.tag_key,
         ]:
@@ -267,8 +267,6 @@ class StreamConfigService:
                 tags_payload = self.sanitize_stream_tags(val)
                 conf[self.tag_key] = tags_payload
                 self.register_global_tags(tags_payload)
-            elif key == "hide_nsfw":
-                conf[key] = bool(val)
             elif key == "background_blur_enabled":
                 conf[key] = self.coerce_bool(val, conf.get(key, False))
             elif key == "background_blur_amount":
