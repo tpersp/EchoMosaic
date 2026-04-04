@@ -3759,14 +3759,23 @@
   
 
   // Add a new stream by posting to /streams
-  addStreamBtn.addEventListener('click', () => {
-    fetch('/streams', {method:'POST'})
-      .then(res => res.json())
-      .then(data => {
-        if (data.stream_id) {
-          location.reload();
-        }
-      });
+  addStreamBtn.addEventListener('click', async () => {
+    if (addStreamBtn.disabled) return;
+    addStreamBtn.disabled = true;
+    try {
+      const res = await fetch('/streams', {method:'POST'});
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.stream_id) {
+        throw new Error(data.error || 'Unable to add stream');
+      }
+      await addStreamCardInPlace(data.stream_id);
+      showNotification(`Added ${data.stream_id}`);
+    } catch (err) {
+      console.error('Add stream failed', err);
+      showNotification(err && err.message ? err.message : 'Unable to add stream');
+    } finally {
+      addStreamBtn.disabled = false;
+    }
   });
 
   // Card menu interactions: close on outside click and handle remove
@@ -3784,7 +3793,8 @@
           .then(res => res.json())
           .then(data => {
             if (data.status === 'deleted') {
-              location.reload();
+              removeStreamCardInPlace(id);
+              showNotification(`Removed ${id}`);
             }
           });
       }
@@ -3798,9 +3808,30 @@
   });
 
   // Socket.IO listener for layout updates if needed in future
-  socket.on('streams_changed', (data) => {
-    // This could be used to update the UI without reload.
+  socket.on('streams_changed', async (data) => {
     console.log('Streams changed:', data);
+    if (!data || typeof data !== 'object') return;
+    const action = String(data.action || '').toLowerCase();
+    const streamId = String(data.stream_id || '').trim();
+    if (action === 'added' && streamId) {
+      if (!findStreamCard(streamId)) {
+        try {
+          await addStreamCardInPlace(streamId);
+        } catch (err) {
+          console.error('Failed to add stream card in place', err);
+        }
+      }
+      return;
+    }
+    if (action === 'deleted' && streamId) {
+      if (findStreamCard(streamId)) {
+        removeStreamCardInPlace(streamId);
+      }
+      return;
+    }
+    if (action === 'reordered' && Array.isArray(data.stream_order)) {
+      refreshDashboardCardCollections(data.stream_order);
+    }
   });
 
   socket.on('ai_job_update', (data) => {
@@ -6748,21 +6779,102 @@ function applyPicsumSettings(card, settings, opts = {}) {
       });
   }
 
-  document.addEventListener('DOMContentLoaded', () => {
-    const allCards = Array.from(document.querySelectorAll('.stream-card'));
-    const streamCards = allCards.filter(card => card.dataset.stream);
-    const presentIds = new Set(streamCards.map(card => card.dataset.stream));
-    let minimizedChanged = false;
-    minimizedStreamSet.forEach(id => {
-      if (!presentIds.has(id)) {
-        minimizedStreamSet.delete(id);
-        minimizedChanged = true;
+  function refreshDashboardCardCollections(preferredOrderIds = null) {
+    const currentCards = Array.from(document.querySelectorAll('.stream-card[data-stream]'));
+    defaultCardOrder = currentCards.slice();
+    const cardById = new Map(defaultCardOrder.map(card => [card.dataset.stream, card]));
+    const preferred = Array.isArray(preferredOrderIds)
+      ? preferredOrderIds.slice()
+      : (customCardOrder.length
+          ? customCardOrder.map(card => card && card.dataset ? (card.dataset.stream || '') : '').filter(Boolean)
+          : (Array.isArray(persistedCustomStreamOrder) ? persistedCustomStreamOrder.slice() : []));
+    const seen = new Set();
+    customCardOrder = [];
+    preferred.forEach(streamId => {
+      if (!streamId || seen.has(streamId) || !cardById.has(streamId)) {
+        return;
+      }
+      seen.add(streamId);
+      customCardOrder.push(cardById.get(streamId));
+    });
+    defaultCardOrder.forEach(card => {
+      const streamId = card.dataset.stream;
+      if (streamId && !seen.has(streamId)) {
+        customCardOrder.push(card);
       }
     });
-    if (minimizedChanged) {
-      persistMinimizedSet(minimizedStreamSet);
+    renderTagManager();
+    applyFiltersAndSorting();
+    syncMinimizedGridState();
+  }
+
+  function findParsedDashboardCard(doc, streamId) {
+    if (!doc || !streamId) return null;
+    const cards = doc.querySelectorAll('.stream-card[data-stream]');
+    for (const card of cards) {
+      if (card.dataset.stream === streamId) {
+        return card;
+      }
     }
-    streamCards.forEach(card => {
+    return null;
+  }
+
+  async function fetchDashboardCardFragment(streamId) {
+    const response = await fetch(window.location.pathname, { cache: 'no-store' });
+    if (!response.ok) {
+      throw new Error(`Dashboard refresh failed (${response.status})`);
+    }
+    const html = await response.text();
+    const parsed = new DOMParser().parseFromString(html, 'text/html');
+    return findParsedDashboardCard(parsed, streamId);
+  }
+
+  async function addStreamCardInPlace(streamId) {
+    if (!streamId) return null;
+    const existing = findStreamCard(streamId);
+    if (existing) return existing;
+    const parsedCard = await fetchDashboardCardFragment(streamId);
+    if (!parsedCard || !dashboardGrid) {
+      throw new Error('Unable to load the new stream card');
+    }
+    const imported = document.importNode(parsedCard, true);
+    dashboardGrid.appendChild(imported);
+    initializeStreamCard(imported);
+    const currentOrder = customCardOrder.map(card => card && card.dataset ? (card.dataset.stream || '') : '').filter(Boolean);
+    if (currentSortMode === 'custom') {
+      currentOrder.push(streamId);
+    }
+    refreshDashboardCardCollections(currentOrder);
+    loadGroupsUI();
+    return imported;
+  }
+
+  function removeStreamCardInPlace(streamId) {
+    const card = findStreamCard(streamId);
+    if (!card) {
+      refreshDashboardCardCollections();
+      loadGroupsUI();
+      return;
+    }
+    if (openStreamLinksCard === card) {
+      closeStreamLinksPopover();
+    }
+    minimizedStreamSet.delete(streamId);
+    persistMinimizedSet(minimizedStreamSet);
+    aiActiveJobs.delete(streamId);
+    Object.keys(takenSlugs).forEach(slug => {
+      if (takenSlugs[slug] === streamId) {
+        delete takenSlugs[slug];
+      }
+    });
+    cardTagsMap.delete(card);
+    youtubePlaylistState.delete(card);
+    card.remove();
+    refreshDashboardCardCollections();
+    loadGroupsUI();
+  }
+
+  function initializeStreamCard(card) {
       const streamId = card.dataset.stream;
       if (streamId) {
         applyMinimizedState(card, minimizedStreamSet.has(streamId));
@@ -7367,7 +7479,23 @@ function applyPicsumSettings(card, settings, opts = {}) {
         const effectiveFolder = folderSelect ? (folderSelect.value || folderSelect.dataset.currentFolder || 'all') : 'all';
         loadMediaFor(streamId, effectiveFolder);
       }
+  }
+
+  document.addEventListener('DOMContentLoaded', () => {
+    const allCards = Array.from(document.querySelectorAll('.stream-card'));
+    const streamCards = allCards.filter(card => card.dataset.stream);
+    const presentIds = new Set(streamCards.map(card => card.dataset.stream));
+    let minimizedChanged = false;
+    minimizedStreamSet.forEach(id => {
+      if (!presentIds.has(id)) {
+        minimizedStreamSet.delete(id);
+        minimizedChanged = true;
+      }
     });
+    if (minimizedChanged) {
+      persistMinimizedSet(minimizedStreamSet);
+    }
+    streamCards.forEach(initializeStreamCard);
     if (linksManagerCreateForm) {
       linksManagerCreateForm.addEventListener('submit', async (event) => {
         event.preventDefault();
@@ -7441,25 +7569,7 @@ function applyPicsumSettings(card, settings, opts = {}) {
       }
     });
     syncMinimizedGridState();
-    defaultCardOrder = Array.from(cardTagsMap.keys());
-    const cardById = new Map(defaultCardOrder.map(card => [card.dataset.stream, card]));
-    const customIds = Array.isArray(persistedCustomStreamOrder) ? persistedCustomStreamOrder : [];
-    const seenCustomIds = new Set();
-    customCardOrder = [];
-    customIds.forEach(streamId => {
-      if (!cardById.has(streamId) || seenCustomIds.has(streamId)) {
-        return;
-      }
-      seenCustomIds.add(streamId);
-      customCardOrder.push(cardById.get(streamId));
-    });
-    defaultCardOrder.forEach(card => {
-      const streamId = card.dataset.stream;
-      if (streamId && !seenCustomIds.has(streamId)) {
-        customCardOrder.push(card);
-      }
-    });
-    renderTagManager();
+    refreshDashboardCardCollections();
     renderFilterChips();
     const persistedSortMode = (() => {
       try {

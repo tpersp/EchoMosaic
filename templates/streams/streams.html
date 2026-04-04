@@ -40,22 +40,22 @@
         {% set main_id = layout.pip_main if layout.pip_main in stream_lookup else (ids[0] if ids else None) %}
         {% set pip_id = layout.pip_pip if layout.pip_pip in stream_lookup else (ids[1] if ids|length > 1 else (ids[0] if ids else None)) %}
         {% if main_id %}
-        <div class="mosaic-cell main">
+        <div class="mosaic-cell main" data-stream-id="{{ main_id }}">
           {% set conf = stream_lookup[main_id] %}
-          <iframe src="{{ url_for('dashboard_routes.render_stream', name=(conf.label if conf.label else main_id)|slugify) }}" allow="autoplay; encrypted-media; picture-in-picture; fullscreen" allowfullscreen loading="lazy" scrolling="no"></iframe>
+          <iframe data-stream-id="{{ main_id }}" src="{{ url_for('dashboard_routes.render_stream', name=(conf.label if conf.label else main_id)|slugify) }}" allow="autoplay; encrypted-media; picture-in-picture; fullscreen" allowfullscreen loading="lazy" scrolling="no"></iframe>
         </div>
           {% if pip_id %}
           {% set pip_conf = stream_lookup.get(pip_id) %}
           {% if pip_conf %}
-          <div class="mosaic-cell pip">
-            <iframe src="{{ url_for('dashboard_routes.render_stream', name=(pip_conf.label if pip_conf.label else pip_id)|slugify) }}" allow="autoplay; encrypted-media; picture-in-picture; fullscreen" allowfullscreen loading="lazy" scrolling="no"></iframe>
+          <div class="mosaic-cell pip" data-stream-id="{{ pip_id }}">
+            <iframe data-stream-id="{{ pip_id }}" src="{{ url_for('dashboard_routes.render_stream', name=(pip_conf.label if pip_conf.label else pip_id)|slugify) }}" allow="autoplay; encrypted-media; picture-in-picture; fullscreen" allowfullscreen loading="lazy" scrolling="no"></iframe>
           </div>
           {% endif %}
           {% endif %}
         {% else %}
           {% for stream_id, conf in stream_items %}
-          <div class="mosaic-cell">
-            <iframe src="{{ url_for('dashboard_routes.render_stream', name=(conf.label if conf.label else stream_id)|slugify) }}" allow="autoplay; encrypted-media; picture-in-picture; fullscreen" allowfullscreen loading="lazy" scrolling="no"></iframe>
+          <div class="mosaic-cell" data-stream-id="{{ stream_id }}">
+            <iframe data-stream-id="{{ stream_id }}" src="{{ url_for('dashboard_routes.render_stream', name=(conf.label if conf.label else stream_id)|slugify) }}" allow="autoplay; encrypted-media; picture-in-picture; fullscreen" allowfullscreen loading="lazy" scrolling="no"></iframe>
           </div>
           {% endfor %}
         {% endif %}
@@ -101,16 +101,16 @@
             {% set area = slots[i] %}
             {% if stream_id in stream_lookup %}
             {% set conf = stream_lookup[stream_id] %}
-            <div class="mosaic-cell" style="grid-area: {{ area }};">
-              <iframe src="{{ url_for('dashboard_routes.render_stream', name=(conf.label if conf.label else stream_id)|slugify) }}" allow="autoplay; encrypted-media; picture-in-picture; fullscreen" allowfullscreen loading="lazy" scrolling="no"></iframe>
+            <div class="mosaic-cell" style="grid-area: {{ area }};" data-stream-id="{{ stream_id }}">
+              <iframe data-stream-id="{{ stream_id }}" src="{{ url_for('dashboard_routes.render_stream', name=(conf.label if conf.label else stream_id)|slugify) }}" allow="autoplay; encrypted-media; picture-in-picture; fullscreen" allowfullscreen loading="lazy" scrolling="no"></iframe>
             </div>
             {% endif %}
           {% endfor %}
         </div>
         {% else %}
           {% for stream_id, conf in stream_items %}
-          <div class="mosaic-cell">
-            <iframe src="{{ url_for('dashboard_routes.render_stream', name=(conf.label if conf.label else stream_id)|slugify) }}" allow="autoplay; encrypted-media; picture-in-picture; fullscreen" allowfullscreen loading="lazy" scrolling="no"></iframe>
+          <div class="mosaic-cell" data-stream-id="{{ stream_id }}">
+            <iframe data-stream-id="{{ stream_id }}" src="{{ url_for('dashboard_routes.render_stream', name=(conf.label if conf.label else stream_id)|slugify) }}" allow="autoplay; encrypted-media; picture-in-picture; fullscreen" allowfullscreen loading="lazy" scrolling="no"></iframe>
           </div>
           {% endfor %}
         {% endif %}
@@ -119,8 +119,8 @@
         {% set limit = layout.rows and layout.cols and (layout.rows * layout.cols) or None %}
         {% if limit %}{% set items = items[:limit] %}{% endif %}
         {% for stream_id, conf in items %}
-        <div class="mosaic-cell">
-          <iframe src="{{ url_for('dashboard_routes.render_stream', name=(conf.label if conf.label else stream_id)|slugify) }}" allow="autoplay; encrypted-media; picture-in-picture; fullscreen" allowfullscreen loading="lazy" scrolling="no"></iframe>
+        <div class="mosaic-cell" data-stream-id="{{ stream_id }}">
+          <iframe data-stream-id="{{ stream_id }}" src="{{ url_for('dashboard_routes.render_stream', name=(conf.label if conf.label else stream_id)|slugify) }}" allow="autoplay; encrypted-media; picture-in-picture; fullscreen" allowfullscreen loading="lazy" scrolling="no"></iframe>
         </div>
         {% endfor %}
       {% endif %}
@@ -155,9 +155,132 @@
 })();
 
 const socket = io();
-['streams_changed', 'mosaic_refresh'].forEach(ev => {
-  socket.on(ev, () => { location.reload(); });
-});
+const mosaic = document.getElementById('mosaic');
+const structuredMosaic = {{ 'true' if layout else 'false' }};
+
+function slugifyStreamName(value) {
+  return String(value || '')
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '') || 'stream';
+}
+
+function updateMosaicCountClass() {
+  if (!mosaic || structuredMosaic) return;
+  const count = mosaic.querySelectorAll('.mosaic-cell[data-stream-id]').length;
+  mosaic.dataset.streamCount = String(count);
+  Array.from(mosaic.classList).forEach(cls => {
+    if (cls.startsWith('stream-count-')) {
+      mosaic.classList.remove(cls);
+    }
+  });
+  mosaic.classList.add(`stream-count-${count}`);
+}
+
+function ensureMosaicEmptyState() {
+  if (!mosaic || structuredMosaic) return;
+  const cells = mosaic.querySelectorAll('.mosaic-cell[data-stream-id]');
+  const empty = mosaic.querySelector('.mosaic-empty');
+  if (cells.length) {
+    if (empty) empty.remove();
+    updateMosaicCountClass();
+    return;
+  }
+  if (!empty) {
+    const wrapper = document.createElement('div');
+    wrapper.className = 'mosaic-empty';
+    const text = document.createElement('p');
+    text.textContent = 'No active streams configured.';
+    wrapper.appendChild(text);
+    mosaic.appendChild(wrapper);
+  }
+  updateMosaicCountClass();
+}
+
+function createMosaicCell(streamId, label) {
+  const cell = document.createElement('div');
+  cell.className = 'mosaic-cell';
+  cell.dataset.streamId = streamId;
+  const iframe = document.createElement('iframe');
+  iframe.dataset.streamId = streamId;
+  iframe.src = `/stream/${encodeURIComponent(slugifyStreamName(label || streamId))}`;
+  iframe.setAttribute('allow', 'autoplay; encrypted-media; picture-in-picture; fullscreen');
+  iframe.setAttribute('allowfullscreen', '');
+  iframe.allowFullscreen = true;
+  iframe.loading = 'lazy';
+  iframe.scrolling = 'no';
+  cell.appendChild(iframe);
+  return cell;
+}
+
+async function fetchStreamsMeta() {
+  const response = await fetch('/streams_meta', { cache: 'no-store' });
+  if (!response.ok) {
+    throw new Error(`streams_meta ${response.status}`);
+  }
+  return response.json();
+}
+
+async function handleMosaicStreamsChanged(data) {
+  if (!mosaic || structuredMosaic || !data || typeof data !== 'object') {
+    location.reload();
+    return;
+  }
+  const action = String(data.action || '').toLowerCase();
+  const streamId = String(data.stream_id || '').trim();
+  if (action === 'deleted' && streamId) {
+    const cell = mosaic.querySelector(`.mosaic-cell[data-stream-id="${CSS.escape(streamId)}"]`);
+    if (cell) {
+      cell.remove();
+      ensureMosaicEmptyState();
+    }
+    return;
+  }
+  if (action === 'added' && streamId) {
+    if (mosaic.querySelector(`.mosaic-cell[data-stream-id="${CSS.escape(streamId)}"]`)) {
+      return;
+    }
+    try {
+      const meta = await fetchStreamsMeta();
+      const entry = meta && typeof meta === 'object' ? meta[streamId] : null;
+      if (!entry) {
+        location.reload();
+        return;
+      }
+      const empty = mosaic.querySelector('.mosaic-empty');
+      if (empty) empty.remove();
+      mosaic.appendChild(createMosaicCell(streamId, entry.label || streamId));
+      updateMosaicCountClass();
+    } catch (err) {
+      location.reload();
+    }
+    return;
+  }
+  if (action === 'reordered' && Array.isArray(data.stream_order)) {
+    const byId = new Map();
+    mosaic.querySelectorAll('.mosaic-cell[data-stream-id]').forEach(cell => {
+      byId.set(cell.dataset.streamId || '', cell);
+    });
+    const reordered = [];
+    data.stream_order.forEach(id => {
+      const cell = byId.get(String(id || ''));
+      if (cell) {
+        reordered.push(cell);
+        byId.delete(String(id || ''));
+      }
+    });
+    byId.forEach(cell => reordered.push(cell));
+    reordered.forEach(cell => mosaic.appendChild(cell));
+    updateMosaicCountClass();
+    return;
+  }
+  location.reload();
+}
+
+socket.on('streams_changed', handleMosaicStreamsChanged);
+socket.on('mosaic_refresh', () => { location.reload(); });
 </script>
 </body>
 </html>
