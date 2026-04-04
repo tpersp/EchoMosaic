@@ -3,9 +3,9 @@
 A cleaned-up list of what is still open, what is done, and what was tried and later replaced or removed.
 
 ## Current Priorities
-- [ ] Stream real-time update logs via Socket.IO instead of the current client-side animation.
+- [ ] Add a `System Events` panel for recent high-signal app activity.
+  Note: this should be a curated in-app event feed, not a raw server log viewer. Good candidates are updates, media/upload failures, broken stream sources, and AI job warnings/errors.
 - [ ] Reduce RAM usage without limiting usability or performance.
-- [ ] Add a page and function similar to `stablehorde.py` that can pull images from the `Pexels` API with exposed UI options.
 
 ## Open Suggestions / Future Ideas
 - [ ] [2025-09-08] Add optional authentication or simple login with a session cache so the dashboard and update endpoints are protected from anyone on the network.
@@ -68,17 +68,11 @@ A cleaned-up list of what is still open, what is done, and what was tried and la
 - [x] Add folder filtering so the user can hide folders containing `nsfw` / `NSFW` by default.
   This feature was implemented earlier, but later removed from the app because it depended on an unclear naming convention and added clutter without enough value.
 
-## Historical Idea Notes
-
-### AI Images Sub-Modes
-- Keep `AI Images` as one top-level mode, but split it into `Generate`, `View Random`, and `View Specific`.
-- Use two first-class library roots internally: `/media` for normal uploaded/manual media and `/ai_media` for generated AI output.
-- `Generate` keeps the current Stable Horde workflow but saves results into `/ai_media`.
-- `View Random` and `View Specific` should behave like the existing image random/specific modes, but only browse `/ai_media`.
-- Normal image browsing should continue browsing only `/media`.
-- The design should remain compatible with installs where `/media` is backed by a CIFS/SMB/network share.
-
 ## Notes
+- For new ideas, add a short `Note:` line whenever the title could be interpreted in more than one way.
+- Keep idea titles short, but use the note to clarify scope, intent, or what should explicitly be avoided.
+- Keep `TODO.md` limited to actionable items that can be completed, removed, or explicitly discarded.
+- If an item is large enough to need design notes, careful handling, or acceptance criteria, create a matching file in [`plans/`](/home/doden/workspace/EchoMosaic-Project/EchoMosaic-dev/plans) and keep only the short trackable entry here.
 - Use unchecked boxes for real open work only.
 - Move completed items into `Completed` instead of leaving them mixed into idea sections.
 - If a feature is later removed, keep it in `Replaced / Removed` so the history stays understandable.
