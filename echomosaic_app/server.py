@@ -1130,6 +1130,22 @@ def _folders_overlap(folder_a: str, folder_b: str) -> bool:
     return rel_a == rel_b or rel_a.startswith(rel_b + "/") or rel_b.startswith(rel_a + "/")
 
 
+def _should_canonicalize_stream_folder(stream_folder: str, changed_folder: str) -> bool:
+    normalized_stream = _normalize_folder_key(stream_folder)
+    normalized_changed = _normalize_folder_key(changed_folder)
+    if normalized_stream in {"", "all"} or normalized_changed in {"", "all"}:
+        return False
+    if normalized_stream == normalized_changed:
+        return False
+    # Legacy imports can keep bare folder names like "Lofi" while runtime media
+    # discovery now uses canonical root-qualified keys like "media/Lofi".
+    if "/" in normalized_stream:
+        return False
+    _, changed_relative = _split_virtual_media_path(normalized_changed)
+    changed_leaf = changed_relative.strip("/")
+    return bool(changed_leaf and changed_leaf == normalized_stream.strip("/"))
+
+
 def _refresh_streams_for_media_path(path: Optional[str]) -> None:
     if playback_manager is None or not path:
         return
@@ -1142,8 +1158,7 @@ def _refresh_streams_for_media_path(path: Optional[str]) -> None:
     for stream_id, conf in list(settings.items()):
         if not isinstance(stream_id, str) or stream_id.startswith("_") or not isinstance(conf, dict):
             continue
-        media_mode_raw = conf.get("media_mode")
-        media_mode = media_mode_raw.strip().lower() if isinstance(media_mode_raw, str) else ""
+        media_mode = _infer_media_mode(conf)
         if media_mode not in {MEDIA_MODE_IMAGE, MEDIA_MODE_VIDEO, MEDIA_MODE_AI}:
             continue
         mode_raw = conf.get("mode")
@@ -1171,6 +1186,10 @@ def _refresh_streams_for_media_path(path: Optional[str]) -> None:
         if stream_library != changed_library:
             continue
         stream_folder = _normalize_folder_key(conf.get("folder"))
+        if _should_canonicalize_stream_folder(stream_folder, changed_folder):
+            conf["folder"] = changed_folder
+            stream_folder = changed_folder
+            save_settings_debounced()
         if not _folders_overlap(stream_folder, changed_folder):
             continue
         playback_manager.update_stream_config(stream_id, conf)
