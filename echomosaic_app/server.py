@@ -1114,6 +1114,68 @@ def _invalidate_media_cache(path: Optional[str], *, library: Optional[str] = Non
     MEDIA_CATALOG_SERVICE.invalidate_media_cache(path, library=library)
 
 
+def _folders_overlap(folder_a: str, folder_b: str) -> bool:
+    normalized_a = _normalize_folder_key(folder_a)
+    normalized_b = _normalize_folder_key(folder_b)
+    if normalized_a == "all" or normalized_b == "all":
+        return True
+    alias_a, relative_a = _split_virtual_media_path(normalized_a)
+    alias_b, relative_b = _split_virtual_media_path(normalized_b)
+    if alias_a != alias_b:
+        return False
+    rel_a = relative_a.strip("/")
+    rel_b = relative_b.strip("/")
+    if not rel_a or not rel_b:
+        return True
+    return rel_a == rel_b or rel_a.startswith(rel_b + "/") or rel_b.startswith(rel_a + "/")
+
+
+def _refresh_streams_for_media_path(path: Optional[str]) -> None:
+    if playback_manager is None or not path:
+        return
+    changed_virtual_path = _virtualize_path(path)
+    changed_folder = _cache_folder_for_path(path) or _normalize_folder_key(path)
+    changed_alias, _ = _split_virtual_media_path(changed_folder)
+    changed_root = MEDIA_ROOT_LOOKUP.get(changed_alias)
+    changed_library = changed_root.library if changed_root is not None else MEDIA_LIBRARY_DEFAULT
+    tags_snapshot = get_global_tags()
+    for stream_id, conf in list(settings.items()):
+        if not isinstance(stream_id, str) or stream_id.startswith("_") or not isinstance(conf, dict):
+            continue
+        media_mode_raw = conf.get("media_mode")
+        media_mode = media_mode_raw.strip().lower() if isinstance(media_mode_raw, str) else ""
+        if media_mode not in {MEDIA_MODE_IMAGE, MEDIA_MODE_VIDEO, MEDIA_MODE_AI}:
+            continue
+        mode_raw = conf.get("mode")
+        mode = mode_raw.strip().lower() if isinstance(mode_raw, str) else ""
+        selected_image = conf.get("selected_image")
+        selected_virtual_path = _virtualize_path(selected_image) if isinstance(selected_image, str) and selected_image.strip() else ""
+        if selected_virtual_path and selected_virtual_path == changed_virtual_path:
+            _update_stream_runtime_state(
+                stream_id,
+                path=conf.get("selected_image"),
+                kind=conf.get("selected_media_kind"),
+                media_mode=conf.get("media_mode"),
+                stream_url=conf.get("stream_url"),
+                source="media_refresh",
+            )
+            safe_emit("refresh", {"stream_id": stream_id, "config": conf, "tags": tags_snapshot})
+            continue
+        should_run = (
+            (media_mode in {MEDIA_MODE_IMAGE, MEDIA_MODE_VIDEO} and mode == "random")
+            or (media_mode == MEDIA_MODE_AI and mode == AI_RANDOM_MODE)
+        )
+        if not should_run:
+            continue
+        stream_library = _library_for_media_mode(media_mode)
+        if stream_library != changed_library:
+            continue
+        stream_folder = _normalize_folder_key(conf.get("folder"))
+        if not _folders_overlap(stream_folder, changed_folder):
+            continue
+        playback_manager.update_stream_config(stream_id, conf)
+
+
 def initialize_image_cache() -> None:
     """Warm the cache for the root folder on startup."""
     MEDIA_CATALOG_SERVICE.initialize_image_cache()
@@ -2943,6 +3005,7 @@ _media_blueprint = create_media_blueprint(
     media_error_response=_media_error_response,
     require_media_edit=_require_media_edit,
     invalidate_media_cache=_invalidate_media_cache,
+    refresh_streams_for_media_path=_refresh_streams_for_media_path,
     normalize_library_key=_normalize_library_key,
     get_folder_inventory=get_folder_inventory,
     as_int=_as_int,

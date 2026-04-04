@@ -26,6 +26,7 @@ def create_media_blueprint(
     media_error_response: Callable[[Exception], Any],
     require_media_edit: Callable[[], None],
     invalidate_media_cache: Callable[[str], None],
+    refresh_streams_for_media_path: Callable[[str], None] | None,
     normalize_library_key: Callable[[Any, str], str],
     get_folder_inventory: Callable[..., list[dict[str, Any]]],
     as_int: Callable[[Any, int], int],
@@ -69,6 +70,8 @@ def create_media_blueprint(
             return media_error_response(exc)
         logger.info("media.create_folder parent=%s name=%s", parent or "", name)
         invalidate_media_cache(new_path)
+        if refresh_streams_for_media_path is not None:
+            refresh_streams_for_media_path(new_path)
         return jsonify({"path": new_path, "name": virtual_leaf(new_path)})
 
     @blueprint.route("/api/media/rename", methods=["POST"])
@@ -88,6 +91,9 @@ def create_media_blueprint(
         logger.info("media.rename path=%s new_name=%s", target_path, new_name)
         invalidate_media_cache(target_path)
         invalidate_media_cache(updated)
+        if refresh_streams_for_media_path is not None:
+            refresh_streams_for_media_path(target_path)
+            refresh_streams_for_media_path(updated)
         return jsonify({"path": updated, "name": virtual_leaf(updated)})
 
     @blueprint.route("/api/media/delete", methods=["DELETE"])
@@ -105,6 +111,8 @@ def create_media_blueprint(
             return media_error_response(exc)
         logger.info("media.delete path=%s", target)
         invalidate_media_cache(target)
+        if refresh_streams_for_media_path is not None:
+            refresh_streams_for_media_path(target)
         return jsonify({"ok": True})
 
     @blueprint.route("/api/media/upload", methods=["POST"])
@@ -121,6 +129,11 @@ def create_media_blueprint(
             return media_error_response(exc)
         logger.info("media.upload path=%s count=%d", destination, len(saved))
         invalidate_media_cache(destination)
+        if refresh_streams_for_media_path is not None:
+            refresh_streams_for_media_path(destination)
+            for saved_path in saved:
+                if isinstance(saved_path, str) and saved_path:
+                    refresh_streams_for_media_path(saved_path)
         return jsonify({"uploaded": saved, "count": len(saved)})
 
     @blueprint.route("/api/media/thumbnail", methods=["GET"])
