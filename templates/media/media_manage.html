@@ -9,6 +9,10 @@
         if (window.localStorage.getItem('sidebar-collapsed') === '1') {
           document.documentElement.classList.add('sidebar-collapsed');
         }
+        const savedTheme = window.localStorage.getItem('theme');
+        if (savedTheme === 'light' || savedTheme === 'dark') {
+          document.documentElement.setAttribute('data-theme', savedTheme);
+        }
       } catch (err) {}
     })();
   </script>
@@ -78,10 +82,6 @@
             <option value="mtime|desc">Date (new → old)</option>
             <option value="mtime|asc">Date (old → new)</option>
           </select>
-        </label>
-        <label class="toolbar-control checkbox">
-          <input type="checkbox" id="media-hide-nsfw" checked>
-          <span>Hide NSFW</span>
         </label>
         {% if media_allow_edit %}
         <div class="toolbar-buttons">

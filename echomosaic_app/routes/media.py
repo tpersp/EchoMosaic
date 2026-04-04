@@ -26,7 +26,7 @@ def create_media_blueprint(
     media_error_response: Callable[[Exception], Any],
     require_media_edit: Callable[[], None],
     invalidate_media_cache: Callable[[str], None],
-    parse_truthy: Callable[[Any], bool],
+    refresh_streams_for_media_path: Callable[[str], None] | None,
     normalize_library_key: Callable[[Any, str], str],
     get_folder_inventory: Callable[..., list[dict[str, Any]]],
     as_int: Callable[[Any, int], int],
@@ -44,12 +44,9 @@ def create_media_blueprint(
         page_size = max(1, min(page_size, 500))
         sort = request.args.get("sort", "name")
         order = request.args.get("order") or request.args.get("direction") or "asc"
-        hide_nsfw_raw = request.args.get("hide_nsfw")
-        hide_nsfw = True if hide_nsfw_raw is None else parse_truthy(hide_nsfw_raw)
         try:
             payload = media_manager.list_directory(
                 path,
-                hide_nsfw=hide_nsfw,
                 page=page,
                 page_size=page_size,
                 sort=sort,
@@ -73,6 +70,8 @@ def create_media_blueprint(
             return media_error_response(exc)
         logger.info("media.create_folder parent=%s name=%s", parent or "", name)
         invalidate_media_cache(new_path)
+        if refresh_streams_for_media_path is not None:
+            refresh_streams_for_media_path(new_path)
         return jsonify({"path": new_path, "name": virtual_leaf(new_path)})
 
     @blueprint.route("/api/media/rename", methods=["POST"])
@@ -92,6 +91,9 @@ def create_media_blueprint(
         logger.info("media.rename path=%s new_name=%s", target_path, new_name)
         invalidate_media_cache(target_path)
         invalidate_media_cache(updated)
+        if refresh_streams_for_media_path is not None:
+            refresh_streams_for_media_path(target_path)
+            refresh_streams_for_media_path(updated)
         return jsonify({"path": updated, "name": virtual_leaf(updated)})
 
     @blueprint.route("/api/media/delete", methods=["DELETE"])
@@ -109,6 +111,8 @@ def create_media_blueprint(
             return media_error_response(exc)
         logger.info("media.delete path=%s", target)
         invalidate_media_cache(target)
+        if refresh_streams_for_media_path is not None:
+            refresh_streams_for_media_path(target)
         return jsonify({"ok": True})
 
     @blueprint.route("/api/media/upload", methods=["POST"])
@@ -125,6 +129,15 @@ def create_media_blueprint(
             return media_error_response(exc)
         logger.info("media.upload path=%s count=%d", destination, len(saved))
         invalidate_media_cache(destination)
+        if refresh_streams_for_media_path is not None:
+            refresh_streams_for_media_path(destination)
+            for saved_path in saved:
+                if isinstance(saved_path, dict):
+                    candidate = saved_path.get("path")
+                else:
+                    candidate = saved_path
+                if isinstance(candidate, str) and candidate:
+                    refresh_streams_for_media_path(candidate)
         return jsonify({"uploaded": saved, "count": len(saved)})
 
     @blueprint.route("/api/media/thumbnail", methods=["GET"])
@@ -234,9 +247,8 @@ def create_media_blueprint(
 
     @blueprint.route("/folders", methods=["GET"])
     def folders_collection():
-        hide_nsfw = parse_truthy(request.args.get("hide_nsfw"))
         library = normalize_library_key(request.args.get("library"), media_library_default)
-        inventory = get_folder_inventory(hide_nsfw=hide_nsfw, library=library)
+        inventory = get_folder_inventory(library=library)
         return jsonify(inventory)
 
     @blueprint.route("/media/manage")

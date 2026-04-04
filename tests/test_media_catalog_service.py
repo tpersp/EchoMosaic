@@ -22,7 +22,6 @@ def _build_service(tmp_path: Path) -> tuple[MediaCatalogService, dict[str, dict[
         build_virtual_media_path=lambda alias, relative="": f"{alias}/{relative}".rstrip("/"),
         resolve_virtual_media_path=lambda value: root_path / (value.split("/", 1)[1] if "/" in value else ""),
         library_roots=lambda library: [root],
-        path_contains_nsfw=lambda path: "nsfw" in (path or ""),
         should_ignore_media_name=lambda name: name.startswith("."),
         media_root_lookup={"root": root},
         media_extensions={".jpg", ".png", ".mp4"},

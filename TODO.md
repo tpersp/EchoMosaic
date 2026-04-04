@@ -1,102 +1,80 @@
 # TODO
 
-A running list of bugs, active ideas, and future improvements. Add new items anywhere below.
+A cleaned-up list of what is still open, what is done, and what was tried and later replaced or removed.
 
-## Bugs: 
-- [x] Folders are shown twice. they shouldn't be.
-- [x] Images uploaded with capital "JPG" doesn't show up in media, and is not used in show rotation..
-- [x] Folders created isn't always shown in the dashboard.
-- [x] It created a folder via UI, it uploaded images to the folder via UI, but the dashboard does not show images or folders created. 
-- [x] [2026-03-23] Importing settings from an exported settings JSON does not preserve the original stream order on the dashboard. After import, streams fall back to string-like ordering such as `stream1`, `stream10`, `stream12`, `stream2`, which is annoying and should preserve the previous/user-visible order.
+## Current Priorities
+- [ ] Add a `System Events` panel for recent high-signal app activity.
+  Note: this should be a curated in-app event feed, not a raw server log viewer. Good candidates are updates, media/upload failures, broken stream sources, and AI job warnings/errors.
+- [ ] Reduce RAM usage without limiting usability or performance.
+- [ ] Rework the installer so EchoMosaic runs from the actual cloned repo instead of copying files into a second install directory.
+  Note: this should make updates, rollback metadata, and update history reliable again, and should include a matching `uninstall.sh` for clean service removal. See [`plans/installer-flow-rework.md`](/home/doden/workspace/EchoMosaic-Project/EchoMosaic-dev/plans/installer-flow-rework.md).
 
-## Active Ideas
-- [ ] Stream real-time update logs via Socket.IO instead of the current client-side animation.
-- [ ] Reduce RAM usage without limiting useability or performance.
-- [ ] Add a page and function similar to `stablehorde.py` that can pull images from the https://www.pexels.com/api/ with the available options exposed in the UI.
+## Open Suggestions / Future Ideas
+- [ ] [2025-09-08] Add optional authentication or simple login with a session cache so the dashboard and update endpoints are protected from anyone on the network.
+  Note: still undecided whether this is actually needed for a personal/local service.
+- [ ] [2025-09-08] Offload HLS lookup to a background task and cache results. `try_get_hls()` / live HLS resolution should not block request handling under load.
+- [ ] [2025-09-08] Improve error handling and user feedback. Missing images, broken media paths, and bad stream URLs should surface clearer UI messages instead of generic failures.
 
-## Discarded / Replaced Ideas
-- [x] Add drag-and-drop stream reordering on the dashboard and persist the chosen order so imports/exports and normal dashboard rendering keep the same stream layout.
-  Replaced with the current `Custom` layout mode and `Edit Layout` controls, because the drag-and-drop implementation was too unstable and unpleasant to use in the dashboard grid.
-- [x] [2026-01-27] Sync timers for random image/GIF streams so multiple streams change at the exact same time. Includes a global Sync Timers manager (create/edit/delete timers with interval + base offset), per-stream timer selection, and per-stream stagger offset in seconds to create cascading transitions instead of fully random timing.
+## Completed
 
-## Suggestions from a friend
-- [ ] [2025-09-08] Add optional authentication or simple login with a session cache so casual users are not blocked but the dashboard and update endpoints are protected from anyone on the network. - Note: I'm not sure this is necessary for a local only service that i built for myself.
+### Bugs Fixed
+- [x] Folders are shown twice.
+- [x] Images uploaded with capital `.JPG` extensions do not appear in Media or stream rotation.
+- [x] Folders created in the UI are not always shown on the dashboard.
+- [x] Folders and images created/uploaded through the UI are not always available immediately in the dashboard.
+- [x] [2026-03-23] Importing settings from exported JSON did not preserve dashboard stream order.
 
-- [ ] [2025-09-08] Offload HLS lookup to a background task and cache results. `try_get_hls()` currently invokes `yt-dlp` synchronously on each request, which can block the server under load.
-
-- [ ] [2025-09-08] Improve error handling and user feedback. When an image or stream URL is missing, surface clear messages in the UI instead of generic JSON errors.
-
-- [x] [2025-09-08] Add configurable logging and monitoring. Operations like `yt-dlp` calls and update scripts either fail silently or log to the console; configurable log levels and rotating file logs would help.
-
-## Expanded Idea Notes
-
-### AI Images Sub-Modes
-- Keep `AI Images` as one top-level mode, but split it into `Generate`, `View Random`, and `View Specific`.
-- Use two first-class library roots internally: `/media` for normal uploaded/manual media and `/ai_media` for generated AI output.
-- `Generate` keeps the current Stable Horde workflow but saves results into `/ai_media`.
-- `View Random` and `View Specific` should behave like the existing `Images / GIFs` random/specific modes, but only browse `/ai_media`.
-- Normal `Images / GIFs` should continue browsing only `/media`.
-- The media manager should understand both roots as separate libraries internally, while each mode is limited to the intended library.
-- This keeps the separation structural and reliable instead of depending on folder-name matching inside one shared media tree.
-- The design should remain compatible with installs where `/media` is backed by a CIFS/SMB/network share.
-- Keep the library-root configuration flexible enough to support future folder structures or alternate layouts without rewriting mode logic.
-
-## Implemented / Completed Ideas
-- [x] Split `AI Images` into `Generate`, `View Random`, and `View Specific`, with generated media stored in a separate `/ai_media` library that is isolated from normal `/media` browsing.
-
-- [x] Implement Stable Horde image generation. (Streams can switch to AI mode, queue jobs, and manage presets.)
-
-- [x] [2025-09-08] Cache directory listings so media browsing does not rescan the filesystem on every request. (Implemented via the in-process `IMAGE_CACHE`.)
-
-- [x] Add folder filter and toggle so the user can hide folders containing `nsfw`/`NSFW` by default.
-
-- [x] Add ability to cancel Stable Horde queue jobs.
-
-- [x] Add ability to show movie files (mp4, mkv, webm, mov, avi, m4v, mpg, mpeg).
-
-- [x] Add ability to save AI image generation presets so users can store different settings per workflow.
-
-- [x] Add a feature to categorise streams on the dashboard and provide sorting and filtering for categories to improve overview when many streams exist.
-
-- [x] Add a simple "Update history" view in Settings showing prior updates and commit messages.
-
+### Features Implemented
+- [x] Split `AI Images` into `Generate`, `View Random`, and `View Specific`, with generated media stored in a separate `/ai_media` library isolated from normal `/media`.
+- [x] Implement Stable Horde image generation with stream controls, queue handling, and presets.
+- [x] [2025-09-08] Cache directory listings so media browsing does not rescan the filesystem on every request.
+- [x] Add the ability to cancel Stable Horde queue jobs.
+- [x] Add support for movie/video files (`mp4`, `mkv`, `webm`, `mov`, `avi`, `m4v`, `mpg`, `mpeg`).
+- [x] Add the ability to save AI image generation presets.
+- [x] Add stream tags/categories with sorting and filtering for better dashboard overview.
+- [x] Add an update history view in Settings showing prior updates and commit messages.
 - [x] Add a friendlier update flow so users are not dropped onto a browser error page during restarts.
-
-- [x] Add stream quality options instead of free-text fields (1080p, 720p, 480p, 360p, 240p, 144p, Auto) with automatic Auto selection for non-YouTube streams.
-
-- [x] Grid strict-mode: when a group has more streams than Rows x Cols, optionally show only the first N instead of auto-expanding the grid. Provide pagination/scroll or a toggle to auto-fit vs. strict.
-
-- [x] Provide bulk toggle actions (for example, Add all / Remove all) in the group editor.
-
-- [x] Add a "Show only selected" indicator in the dashboard to quickly see which streams are included.
-
-- [x] Add a settings backup/export feature so custom streams, folders, and tags can be restored or moved to another device.
-
-- [x] Add an option to shuffle the display order of media in folders (enabled by default with a toggle to turn it off).
-
+- [x] Add stream quality options instead of free-text fields (`1080p`, `720p`, `480p`, `360p`, `240p`, `144p`, `Auto`) with automatic `Auto` for non-YouTube streams.
+- [x] Grid strict-mode for groups: when a group has more streams than `Rows x Cols`, show only the first `N` instead of auto-expanding.
+- [x] Provide bulk toggle actions in the group editor (`Add all`, `Remove all`).
+- [x] Add a `Show only selected` indicator in the dashboard for group membership.
+- [x] Add settings backup/export so streams, folders, tags, and related config can be restored or moved.
+- [x] Add an option to shuffle media display order in folders.
 - [x] [2025-09-08] Add a light/dark theme toggle.
-
 - [x] [2025-09-21] Expand Stable Horde controls with LoRA stacks, post-processing chains, and worker preference toggles directly in the dashboard.
-
 - [x] [2025-09-21] Move AI generator controls into a modal window and surface per-stream summaries on the dashboard.
+- [x] Show a live thumbnail preview for each stream's current content directly on the dashboard.
+- [x] Add low-bandwidth mode to reduce image resolution and caching behavior for remote access.
+- [x] Add a Picsum Photos mode with exposed options in the UI.
+- [x] Add system monitoring for CPU, memory, GPU (if available), storage, and related stats.
+- [x] Implement rollback/restore points so the app can return to a known-good version on demand.
+- [x] [2025-09-08] Make paths and constants configurable via `config.json` or environment variables, including support for multiple media roots.
+- [x] Enable minimizing streams on the dashboard for better overview.
+- [x] Add a custom stream layout mode with persistent manual ordering and an `Edit Layout` UI.
+- [x] [2025-09-08] Add configurable logging and monitoring.
 
-- [x] Show a live thumbnail preview for each stream's current content directly on the dashboard so you can see all streams at a glance before opening them.
+### Major UI / Workflow Work Completed
+- [x] Rework the main app UI into a cohesive sidebar workspace across Dashboard, Media, Settings, and the updater flow.
+- [x] Add global `Links` management with categories, source/type detection, dashboard picker flow, and a dedicated dashboard manager.
+- [x] Improve YouTube playlist handling with playlist metadata, item selection, and better stream-card integration.
+- [x] Fix YouTube livestream detection and playback handling so live streams are recognized and behave as live streams instead of normal videos.
+- [x] Add folder upload support in Media, including preserved folder structure.
+- [x] Add upload queue improvements including parallel uploads and cancellation support.
+- [x] Add configurable media upload size in Settings and surface the current limit in Media.
 
-- [x] Low-bandwidth mode: automatically reduce image resolution and caching behaviour for remote access.
+## Replaced / Removed
+- [x] Add drag-and-drop stream reordering on the dashboard and persist the chosen order.
+  Replaced by the current `Custom` layout mode and `Edit Layout` controls, because drag-and-drop in the grid was too unstable and unpleasant.
+- [x] [2026-01-27] Sync timers for random image/GIF streams so multiple streams change at the exact same time.
+  Implemented through the current Sync Timers manager and per-stream timer assignment/offset flow.
+- [x] Add folder filtering so the user can hide folders containing `nsfw` / `NSFW` by default.
+  This feature was implemented earlier, but later removed from the app because it depended on an unclear naming convention and added clutter without enough value.
 
-- [x] Add a page and function similar to `stablehorde.py` that can pull images from https://picsum.photos/ with the available options exposed in the UI.
-
-- [x] Add system monitoring to surface CPU usage, memory usage (used/max), GPU usage (if available), storage available for media, and other useful info.
-
-- [x] Implement a better rollback feature that lets admins mark a restore point so the server can always roll back to a known good state on demand.
-
-- [x] [2025-09-08] Make paths and constants configurable via `config.json` or environment variables. Today users still edit `app.py` to change where images are stored. Additionally an option to handle multiple locations, in case the user wants to store media in multiple locations, then the app should be able to see those too.
-
-- [x] Enable minimizing of streams in dashboard, so only streamname and menu button is visible, for better overview.
-
-- [x] Add a custom stream layout mode with persistent manual ordering and an `Edit Layout` dashboard UI for moving streams by slot number.
-
-Notes
-- Use checkboxes to track status (unchecked = planned, checked = done).
-- Optionally prefix entries with a date, e.g. `[2025-09-07] Idea text...`.
-- Group related items under short headings if this grows large.
+## Notes
+- For new ideas, add a short `Note:` line whenever the title could be interpreted in more than one way.
+- Keep idea titles short, but use the note to clarify scope, intent, or what should explicitly be avoided.
+- Keep `TODO.md` limited to actionable items that can be completed, removed, or explicitly discarded.
+- If an item is large enough to need design notes, careful handling, or acceptance criteria, create a matching file in [`plans/`](/home/doden/workspace/EchoMosaic-Project/EchoMosaic-dev/plans) and keep only the short trackable entry here.
+- Use unchecked boxes for real open work only.
+- Move completed items into `Completed` instead of leaving them mixed into idea sections.
+- If a feature is later removed, keep it in `Replaced / Removed` so the history stays understandable.

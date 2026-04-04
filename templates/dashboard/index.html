@@ -9,6 +9,10 @@
         if (window.localStorage.getItem('sidebar-collapsed') === '1') {
           document.documentElement.classList.add('sidebar-collapsed');
         }
+        const savedTheme = window.localStorage.getItem('theme');
+        if (savedTheme === 'light' || savedTheme === 'dark') {
+          document.documentElement.setAttribute('data-theme', savedTheme);
+        }
       } catch (err) {}
     })();
   </script>
@@ -60,6 +64,10 @@
         <button type="button" class="sidebar-action" data-dashboard-panel="sync-manager-panel" title="Sync Timers">
           <span class="sidebar-item-icon" aria-hidden="true">⏱</span>
           <span class="sidebar-item-label">Sync Timers</span>
+        </button>
+        <button type="button" class="sidebar-action" data-dashboard-panel="links-manager-panel" title="Links">
+          <span class="sidebar-item-icon" aria-hidden="true">🔗</span>
+          <span class="sidebar-item-label">Links</span>
         </button>
       </div>
     </section>
@@ -153,7 +161,7 @@
     {% set embed_title = embed_meta.title if embed_meta and embed_meta.title else '' %}
     {% set embed_type = embed_meta.content_type if embed_meta and embed_meta.content_type else '' %}
     {% set embed_provider = embed_meta.provider if embed_meta and embed_meta.provider else '' %}
-    <div class="stream-card" data-stream="{{ stream_id }}" data-hide-nsfw="{{ "true" if conf.hide_nsfw|default(False) else "false" }}" data-tags='{{ (conf.tags|default([]))|tojson }}' data-selected-path="{{ conf.selected_image or '' }}" data-selected-kind="{{ conf.selected_media_kind or '' }}" data-video-mode="{{ conf.video_playback_mode|default('duration') }}" data-video-volume="{{ conf.video_volume|default(1.0) }}" data-media-mode="{{ conf.media_mode|default('image') }}" data-mode="{{ conf.mode|default('random') }}" data-picsum-seed="{{ conf.picsum_settings.seed if conf.picsum_settings and conf.picsum_settings.seed is not none else '' }}" data-sync-timer="{{ conf.sync.timer_id if conf.sync and conf.sync.timer_id else '' }}" data-sync-offset="{{ conf.sync.offset if conf.sync and conf.sync.offset is not none else 0 }}" data-embed-title="{{ embed_title }}" data-embed-type="{{ embed_type }}" data-embed-provider="{{ embed_provider }}" data-embed-video-id="{{ embed_meta.video_id or '' }}" data-embed-playlist-id="{{ embed_meta.playlist_id or '' }}" data-embed-start-index="{{ embed_meta.start_index if embed_meta.start_index is not none else '' }}">
+    <div class="stream-card" data-stream="{{ stream_id }}" data-tags='{{ (conf.tags|default([]))|tojson }}' data-selected-path="{{ conf.selected_image or '' }}" data-selected-kind="{{ conf.selected_media_kind or '' }}" data-video-mode="{{ conf.video_playback_mode|default('duration') }}" data-video-volume="{{ conf.video_volume|default(1.0) }}" data-media-mode="{{ conf.media_mode|default('image') }}" data-mode="{{ conf.mode|default('random') }}" data-picsum-seed="{{ conf.picsum_settings.seed if conf.picsum_settings and conf.picsum_settings.seed is not none else '' }}" data-sync-timer="{{ conf.sync.timer_id if conf.sync and conf.sync.timer_id else '' }}" data-sync-offset="{{ conf.sync.offset if conf.sync and conf.sync.offset is not none else 0 }}" data-embed-title="{{ embed_title }}" data-embed-type="{{ embed_type }}" data-embed-provider="{{ embed_provider }}" data-embed-video-id="{{ embed_meta.video_id or '' }}" data-embed-playlist-id="{{ embed_meta.playlist_id or '' }}" data-embed-start-index="{{ embed_meta.start_index if embed_meta.start_index is not none else '' }}">
       <div class="card-header">
         <div class="card-header-info">
           <div class="title-row">
@@ -238,26 +246,13 @@
         <div class="form-row folder-row" {% if media_mode == 'livestream' or (media_mode == 'ai' and mode_value in ['generate', 'ai']) %} style="display:none;" {% endif %}>
           <label for="folder-{{ stream_id }}">Folder</label>
           {% set current_folder = conf.folder if conf.folder else 'all' %}
-          {% set hide_nsfw = conf.hide_nsfw|default(False) %}
           <select id="folder-{{ stream_id }}" class="folder-select" data-stream="{{ stream_id }}" data-current-folder="{{ current_folder }}" title="{{ current_folder }}">
-            {% if hide_nsfw and current_folder and 'nsfw' in current_folder|lower %}
-              <option value="__filtered__" data-filtered="true" title="{{ current_folder }}" selected>Filtered ({{ current_folder }})</option>
-            {% endif %}
             {% for entry in folder_options %}
               {% set name = entry.name %}
               {% set display_name = entry.display_name if entry.display_name is defined and entry.display_name else name %}
-              {% if not (hide_nsfw and 'nsfw' in name|lower) %}
-                <option value="{{ name }}" title="{{ name }}" data-display-name="{{ display_name }}" data-has-images="{{ 'true' if entry.has_images else 'false' }}" data-has-videos="{{ 'true' if entry.has_videos else 'false' }}"{% if current_folder == name %} selected{% endif %}>{{ display_name }}</option>
-              {% endif %}
+              <option value="{{ name }}" title="{{ name }}" data-display-name="{{ display_name }}" data-has-images="{{ 'true' if entry.has_images else 'false' }}" data-has-videos="{{ 'true' if entry.has_videos else 'false' }}"{% if current_folder == name %} selected{% endif %}>{{ display_name }}</option>
             {% endfor %}
           </select>
-        </div>
-        <div class="form-row nsfw-row" {% if media_mode == 'livestream' %} style="display:none;" {% endif %}>
-          <label for="hide-nsfw-{{ stream_id }}">Hide NSFW</label>
-          <label class="toggle inline" title="Hide folders and files containing 'nsfw'">
-            <input id="hide-nsfw-{{ stream_id }}" type="checkbox" class="hide-nsfw-toggle" data-stream="{{ stream_id }}" {% if hide_nsfw %}checked{% endif %}>
-            <span class="toggle-switch" aria-hidden="true"></span>
-          </label>
         </div>
         <div class="form-row tag-row">
           <label for="tags-{{ stream_id }}">Tags</label>
@@ -291,7 +286,7 @@
             <label class="toggle inline">
               <input id="background-toggle-{{ stream_id }}" type="checkbox" class="background-toggle" data-stream="{{ stream_id }}" {% if blur_enabled %}checked{% endif %}>
               <span class="toggle-switch" aria-hidden="true"></span>
-              <span class="toggle-label">Blur current media</span>
+              <span class="toggle-label">Blur background</span>
             </label>
             <div class="background-blur-slider-wrap{% if not blur_enabled %} is-disabled{% endif %}">
               <input type="range" min="0" max="100" class="background-blur-slider" data-stream="{{ stream_id }}" value="{{ blur_amount }}" {% if not blur_enabled %}disabled{% endif %}>
@@ -313,12 +308,11 @@
           <label>Playback Controls</label>
           <div class="playback-controls" data-stream="{{ stream_id }}">
             <button type="button" class="playback-btn playback-prev" data-stream="{{ stream_id }}" data-action="skip_prev" title="Previous">&#9664;</button>
-            <button type="button" class="playback-btn playback-play" data-stream="{{ stream_id }}" data-action="play" title="Play">&#9654;</button>
-            <button type="button" class="playback-btn playback-pause" data-stream="{{ stream_id }}" data-action="pause" title="Pause">&#10074;&#10074;</button>
+            <button type="button" class="playback-btn playback-toggle" data-stream="{{ stream_id }}" data-action="" title="Loading playback state" aria-label="Loading playback state" disabled>…</button>
             <button type="button" class="playback-btn playback-next" data-stream="{{ stream_id }}" data-action="skip_next" title="Next">&#9654;&#9654;</button>
             <label class="volume-control">
-              <span>Volume</span>
-              <input type="range" min="0" max="100" value="{{ video_volume_pct }}" class="video-volume-slider" data-stream="{{ stream_id }}">
+              <span>Vol.</span>
+              <input type="range" min="0" max="100" value="{{ video_volume_pct }}" class="video-volume-slider" data-stream="{{ stream_id }}" title="{{ video_volume_pct }}%" aria-label="Volume {{ video_volume_pct }}%">
             </label>
           </div>
         </div>
@@ -357,12 +351,13 @@
         <div class="form-row stream-url-container" {% if media_mode != 'livestream' %} style="display:none;" {% endif %}>
           <label for="stream-url-{{ stream_id }}">URL</label>
           <div>
-            <div style="display:flex; align-items:center; gap:8px; flex-wrap: wrap;">
+            <div class="stream-url-controls">
               <input id="stream-url-{{ stream_id }}" type="text" class="stream-url-input" data-stream="{{ stream_id }}" value="{{ conf.stream_url if conf.stream_url else '' }}" placeholder="https://example.com/">
               <span class="url-type-badge" aria-live="polite"></span>
               <span class="embed-status-badge" aria-live="polite"></span>
               {% set show_embed_type_badge = embed_type and embed_provider and embed_provider|lower == 'youtube' %}
               <span class="embed-type-badge" aria-live="polite" {% if not show_embed_type_badge %}hidden{% endif %}{% if show_embed_type_badge %} data-type="{{ embed_type }}"{% endif %}>{% if show_embed_type_badge %}{{ embed_type|capitalize }}{% endif %}</span>
+              <button type="button" class="stream-links-toggle" data-stream="{{ stream_id }}">Links</button>
             </div>
           </div>
         </div>
@@ -378,13 +373,28 @@
           <label for="picsum-width-{{ stream_id }}">Picsum</label>
           <div class="picsum-config" data-stream="{{ stream_id }}" data-current-seed="{{ picsum.seed|default('') }}">
             <div class="picsum-grid">
-              <div class="picsum-field">
+              <div class="picsum-field picsum-size-preset-field">
+                <label for="picsum-size-preset-{{ stream_id }}">Size</label>
+                <select id="picsum-size-preset-{{ stream_id }}" class="picsum-size-preset">
+                  <option value="1280x720">1280x720</option>
+                  <option value="1366x768">1366x768</option>
+                  <option value="1600x900">1600x900</option>
+                  <option value="1920x1080">1920x1080</option>
+                  <option value="2560x1440">2560x1440</option>
+                  <option value="3840x2160">3840x2160</option>
+                  <option value="1080x1920">1080x1920</option>
+                  <option value="custom">Custom</option>
+                </select>
+              </div>
+              <div class="picsum-size-custom-row" hidden>
+                <div class="picsum-field">
                 <label for="picsum-width-{{ stream_id }}">Width</label>
                 <input id="picsum-width-{{ stream_id }}" type="number" class="picsum-width" min="16" max="4096" step="1" data-default="1920" value="{{ picsum.width|default(1920) }}">
               </div>
               <div class="picsum-field">
                 <label for="picsum-height-{{ stream_id }}">Height</label>
                 <input id="picsum-height-{{ stream_id }}" type="number" class="picsum-height" min="16" max="4096" step="1" data-default="1080" value="{{ picsum.height|default(1080) }}">
+              </div>
               </div>
               <div class="picsum-field">
                 <label for="picsum-blur-{{ stream_id }}">Blur</label>
@@ -732,18 +742,67 @@
   </div>
 </section>
 
+<section id="links-manager-panel" class="dashboard-panel" role="dialog" aria-modal="true" aria-labelledby="links-manager-title" hidden>
+  <div class="dashboard-panel-header">
+    <div>
+      <span class="dashboard-panel-kicker">Manager</span>
+      <h2 id="links-manager-title">Links</h2>
+    </div>
+    <button type="button" class="dashboard-panel-close" data-close-dashboard-panel aria-label="Close">&times;</button>
+  </div>
+  <div class="dashboard-panel-body">
+    <div id="links-manager">
+      <form id="links-manager-create-form" class="settings-links-create-form">
+        <label>
+          <span>Label</span>
+          <input type="text" name="label" placeholder="Bob Ross Playlist">
+        </label>
+        <label>
+          <span>Category</span>
+          <input type="text" name="category" placeholder="Cartoons">
+        </label>
+        <label class="settings-links-create-url">
+          <span>URL</span>
+          <input type="text" name="url" placeholder="https://example.com/stream">
+        </label>
+        <button type="submit">Add Link</button>
+      </form>
+      <div class="settings-links-toolbar">
+        <label class="settings-links-filter">
+          <span>Search</span>
+          <input id="links-manager-search" type="text" placeholder="Search links">
+        </label>
+        <label class="settings-links-filter">
+          <span>Category</span>
+          <select id="links-manager-category-filter">
+            <option value="">All categories</option>
+          </select>
+        </label>
+      </div>
+      <div id="links-manager-list" class="settings-links-list"></div>
+      <p id="links-manager-empty" class="settings-muted-note"></p>
+      <p id="links-manager-note" class="settings-status-line" style="display:none;"></p>
+    </div>
+  </div>
+</section>
+
+<div id="stream-links-popover" class="stream-links-popover" role="dialog" aria-modal="false" aria-labelledby="stream-links-popover-title" hidden>
+  <div class="stream-links-popover-head">
+    <strong id="stream-links-popover-title">Links</strong>
+    <button type="button" id="stream-links-popover-close" class="stream-links-popover-close" aria-label="Close links picker">&times;</button>
+  </div>
+  <div class="stream-links-toolbar">
+    <input type="text" id="stream-links-popover-search" placeholder="Search links">
+    <select id="stream-links-popover-category">
+      <option value="">All categories</option>
+    </select>
+  </div>
+  <div id="stream-links-popover-status" class="stream-links-status" aria-live="polite" hidden></div>
+  <div id="stream-links-popover-list" class="stream-links-list"></div>
+</div>
+
 <!-- Notification -->
 <div id="notification" class="notification">Settings updated!</div>
-
-<!-- Floating Notes Pad -->
-<div id="notepad" class="notepad collapsed">
-  <div class="notepad-header">
-    <span>Notes</span>
-    <button id="toggle-notepad">Toggle</button>
-  </div>
-  <textarea id="notepad-text"></textarea>
-  <button id="save-notes">Save</button>
-</div>
 
   <div id="ai-preset-manager-backdrop" class="ai-preset-manager-backdrop" hidden></div>
   <div id="ai-preset-manager" class="ai-preset-manager" role="dialog" aria-modal="true" aria-labelledby="ai-preset-manager-title" hidden>
@@ -808,12 +867,51 @@
   const socket = io();
   let currentSocketId = null;
   const watchedStreams = new Set();
+  const playbackSubscribedStreams = new Set();
+  function setCardPlaybackToggleState(card, playbackState) {
+    if (!card) return;
+    const playbackToggle = card.querySelector('.playback-controls .playback-toggle');
+    if (!playbackToggle) return;
+    const status = String((playbackState && playbackState.status) || '').toLowerCase();
+    let paused = null;
+    if (playbackState && typeof playbackState.is_paused === 'boolean') {
+      paused = playbackState.is_paused;
+    } else if (status === 'playing') {
+      paused = false;
+    } else if (status === 'paused') {
+      paused = true;
+    }
+    if (paused === null) {
+      playbackToggle.dataset.action = '';
+      playbackToggle.innerHTML = '…';
+      playbackToggle.title = 'Loading playback state';
+      playbackToggle.setAttribute('aria-label', 'Loading playback state');
+      playbackToggle.disabled = true;
+      return;
+    }
+    playbackToggle.dataset.action = paused ? 'play' : 'pause';
+    playbackToggle.innerHTML = paused ? '&#9654;' : '&#10074;&#10074;';
+    const label = paused ? 'Play' : 'Pause';
+    playbackToggle.title = label;
+    playbackToggle.setAttribute('aria-label', label);
+    playbackToggle.disabled = false;
+  }
+  function subscribeToPlaybackStream(streamId) {
+    if (!streamId) return;
+    playbackSubscribedStreams.add(streamId);
+    if (currentSocketId) {
+      socket.emit('stream_subscribe', { stream_id: streamId });
+    }
+  }
   socket.on('connect', () => {
     currentSocketId = socket.id;
     watchedStreams.forEach(streamId => {
       socket.emit('ai_watch', { stream_id: streamId });
       const card = findStreamCard(streamId);
       if (card) syncLatestAiJob(streamId, card);
+    });
+    playbackSubscribedStreams.forEach(streamId => {
+      socket.emit('stream_subscribe', { stream_id: streamId });
     });
   });
   socket.on('reconnect', () => {
@@ -823,9 +921,26 @@
       const card = findStreamCard(streamId);
       if (card) syncLatestAiJob(streamId, card);
     });
+    playbackSubscribedStreams.forEach(streamId => {
+      socket.emit('stream_subscribe', { stream_id: streamId });
+    });
   });
   socket.on('disconnect', () => {
     currentSocketId = null;
+  });
+  socket.on('stream_init', (data) => {
+    const streamId = data && data.stream_id;
+    if (!streamId) return;
+    const card = findStreamCard(streamId);
+    if (!card) return;
+    setCardPlaybackToggleState(card, data);
+  });
+  socket.on('stream_update', (data) => {
+    const streamId = data && data.stream_id;
+    if (!streamId) return;
+    const card = findStreamCard(streamId);
+    if (!card) return;
+    setCardPlaybackToggleState(card, data);
   });
   let openAiCard = null;
   const aiSummaryUpdaters = new WeakMap();
@@ -1251,6 +1366,21 @@
       }
       document.body.classList.add('dashboard-panel-open');
       syncDashboardLauncherState();
+      if (panelId === 'links-manager-panel') {
+        fetchGlobalLinks(true)
+          .then(() => {
+            populateLinkCategories(linksManagerCategoryFilter, linksManagerCategoryFilter ? linksManagerCategoryFilter.value : '');
+            renderLinksManager();
+            setLinksManagerStatus('');
+          })
+          .catch((err) => {
+            if (linksManagerEmpty) {
+              linksManagerEmpty.hidden = false;
+              linksManagerEmpty.textContent = 'Links are unavailable.';
+            }
+            setLinksManagerStatus(err && err.message ? err.message : 'Links are unavailable.', true);
+          });
+      }
       const focusTarget = panel.querySelector('[data-close-dashboard-panel], input, button, select, textarea, a[href]');
       if (focusTarget && typeof focusTarget.focus === 'function') {
         window.setTimeout(() => focusTarget.focus(), 0);
@@ -2993,28 +3123,14 @@
     return '';
   }
   // Persist expanded/collapsed tile state
-  function getOpenSet() {
-    try { return new Set(JSON.parse(localStorage.getItem('gmOpen') || '[]')); } catch { return new Set(); }
-  }
-  function setOpenSet(s) { try { localStorage.setItem('gmOpen', JSON.stringify(Array.from(s))); } catch {} }
-  function markOpen(name, open) {
-    if (!name) return; // only persist named groups
-    const s = getOpenSet();
-    if (open) s.add(name); else s.delete(name);
-    setOpenSet(s);
-  }
   let gmOpenSet = new Set();
   let gmCurrentGroups = {};
   function loadOpenSet() {
-    try { gmOpenSet = new Set(JSON.parse(localStorage.getItem('gmOpen') || '[]')); } catch (e) { gmOpenSet = new Set(); }
-  }
-  function persistOpenSet() {
-    try { localStorage.setItem('gmOpen', JSON.stringify(Array.from(gmOpenSet))); } catch (e) {}
+    gmOpenSet = new Set();
   }
   function markOpen(name, open) {
     if (!name) return;
     if (open) gmOpenSet.add(name); else gmOpenSet.delete(name);
-    persistOpenSet();
   }
   function isOpen(name) { return name && gmOpenSet.has(name); }
 
@@ -3065,65 +3181,110 @@
     function hasMember(id) { return order.includes(id); }
     const isNew = !name;
     const tile = makeEl('div', {class:'group-tile'}, []);
-    const header = makeEl('div', {class:'tile-header'}, []);
-    const title = makeEl('span', {class:'tile-title'}, [name || 'New Group']);
-    const actions = makeEl('div', {class:'tile-actions'}, []);
-    const open = name ? makeEl('a', {href:`/stream/group/${encodeURIComponent(name)}`, target:'_blank'}, ['Open']) : null;
-    const edit = makeEl('button', {class:'tile-edit'}, ['Edit']);
-    const del = name ? makeEl('button', {class:'tile-del'}, ['Delete']) : null;
+    const header = makeEl('div', {class:'group-tile-head'}, []);
+    const heading = makeEl('div', {class:'group-tile-heading'}, []);
+    const titleRow = makeEl('div', {class:'group-tile-title-row'}, []);
+    const title = makeEl('span', {class:'group-tile-title'}, [name || 'New Group']);
+    const countBadge = makeEl('span', {class:'group-tile-count'}, ['0']);
+    const summary = makeEl('div', {class:'group-tile-summary'}, []);
+    const actions = makeEl('div', {class:'group-tile-actions'}, []);
+    const open = name ? makeEl('a', {href:`/stream/group/${encodeURIComponent(name)}`, target:'_blank', class:'group-tile-action group-tile-action-link'}, ['Open']) : null;
+    const edit = makeEl('button', {class:'group-tile-action tile-edit', type:'button'}, ['Edit']);
+    const del = name ? makeEl('button', {class:'group-tile-action tile-del', type:'button'}, ['Delete']) : null;
     if (open) actions.appendChild(open);
     actions.appendChild(edit);
     if (del) actions.appendChild(del);
-    header.appendChild(title);
+    titleRow.appendChild(title);
+    titleRow.appendChild(countBadge);
+    heading.appendChild(titleRow);
+    heading.appendChild(summary);
+    header.appendChild(heading);
     header.appendChild(actions);
     tile.appendChild(header);
     const body = makeEl('div', {class:'tile-body', hidden: !isOpen(name)}, []);
     if (isOpen(name)) tile.classList.add('expanded');
-    const nameRow = makeEl('div', {class:'tile-row'}, [
-      makeEl('label', {}, ['Name: ', makeEl('input', {type:'text', class:'tile-name', value: name || ''}, [])])
+    const nameRow = makeEl('div', {class:'group-card-section group-basics-section'}, []);
+    const basicsHeader = makeEl('div', {class:'group-section-head'}, [
+      makeEl('span', {class:'group-section-kicker'}, ['Basics']),
+      makeEl('span', {class:'group-section-note'}, ['Name and layout selection'])
     ]);
+    const basicsGrid = makeEl('div', {class:'group-form-grid'}, []);
+    const nameField = makeEl('label', {class:'group-field group-field-full'}, []);
+    nameField.appendChild(makeEl('span', {class:'group-field-label'}, ['Name']));
+    nameField.appendChild(makeEl('input', {type:'text', class:'tile-name', value: name || '', placeholder:'Group name'}, []));
+    basicsGrid.appendChild(nameField);
+    nameRow.appendChild(basicsHeader);
+    nameRow.appendChild(basicsGrid);
     body.appendChild(nameRow);
     // Layout selection + visual gallery
-    const layoutRow = makeEl('div', {class:'tile-row'}, []);
+    const layoutRow = makeEl('div', {class:'group-card-section group-layout-section'}, []);
+    const layoutHeader = makeEl('div', {class:'group-section-head'}, [
+      makeEl('span', {class:'group-section-kicker'}, ['Layout']),
+      makeEl('span', {class:'group-section-note'}, ['Choose how this group should render'])
+    ]);
+    const layoutControls = makeEl('div', {class:'group-form-grid group-layout-grid'}, []);
+    const layoutField = makeEl('label', {class:'group-field'}, []);
+    layoutField.appendChild(makeEl('span', {class:'group-field-label'}, ['Layout']));
     const layoutSelect = makeEl('select', {class:'tile-layout'}, []);
     ['grid','focus','pip'].forEach(opt => {
       const o = makeEl('option', {value:opt}, [opt.charAt(0).toUpperCase()+opt.slice(1)]);
       layoutSelect.appendChild(o);
     });
-    layoutRow.appendChild(makeEl('label', {}, ['Layout: ', layoutSelect]));
+    layoutField.appendChild(layoutSelect);
+    layoutControls.appendChild(layoutField);
     const colsInput = makeEl('input', {type:'number', min:'1', max:'8', class:'tile-cols', value: gLayout.cols || 2}, []);
-    const colsWrap = makeEl('span', {class:'tile-cols-wrap'}, [' Cols: ', colsInput]);
-    layoutRow.appendChild(colsWrap);
+    const colsWrap = makeEl('label', {class:'group-field tile-cols-wrap'}, []);
+    colsWrap.appendChild(makeEl('span', {class:'group-field-label'}, ['Columns']));
+    colsWrap.appendChild(colsInput);
+    layoutControls.appendChild(colsWrap);
     const rowsInput = makeEl('input', {type:'number', min:'1', max:'8', class:'tile-rows', value: gLayout.rows || 2}, []);
-    const rowsWrap = makeEl('span', {class:'tile-rows-wrap'}, [' Rows: ', rowsInput]);
-    layoutRow.appendChild(rowsWrap);
+    const rowsWrap = makeEl('label', {class:'group-field tile-rows-wrap'}, []);
+    rowsWrap.appendChild(makeEl('span', {class:'group-field-label'}, ['Rows']));
+    rowsWrap.appendChild(rowsInput);
+    layoutControls.appendChild(rowsWrap);
     // Focus options
-    const focusWrap = makeEl('div', {class:'tile-pip-wrap', style:'display:none;'}, []);
+    const focusWrap = makeEl('div', {class:'tile-pip-wrap group-layout-extra', style:'display:none;'}, []);
     const focusMode = makeEl('select', {class:'tile-focus-mode'}, []);
     ['1-2','1-3','1-5'].forEach(v => focusMode.appendChild(makeEl('option', {value:v}, [v.replace('-', ' + ')])));
     const focusPos = makeEl('select', {class:'tile-focus-pos'}, []);
     const focusMain = makeEl('select', {class:'tile-focus-main'}, []);
-    const fRow1 = makeEl('div', {class:'pip-row'}, [ makeEl('label', {}, ['Focus: ']), focusMode ]);
-    const fRow2 = makeEl('div', {class:'pip-row'}, [ makeEl('label', {}, ['Placement: ']), focusPos ]);
-    const fRow3 = makeEl('div', {class:'pip-row'}, [ makeEl('label', {}, ['Main: ']), focusMain ]);
+    const fRow1 = makeEl('label', {class:'group-field pip-row'}, []);
+    fRow1.appendChild(makeEl('span', {class:'group-field-label'}, ['Focus']));
+    fRow1.appendChild(focusMode);
+    const fRow2 = makeEl('label', {class:'group-field pip-row'}, []);
+    fRow2.appendChild(makeEl('span', {class:'group-field-label'}, ['Placement']));
+    fRow2.appendChild(focusPos);
+    const fRow3 = makeEl('label', {class:'group-field pip-row'}, []);
+    fRow3.appendChild(makeEl('span', {class:'group-field-label'}, ['Main stream']));
+    fRow3.appendChild(focusMain);
     focusWrap.appendChild(fRow1); focusWrap.appendChild(fRow2); focusWrap.appendChild(fRow3);
-    layoutRow.appendChild(focusWrap);
+    layoutControls.appendChild(focusWrap);
     // PIP options
-    const pipWrap = makeEl('div', {class:'tile-pip-wrap', style:'display:none;'}, []);
+    const pipWrap = makeEl('div', {class:'tile-pip-wrap group-layout-extra', style:'display:none;'}, []);
     const pipMain = makeEl('select', {class:'tile-pip-main'}, []);
     const pipPip = makeEl('select', {class:'tile-pip-pip'}, []);
     const pipCorner = makeEl('select', {class:'tile-pip-corner'}, []);
     ['top-left','top-right','bottom-left','bottom-right'].forEach(c => pipCorner.appendChild(makeEl('option', {value:c}, [c])));
     const pipSize = makeEl('input', {type:'number', min:'10', max:'50', class:'tile-pip-size', value: gLayout.pip_size || 25}, []);
-    const rowMain = makeEl('div', {class:'pip-row'}, [ makeEl('label', {}, ['Main: ']), pipMain ]);
-    const rowPip = makeEl('div', {class:'pip-row'}, [ makeEl('label', {}, ['PIP: ']), pipPip ]);
-    const rowCorner = makeEl('div', {class:'pip-row'}, [ makeEl('label', {}, ['Corner: ']), pipCorner ]);
-    const rowSize = makeEl('div', {class:'pip-row'}, [ makeEl('label', {}, ['Size: ']), pipSize ]);
+    const rowMain = makeEl('label', {class:'group-field pip-row'}, []);
+    rowMain.appendChild(makeEl('span', {class:'group-field-label'}, ['Main stream']));
+    rowMain.appendChild(pipMain);
+    const rowPip = makeEl('label', {class:'group-field pip-row'}, []);
+    rowPip.appendChild(makeEl('span', {class:'group-field-label'}, ['PiP stream']));
+    rowPip.appendChild(pipPip);
+    const rowCorner = makeEl('label', {class:'group-field pip-row'}, []);
+    rowCorner.appendChild(makeEl('span', {class:'group-field-label'}, ['Corner']));
+    rowCorner.appendChild(pipCorner);
+    const rowSize = makeEl('label', {class:'group-field pip-row'}, []);
+    rowSize.appendChild(makeEl('span', {class:'group-field-label'}, ['Size']));
+    rowSize.appendChild(pipSize);
     pipWrap.appendChild(rowMain);
     pipWrap.appendChild(rowPip);
     pipWrap.appendChild(rowCorner);
     pipWrap.appendChild(rowSize);
-    layoutRow.appendChild(pipWrap);
+    layoutControls.appendChild(pipWrap);
+    layoutRow.appendChild(layoutHeader);
+    layoutRow.appendChild(layoutControls);
     body.appendChild(layoutRow);
 
     // Visual layout gallery
@@ -3198,7 +3359,7 @@
     const gridOpt = addOption('grid', 'Grid', () => { layoutSelect.value='grid'; updateLayoutVisibility(); }, () => buildGridPreview(parseInt(rowsInput.value||'2',10), parseInt(colsInput.value||'2',10)));
     const focusOpt = addOption('focus', 'Focus', () => { layoutSelect.value='focus'; updateLayoutVisibility(); }, () => buildFocusPreview(focusMode.value||'1-5', focusPos.value||'bottom-right'));
     const pipOpt = addOption('pip', 'PiP', () => { layoutSelect.value='pip'; updateLayoutVisibility(); }, () => buildPipPreview());
-    body.appendChild(gallery);
+    layoutRow.appendChild(gallery);
     function syncActiveFromInputs() {
       const v = layoutSelect.value;
       if (v==='grid') setActive('grid'); else setActive(v);
@@ -3232,25 +3393,32 @@
       Array.from(focusPos.options).forEach(o => o.selected = (o.value===desired));
     }
     // Bulk row (Add all / Remove all) above the combo
-    const bulkRow = makeEl('div', {class:'tile-row tile-bulk-row'}, []);
+    const membersSection = makeEl('div', {class:'group-card-section group-members-section'}, []);
+    const membersHeader = makeEl('div', {class:'group-section-head'}, [
+      makeEl('span', {class:'group-section-kicker'}, ['Members']),
+      makeEl('span', {class:'group-section-note'}, ['Pick streams and reorder them for the layout'])
+    ]);
+    membersSection.appendChild(membersHeader);
+    const bulkRow = makeEl('div', {class:'tile-row tile-bulk-row group-members-toolbar'}, []);
     const addAllBtn = makeEl('button', {class:'tile-addall-btn', type:'button'}, ['Add all']);
     const removeAllBtn = makeEl('button', {class:'tile-removeall-btn', type:'button'}, ['Remove all']);
     bulkRow.appendChild(addAllBtn);
     bulkRow.appendChild(removeAllBtn);
-    body.appendChild(bulkRow);
+    membersSection.appendChild(bulkRow);
     // Add row with combined search/select + Add
-    const addRow = makeEl('div', {class:'tile-row tile-add-row'}, []);
+    const addRow = makeEl('div', {class:'tile-row tile-add-row group-search-row'}, []);
     const dlId = `dl-${Math.random().toString(36).slice(2)}`;
     const combo = makeEl('input', {type:'text', class:'tile-combo', placeholder:'Search or select...', list: dlId}, []);
     const datalist = makeEl('datalist', {id: dlId}, []);
     const addBtn = makeEl('button', {class:'tile-add-btn', type:'button'}, ['Add']);
     addRow.appendChild(combo);
     addRow.appendChild(addBtn);
-    body.appendChild(addRow);
-    body.appendChild(datalist);
+    membersSection.appendChild(addRow);
+    membersSection.appendChild(datalist);
     // Chips container for current members
     const chips = makeEl('div', {class:'member-chips'}, []);
-    body.appendChild(chips);
+    membersSection.appendChild(chips);
+    body.appendChild(membersSection);
     // helpers to refresh UI
     function labelOf(id) { return (streamsMeta[id]?.label || id) + ''; }
     function candidates(query) {
@@ -3261,7 +3429,29 @@
     }
     function refreshTitleCount() {
       const count = order.length;
-      title.textContent = (tile.querySelector('.tile-name')?.value?.trim() || name || 'New Group') + ` (${count})`;
+      title.textContent = tile.querySelector('.tile-name')?.value?.trim() || name || 'New Group';
+      countBadge.textContent = `${count}`;
+    }
+    function layoutLabel() {
+      const v = layoutSelect.value || 'grid';
+      if (v === 'pip') return 'PiP';
+      if (v === 'focus') return 'Focus';
+      return 'Grid';
+    }
+    function summaryMembers() {
+      const members = uniqueMembers().map((id) => labelOf(id));
+      if (!members.length) return 'No streams assigned';
+      if (members.length <= 2) return members.join(' + ');
+      return `${members[0]}, ${members[1]} +${members.length - 2}`;
+    }
+    function refreshSummary() {
+      summary.innerHTML = '';
+      const layoutChip = makeEl('span', {class:'group-summary-chip'}, [layoutLabel()]);
+      const memberChip = makeEl('span', {class:'group-summary-chip'}, [`${uniqueMembers().length} stream${uniqueMembers().length === 1 ? '' : 's'}`]);
+      const memberText = makeEl('span', {class:'group-summary-text'}, [summaryMembers()]);
+      summary.appendChild(layoutChip);
+      summary.appendChild(memberChip);
+      summary.appendChild(memberText);
     }
     function refreshPipSelects() {
       const mem = uniqueMembers();
@@ -3336,10 +3526,15 @@
       chips.innerHTML = '';
       const list = makeEl('ul', {class:'member-list'}, []);
       const cap = capacityForLayout();
+      if (!order.length) {
+        chips.appendChild(makeEl('div', {class:'group-empty-state'}, ['No streams in this group yet.']));
+      }
       order.forEach((id, idx) => {
         const li = makeEl('li', {class:'member-item' + (idx >= cap ? ' overflow' : '')}, []);
         li.setAttribute('draggable', 'true');
+        const memberMeta = makeEl('div', {class:'member-meta'}, []);
         const nameSpan = makeEl('span', {class:'member-name'}, [labelOf(id)]);
+        const slotSpan = makeEl('span', {class:'member-slot'}, [`Slot ${idx + 1}`]);
         const rm = makeEl('button', {class:'member-remove', title:'Remove'}, ['Remove']);
         rm.addEventListener('click', () => {
           order.splice(idx, 1);
@@ -3389,12 +3584,15 @@
           els.forEach(el => el.classList.remove('drag-over-top','drag-over-bottom'));
           draggingIndex = null;
         });
-        li.appendChild(nameSpan);
+        memberMeta.appendChild(nameSpan);
+        memberMeta.appendChild(slotSpan);
+        li.appendChild(memberMeta);
         li.appendChild(rm);
         list.appendChild(li);
       });
-      chips.appendChild(list);
+      if (order.length) chips.appendChild(list);
       refreshTitleCount();
+      refreshSummary();
     }
     // init layout controls
     layoutSelect.value = gLayout.layout || 'grid';
@@ -3463,6 +3661,7 @@
       body.hidden = !body.hidden;
       tile.classList.toggle('expanded', !body.hidden);
       markOpen(name, !body.hidden);
+      edit.textContent = body.hidden ? 'Edit' : 'Close';
     });
     if (del) {
       del.addEventListener('click', async () => {
@@ -3511,10 +3710,17 @@
         alert(msg);
       }
     });
-    cancel.addEventListener('click', () => { body.hidden = true; tile.classList.remove('expanded'); });
+    cancel.addEventListener('click', () => {
+      body.hidden = true;
+      tile.classList.remove('expanded');
+      markOpen(name, false);
+      edit.textContent = 'Edit';
+    });
     // Keep count/title in sync with name edits
     const nameInputEl = nameRow.querySelector('.tile-name');
     if (nameInputEl) nameInputEl.addEventListener('input', () => { refreshTitleCount(); });
+    refreshSummary();
+    edit.textContent = body.hidden ? 'Edit' : 'Close';
     return tile;
   }
 
@@ -3737,29 +3943,496 @@
     }
   });
 
-  // Notepad behaviour
-  const notepad = document.getElementById('notepad');
-  const toggleNotepadBtn = document.getElementById('toggle-notepad');
-  const notepadText = document.getElementById('notepad-text');
-  const saveNotesBtn = document.getElementById('save-notes');
-  // Load notes from server
-  fetch('/notes')
-    .then(r => r.json())
-    .then(({text}) => { notepadText.value = text || ''; })
-    .catch(() => {});
-  toggleNotepadBtn.addEventListener('click', () => {
-    notepad.classList.toggle('collapsed');
-  });
-  saveNotesBtn.addEventListener('click', () => {
-    fetch('/notes', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text: notepadText.value })
-    })
-    .then(r => r.json())
-    .then(() => showNotification('Notes saved on server'))
-    .catch(() => showNotification('Failed to save notes'));
-  });
+  const globalLinksState = {
+    links: [],
+    categories: [],
+    loaded: false,
+    loading: false,
+  };
+  let openStreamLinksCard = null;
+  const linksManagerList = document.getElementById('links-manager-list');
+  const linksManagerEmpty = document.getElementById('links-manager-empty');
+  const linksManagerNote = document.getElementById('links-manager-note');
+  const linksManagerSearch = document.getElementById('links-manager-search');
+  const linksManagerCategoryFilter = document.getElementById('links-manager-category-filter');
+  const linksManagerCreateForm = document.getElementById('links-manager-create-form');
+  const streamLinksPopover = document.getElementById('stream-links-popover');
+  const streamLinksPopoverClose = document.getElementById('stream-links-popover-close');
+  const streamLinksPopoverSearch = document.getElementById('stream-links-popover-search');
+  const streamLinksPopoverCategory = document.getElementById('stream-links-popover-category');
+  const streamLinksPopoverStatus = document.getElementById('stream-links-popover-status');
+  const streamLinksPopoverList = document.getElementById('stream-links-popover-list');
+
+  const LINK_PROVIDER_LABELS = {
+    youtube: 'YouTube',
+    website: 'Website',
+    hls: 'HLS',
+  };
+
+  const LINK_TYPE_LABELS = {
+    playlist: 'Playlist',
+    live: 'Live',
+    video: 'Video',
+    website: 'Website',
+  };
+
+  function linkProviderLabel(value) {
+    const key = String(value || '').trim().toLowerCase();
+    return LINK_PROVIDER_LABELS[key] || (key ? key.charAt(0).toUpperCase() + key.slice(1) : '');
+  }
+
+  function linkTypeLabel(value) {
+    const key = String(value || '').trim().toLowerCase();
+    return LINK_TYPE_LABELS[key] || (key ? key.charAt(0).toUpperCase() + key.slice(1) : '');
+  }
+
+  async function fetchGlobalLinks(force = false) {
+    if (globalLinksState.loading) {
+      return globalLinksState;
+    }
+    if (!force && globalLinksState.loaded) {
+      return globalLinksState;
+    }
+    globalLinksState.loading = true;
+    try {
+      const response = await fetch('/api/links', { cache: 'no-store' });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(data.error || `Unable to load links (${response.status})`);
+      }
+      globalLinksState.links = Array.isArray(data.links) ? data.links : [];
+      globalLinksState.categories = Array.isArray(data.categories) ? data.categories : [];
+      globalLinksState.loaded = true;
+    } finally {
+      globalLinksState.loading = false;
+    }
+    return globalLinksState;
+  }
+
+  function setLinksManagerStatus(message, isError = false) {
+    const el = linksManagerNote;
+    if (!el) return;
+    const text = String(message || '').trim();
+    el.textContent = text;
+    el.style.display = text ? 'block' : 'none';
+    el.style.color = isError ? '#f66' : 'inherit';
+  }
+
+  function setStreamLinksStatus(message, isError = false) {
+    const el = streamLinksPopoverStatus;
+    if (!el) return;
+    const text = String(message || '').trim();
+    el.textContent = text;
+    el.hidden = !text;
+    el.dataset.error = isError ? 'true' : 'false';
+  }
+
+  function populateLinkCategories(select, current = '') {
+    if (!select) return;
+    select.innerHTML = '<option value="">All categories</option>';
+    globalLinksState.categories.forEach((category) => {
+      const option = document.createElement('option');
+      option.value = category;
+      option.textContent = category;
+      select.appendChild(option);
+    });
+    select.value = globalLinksState.categories.includes(current) ? current : '';
+  }
+
+  function collectFilteredLinks(query, selectedCategory) {
+    const loweredQuery = String(query || '').trim().toLowerCase();
+    const loweredCategory = String(selectedCategory || '').trim().toLowerCase();
+    return globalLinksState.links.filter((link) => {
+      const linkCategory = String(link.category || '').trim().toLowerCase();
+      if (loweredCategory && linkCategory !== loweredCategory) {
+        return false;
+      }
+      if (!loweredQuery) {
+        return true;
+      }
+      return [
+        link.label,
+        link.url,
+        link.category,
+        linkProviderLabel(link.provider),
+        linkTypeLabel(link.content_type),
+      ].some((value) => String(value || '').toLowerCase().includes(loweredQuery));
+    });
+  }
+
+  function renderLinksCollection(list, filtered, options = {}) {
+    if (!list) return;
+    const {
+      emptyMessage = 'No saved links are available.',
+      onSelect = null,
+      activeUrl = '',
+    } = options;
+
+    list.innerHTML = '';
+    if (!filtered.length) {
+      const empty = document.createElement('div');
+      empty.className = 'stream-links-empty';
+      empty.textContent = emptyMessage;
+      list.appendChild(empty);
+      return;
+    }
+
+    const grouped = new Map();
+    filtered.forEach((link) => {
+      const categoryName = String(link.category || 'Uncategorized');
+      if (!grouped.has(categoryName)) {
+        grouped.set(categoryName, []);
+      }
+      grouped.get(categoryName).push(link);
+    });
+
+    Array.from(grouped.keys()).sort((a, b) => a.localeCompare(b)).forEach((categoryName) => {
+      const section = document.createElement('section');
+      section.className = 'stream-links-group';
+      const header = document.createElement('div');
+      header.className = 'stream-links-group-title';
+      header.textContent = categoryName;
+      section.appendChild(header);
+      grouped.get(categoryName).forEach((link) => {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'stream-links-item';
+        button.dataset.linkId = link.id || '';
+        const currentUrl = String(activeUrl || '').trim();
+        if (currentUrl && currentUrl === String(link.url || '').trim()) {
+          button.classList.add('is-active');
+        }
+
+        const top = document.createElement('div');
+        top.className = 'stream-links-item-top';
+        const label = document.createElement('strong');
+        label.textContent = link.label || 'Untitled link';
+        top.appendChild(label);
+        const badges = document.createElement('div');
+        badges.className = 'stream-links-item-badges';
+        const provider = linkProviderLabel(link.provider);
+        const type = linkTypeLabel(link.content_type);
+        if (provider) {
+          const badge = document.createElement('span');
+          badge.className = 'stream-links-badge';
+          badge.dataset.type = String(link.provider || '').toLowerCase();
+          badge.textContent = provider;
+          badges.appendChild(badge);
+        }
+        if (type && type !== provider) {
+          const badge = document.createElement('span');
+          badge.className = 'stream-links-badge';
+          badge.dataset.type = String(link.content_type || '').toLowerCase();
+          badge.textContent = type;
+          badges.appendChild(badge);
+        }
+        if (badges.childNodes.length) {
+          top.appendChild(badges);
+        }
+
+        const url = document.createElement('div');
+        url.className = 'stream-links-item-url';
+        url.textContent = link.url || '';
+        button.append(top, url);
+        if (typeof onSelect === 'function') {
+          button.addEventListener('click', () => onSelect(link));
+        }
+        section.appendChild(button);
+      });
+      list.appendChild(section);
+    });
+  }
+
+  function renderLinksManager() {
+    if (!linksManagerList || !linksManagerEmpty) return;
+    populateLinkCategories(linksManagerCategoryFilter, linksManagerCategoryFilter ? linksManagerCategoryFilter.value : '');
+    const filtered = collectFilteredLinks(
+      linksManagerSearch ? linksManagerSearch.value : '',
+      linksManagerCategoryFilter ? linksManagerCategoryFilter.value : ''
+    );
+    if (!filtered.length) {
+      linksManagerEmpty.hidden = false;
+      linksManagerEmpty.textContent = globalLinksState.links.length ? 'No links match the current filters.' : 'No saved links available.';
+    } else {
+      linksManagerEmpty.hidden = true;
+      linksManagerEmpty.textContent = '';
+    }
+    renderLinksCollection(linksManagerList, filtered, {
+      emptyMessage: globalLinksState.links.length ? 'No links match the current filters.' : 'No saved links available.',
+      activeUrl: '',
+    });
+
+    Array.from(linksManagerList.querySelectorAll('.stream-links-item')).forEach((item) => {
+      const linkId = item.dataset.linkId;
+      const link = globalLinksState.links.find((entry) => String(entry.id) === String(linkId));
+      if (!link) return;
+      item.replaceWith(buildLinksManagerItem(link));
+    });
+  }
+
+  function buildLinksManagerItem(link) {
+    const item = document.createElement('article');
+    item.className = 'settings-links-item';
+    item.dataset.linkId = link.id || '';
+
+    const summary = document.createElement('div');
+    summary.className = 'settings-links-summary';
+    const thumb = document.createElement('div');
+    thumb.className = 'settings-links-thumb';
+    if (link.thumbnail_url) {
+      const image = document.createElement('img');
+      image.src = link.thumbnail_url;
+      image.alt = link.label || 'Link thumbnail';
+      image.loading = 'lazy';
+      image.decoding = 'async';
+      thumb.appendChild(image);
+    } else {
+      thumb.textContent = 'URL';
+    }
+
+    const head = document.createElement('div');
+    head.className = 'settings-links-item-head';
+    const titleWrap = document.createElement('div');
+    titleWrap.className = 'settings-links-item-title';
+    const title = document.createElement('strong');
+    title.textContent = link.label || 'Untitled link';
+    title.title = link.label || 'Untitled link';
+    const category = document.createElement('span');
+    category.className = 'settings-links-category';
+    category.textContent = link.category || 'Uncategorized';
+    titleWrap.append(title, category);
+
+    const badges = document.createElement('div');
+    badges.className = 'settings-links-badges';
+    const provider = linkProviderLabel(link.provider);
+    const type = linkTypeLabel(link.content_type);
+    [provider, type].forEach((label, index) => {
+      if (!label) return;
+      if (index === 1 && label === provider) return;
+      const badge = document.createElement('span');
+      badge.className = 'settings-links-badge';
+      badge.dataset.type = index === 0 ? String(link.provider || '').toLowerCase() : String(link.content_type || '').toLowerCase();
+      badge.textContent = label;
+      badges.appendChild(badge);
+    });
+    head.append(titleWrap);
+    if (badges.childNodes.length) {
+      head.appendChild(badges);
+    }
+
+    const url = document.createElement('div');
+    url.className = 'settings-links-url';
+    url.textContent = link.url || '';
+    url.title = link.url || '';
+
+    const actionsWrap = document.createElement('div');
+    actionsWrap.className = 'settings-links-summary-actions';
+    const copyButton = document.createElement('button');
+    copyButton.type = 'button';
+    copyButton.className = 'settings-links-copy-toggle';
+    copyButton.textContent = 'Copy';
+    const editToggle = document.createElement('button');
+    editToggle.type = 'button';
+    editToggle.className = 'settings-links-edit-toggle';
+    editToggle.textContent = 'Edit';
+    actionsWrap.append(copyButton, editToggle);
+
+    const mediaColumn = document.createElement('div');
+    mediaColumn.className = 'settings-links-media-column';
+    mediaColumn.append(thumb);
+    summary.append(mediaColumn);
+    const summaryBody = document.createElement('div');
+    summaryBody.className = 'settings-links-summary-body';
+    summaryBody.append(head, url);
+    summary.append(summaryBody, actionsWrap);
+
+    const form = document.createElement('form');
+    form.className = 'settings-links-edit-form';
+    form.hidden = true;
+    form.innerHTML = `
+      <label>
+        <span>Label</span>
+        <input type="text" name="label" value="">
+      </label>
+      <label>
+        <span>Category</span>
+        <input type="text" name="category" value="">
+      </label>
+      <label class="settings-links-edit-url">
+        <span>URL</span>
+        <input type="text" name="url" value="">
+      </label>
+      <div class="settings-links-item-actions">
+        <button type="submit">Save</button>
+        <button type="button" class="danger">Delete</button>
+      </div>
+    `;
+    form.querySelector('[name="label"]').value = link.label || '';
+    form.querySelector('[name="category"]').value = link.category || '';
+    form.querySelector('[name="url"]').value = link.url || '';
+    const saveButton = form.querySelector('button[type="submit"]');
+    const deleteButton = form.querySelector('button[type="button"]');
+    copyButton.addEventListener('click', async () => {
+      const copied = await copyTextToClipboard(link.url || '');
+      if (copied) {
+        showNotification(`Copied link URL for ${link.label}`);
+      } else {
+        showNotification(link.url || 'Link URL unavailable');
+      }
+    });
+    editToggle.addEventListener('click', () => {
+      const nextExpanded = !item.classList.contains('is-expanded');
+      item.classList.toggle('is-expanded', nextExpanded);
+      editToggle.textContent = nextExpanded ? 'Done' : 'Edit';
+    });
+
+    form.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const payload = {
+        label: String(form.querySelector('[name="label"]').value || '').trim(),
+        category: String(form.querySelector('[name="category"]').value || '').trim(),
+        url: String(form.querySelector('[name="url"]').value || '').trim(),
+      };
+      if (!payload.label || !payload.category || !payload.url) {
+        setLinksManagerStatus('Label, URL, and category are required.', true);
+        return;
+      }
+      saveButton.disabled = true;
+      deleteButton.disabled = true;
+      setLinksManagerStatus('Saving link...');
+      try {
+        const response = await fetch(`/api/links/${encodeURIComponent(link.id)}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          throw new Error(data.error || `Unable to save link (${response.status})`);
+        }
+        globalLinksState.links = Array.isArray(data.links) ? data.links : [];
+        globalLinksState.categories = Array.isArray(data.categories) ? data.categories : [];
+        populateLinkCategories(linksManagerCategoryFilter, linksManagerCategoryFilter ? linksManagerCategoryFilter.value : '');
+        populateLinkCategories(streamLinksPopoverCategory, streamLinksPopoverCategory ? streamLinksPopoverCategory.value : '');
+        renderLinksManager();
+        renderStreamLinksPopover();
+        setLinksManagerStatus(`Saved "${payload.label}".`);
+      } catch (err) {
+        setLinksManagerStatus(err && err.message ? err.message : 'Link update failed.', true);
+      } finally {
+        saveButton.disabled = false;
+        deleteButton.disabled = false;
+      }
+    });
+
+    deleteButton.addEventListener('click', async () => {
+      if (!window.confirm(`Delete "${link.label}" from Links?`)) return;
+      saveButton.disabled = true;
+      deleteButton.disabled = true;
+      setLinksManagerStatus('Deleting link...');
+      try {
+        const response = await fetch(`/api/links/${encodeURIComponent(link.id)}`, { method: 'DELETE' });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          throw new Error(data.error || `Unable to delete link (${response.status})`);
+        }
+        globalLinksState.links = Array.isArray(data.links) ? data.links : [];
+        globalLinksState.categories = Array.isArray(data.categories) ? data.categories : [];
+        populateLinkCategories(linksManagerCategoryFilter, linksManagerCategoryFilter ? linksManagerCategoryFilter.value : '');
+        populateLinkCategories(streamLinksPopoverCategory, streamLinksPopoverCategory ? streamLinksPopoverCategory.value : '');
+        renderLinksManager();
+        renderStreamLinksPopover();
+        setLinksManagerStatus(`Deleted "${link.label}".`);
+      } catch (err) {
+        setLinksManagerStatus(err && err.message ? err.message : 'Link deletion failed.', true);
+      } finally {
+        saveButton.disabled = false;
+        deleteButton.disabled = false;
+      }
+    });
+
+    item.append(summary, form);
+    return item;
+  }
+
+  function closeStreamLinksPopover() {
+    if (streamLinksPopover) streamLinksPopover.hidden = true;
+    if (openStreamLinksCard) {
+      const toggle = openStreamLinksCard.querySelector('.stream-links-toggle');
+      if (toggle) toggle.setAttribute('aria-expanded', 'false');
+    }
+    openStreamLinksCard = null;
+    if (streamLinksPopoverSearch) streamLinksPopoverSearch.value = '';
+    if (streamLinksPopoverCategory) streamLinksPopoverCategory.value = '';
+    setStreamLinksStatus('');
+  }
+
+  function renderStreamLinksPopover() {
+    if (!streamLinksPopoverList || !openStreamLinksCard) return;
+    const currentUrl = String(openStreamLinksCard.querySelector('.stream-url-input')?.value || '').trim();
+    const filtered = collectFilteredLinks(
+      streamLinksPopoverSearch ? streamLinksPopoverSearch.value : '',
+      streamLinksPopoverCategory ? streamLinksPopoverCategory.value : ''
+    );
+    renderLinksCollection(streamLinksPopoverList, filtered, {
+      emptyMessage: globalLinksState.links.length ? 'No links match the current filters.' : 'No saved links are available.',
+      activeUrl: currentUrl,
+      onSelect: (link) => {
+        const streamId = openStreamLinksCard.dataset.stream;
+        const urlInput = openStreamLinksCard.querySelector('.stream-url-input');
+        const nextUrl = String(link.url || '').trim();
+        const current = String(urlInput ? urlInput.value : '').trim();
+        if (!streamId || !nextUrl) return;
+        if (current && current !== nextUrl) {
+          const confirmed = window.confirm(`Replace the current URL on ${streamId} with "${link.label}"?`);
+          if (!confirmed) return;
+        }
+        if (urlInput) {
+          urlInput.value = nextUrl;
+        }
+        updateNowPlaying(openStreamLinksCard, {
+          title: link.label || '',
+          content_type: link.content_type || '',
+          provider: link.provider ? linkProviderLabel(link.provider) : '',
+        });
+        saveSettings(streamId, { stream_url: nextUrl });
+        closeStreamLinksPopover();
+      }
+    });
+  }
+
+  function positionStreamLinksPopover(anchor) {
+    if (!streamLinksPopover || !anchor) return;
+    const rect = anchor.getBoundingClientRect();
+    const margin = 12;
+    const desiredWidth = Math.min(420, Math.max(320, window.innerWidth * 0.32));
+    const maxLeft = Math.max(margin, window.innerWidth - desiredWidth - margin);
+    const left = Math.min(Math.max(margin, rect.left), maxLeft);
+    const top = Math.min(rect.bottom + 8, window.innerHeight - margin - 320);
+    streamLinksPopover.style.left = `${left}px`;
+    streamLinksPopover.style.top = `${Math.max(margin, top)}px`;
+    streamLinksPopover.style.width = `${desiredWidth}px`;
+  }
+
+  async function openStreamLinksPopover(card, trigger) {
+    if (!card || !streamLinksPopover) return;
+    openStreamLinksCard = card;
+    if (trigger) {
+      positionStreamLinksPopover(trigger);
+    }
+    streamLinksPopover.hidden = false;
+    const toggle = card.querySelector('.stream-links-toggle');
+    if (toggle) toggle.setAttribute('aria-expanded', 'true');
+    setStreamLinksStatus('Loading links...');
+    try {
+      await fetchGlobalLinks(true);
+      populateLinkCategories(streamLinksPopoverCategory, streamLinksPopoverCategory ? streamLinksPopoverCategory.value : '');
+      renderStreamLinksPopover();
+      setStreamLinksStatus('');
+    } catch (err) {
+      setStreamLinksStatus(err && err.message ? err.message : 'Links are unavailable.', true);
+    }
+  }
 
   // The following section reuses much of the original dashboard logic to
   // handle folder/mode selection, duration changes, image selection and
@@ -4260,9 +4933,9 @@
     if (!streamId) return;
     const folderSelect = card.querySelector('.folder-select');
     const currentFolder = folderSelect
-      ? (folderSelect.value === '__filtered__' ? (folderSelect.dataset.currentFolder || 'all') : (folderSelect.value || folderSelect.dataset.currentFolder || 'all'))
+      ? (folderSelect.value || folderSelect.dataset.currentFolder || 'all')
       : 'all';
-    const refreshResult = refreshFoldersForCard(card, card.dataset.hideNsfw === 'true');
+    const refreshResult = refreshFoldersForCard(card);
     if (refreshResult && typeof refreshResult.then === 'function') {
       refreshResult.then(folder => {
         loadMediaFor(streamId, folder || currentFolder || 'all');
@@ -5280,6 +5953,8 @@
             if (volumeSlider) {
               const pct = Math.max(0, Math.min(1, Number.isFinite(volumeValue) ? volumeValue : 1)) * 100;
               volumeSlider.value = String(Math.round(pct));
+              volumeSlider.title = `${Math.round(pct)}%`;
+              volumeSlider.setAttribute('aria-label', `Volume ${Math.round(pct)}%`);
             }
           }
           if (data.new_config && data.new_config.sync !== undefined) {
@@ -5302,13 +5977,6 @@
             const qualitySelect = card.querySelector('.image-quality-select');
             if (qualitySelect) {
               qualitySelect.value = (data.new_config.image_quality || 'auto');
-            }
-          }
-          if (data.new_config && data.new_config.hide_nsfw !== undefined) {
-            card.dataset.hideNsfw = data.new_config.hide_nsfw ? 'true' : 'false';
-            const hideToggle = card.querySelector('.hide-nsfw-toggle');
-            if (hideToggle) {
-              hideToggle.checked = !!data.new_config.hide_nsfw;
             }
           }
           if (data.new_config && data.new_config.background_blur_enabled !== undefined) {
@@ -5439,13 +6107,17 @@
         option.hidden = false;
         return;
       }
+      if (option.dataset.missing === 'true') {
+        option.hidden = false;
+        return;
+      }
       const hasImages = option.dataset.hasImages === 'true';
       const hasVideos = option.dataset.hasVideos === 'true';
       const isVisible = wantsImages ? hasImages : hasVideos;
       option.hidden = !isVisible;
     });
     const selectedOption = select.options[select.selectedIndex];
-    if (selectedOption && selectedOption.hidden) {
+    if (selectedOption && selectedOption.hidden && selectedOption.dataset.missing !== 'true') {
       const fallback = options.find(opt => !opt.hidden && opt.dataset.filtered !== 'true');
       if (fallback) {
         select.value = fallback.value;
@@ -5530,6 +6202,35 @@
     next_auto_trigger: null,
     last_auto_trigger: null,
   });
+
+  const PICSUM_SIZE_PRESETS = Object.freeze([
+    { value: '1280x720', width: 1280, height: 720 },
+    { value: '1366x768', width: 1366, height: 768 },
+    { value: '1600x900', width: 1600, height: 900 },
+    { value: '1920x1080', width: 1920, height: 1080 },
+    { value: '2560x1440', width: 2560, height: 1440 },
+    { value: '3840x2160', width: 3840, height: 2160 },
+    { value: '1080x1920', width: 1080, height: 1920 },
+  ]);
+
+  function matchPicsumPreset(width, height) {
+    const widthValue = Number(width);
+    const heightValue = Number(height);
+    const preset = PICSUM_SIZE_PRESETS.find(entry => entry.width === widthValue && entry.height === heightValue);
+    return preset ? preset.value : 'custom';
+  }
+
+  function syncPicsumPresetUi(config, normalized) {
+    if (!config) return;
+    const presetSelect = config.querySelector('.picsum-size-preset');
+    const customRow = config.querySelector('.picsum-size-custom-row');
+    if (presetSelect) {
+      presetSelect.value = matchPicsumPreset(normalized.width, normalized.height);
+    }
+    if (customRow) {
+      customRow.hidden = !presetSelect || presetSelect.value !== 'custom';
+    }
+  }
 
   function clamp(value, min, max) {
     if (!Number.isFinite(value)) {
@@ -5641,6 +6342,7 @@ function applyPicsumSettings(card, settings, opts = {}) {
   if (heightInput) heightInput.value = normalized.height;
   if (blurInput) blurInput.value = normalized.blur;
   if (grayscaleInput) grayscaleInput.checked = normalized.grayscale;
+  syncPicsumPresetUi(config, normalized);
 
   if (seedDisplay) {
     if (displaySeed) {
@@ -5722,7 +6424,7 @@ function applyPicsumSettings(card, settings, opts = {}) {
     return data;
   }
 
-  async function refreshFoldersForCard(card, hideNsfw) {
+  async function refreshFoldersForCard(card) {
     const folderSelect = card.querySelector('.folder-select');
     if (!folderSelect) {
       return null;
@@ -5742,9 +6444,6 @@ function applyPicsumSettings(card, settings, opts = {}) {
     };
     const library = currentLibraryForMode(card.dataset.mediaMode || 'image');
     const params = new URLSearchParams({ library });
-    if (hideNsfw) {
-      params.set('hide_nsfw', '1');
-    }
     const url = `/folders?${params.toString()}`;
     try {
       const response = await fetch(url);
@@ -5757,17 +6456,18 @@ function applyPicsumSettings(card, settings, opts = {}) {
       }
       const assigned = folderSelect.dataset.currentFolder || 'all';
       const assignedLabel = toDisplayName(assigned);
-      const assignedLower = (assigned || '').toLowerCase();
       const hasAssigned = items.some(entry => entry && entry.name === assigned);
-      const shouldShowPlaceholder = Boolean(hideNsfw) && assigned && assignedLower.includes('nsfw') && !hasAssigned;
+      const shouldShowPlaceholder = assigned && !hasAssigned;
       const frag = document.createDocumentFragment();
       if (shouldShowPlaceholder) {
         const placeholder = document.createElement('option');
-        placeholder.value = '__filtered__';
-        placeholder.textContent = `Filtered (${assignedLabel})`;
+        placeholder.value = assigned;
+        placeholder.textContent = `${assignedLabel} (missing)`;
         placeholder.title = assigned;
-        placeholder.dataset.filtered = 'true';
         placeholder.dataset.displayName = placeholder.textContent;
+        placeholder.dataset.missing = 'true';
+        placeholder.dataset.hasImages = 'true';
+        placeholder.dataset.hasVideos = 'true';
         placeholder.selected = true;
         frag.appendChild(placeholder);
       }
@@ -5777,9 +6477,6 @@ function applyPicsumSettings(card, settings, opts = {}) {
         }
         const name = String(entry.name);
         const displayName = entry.display_name ? String(entry.display_name) : name;
-        if (hideNsfw && name.toLowerCase().includes('nsfw')) {
-          return;
-        }
         const opt = document.createElement('option');
         opt.value = name;
         opt.title = name;
@@ -5795,7 +6492,7 @@ function applyPicsumSettings(card, settings, opts = {}) {
       folderSelect.replaceChildren(frag);
       let currentSelection = folderSelect.dataset.currentFolder || 'all';
       if (shouldShowPlaceholder) {
-        folderSelect.value = '__filtered__';
+        folderSelect.value = assigned;
         folderSelect.title = assignedLabel;
         folderSelect.dataset.currentFolder = assigned;
         currentSelection = assigned || 'all';
@@ -5875,7 +6572,6 @@ function applyPicsumSettings(card, settings, opts = {}) {
     const selectedRow = card.querySelector('.selected-image-row');
     const folderRow = card.querySelector('.folder-row');
     const qualityRow = card.querySelector('.image-quality-row');
-    const nsfwRow = card.querySelector('.nsfw-row');
     const backgroundRow = card.querySelector('.background-row');
     const aiSection = card.querySelector('.ai-generator');
     const aiSummary = card.querySelector('.ai-summary');
@@ -5921,7 +6617,6 @@ function applyPicsumSettings(card, settings, opts = {}) {
       selectedRow.style.display = showSelected ? '' : 'none';
     }
     if (folderRow) folderRow.style.display = (isImage || isVideo || isAiRandom || isAiSpecific) ? '' : 'none';
-    if (nsfwRow) nsfwRow.style.display = (isLivestream || isPicsum) ? 'none' : '';
     if (qualityRow) qualityRow.style.display = (isLivestream || isVideo || isPicsum) ? 'none' : '';
     if (backgroundRow) backgroundRow.style.display = (isLivestream || isVideo) ? 'none' : '';
     if (picsumRow) {
@@ -5957,12 +6652,8 @@ function applyPicsumSettings(card, settings, opts = {}) {
     const grid = card.querySelector('.image-picker .image-grid');
     if (!grid) return;
     const mediaMode = (card.dataset.mediaMode || 'image').toLowerCase();
-    const hideNsfw = card.dataset.hideNsfw === 'true';
     const params = new URLSearchParams({ folder });
     params.set('library', currentLibraryForMode(mediaMode));
-    if (hideNsfw) {
-      params.set('hide_nsfw', '1');
-    }
     if (mediaMode === 'image' || mediaMode === 'ai') {
       params.set('kind', 'image');
     } else if (mediaMode === 'video') {
@@ -6126,20 +6817,8 @@ function applyPicsumSettings(card, settings, opts = {}) {
         }
         folderSelect.addEventListener('change', e => {
           const selectEl = e.target;
-          if (selectEl.value === '__filtered__') {
-            const filteredOption = selectEl.options[selectEl.selectedIndex];
-            if (filteredOption) {
-              const label = filteredOption.dataset.displayName || filteredOption.textContent || filteredOption.title || selectEl.title;
-              selectEl.title = label;
-            }
-            return;
-          }
           const folder = selectEl.value || 'all';
           selectEl.dataset.currentFolder = folder;
-          const filteredOption = selectEl.querySelector('option[data-filtered="true"]');
-          if (filteredOption) {
-            filteredOption.remove();
-          }
           const selectedOption = selectEl.options[selectEl.selectedIndex];
           if (selectedOption) {
             const label = selectedOption.dataset.displayName || selectedOption.textContent || selectedOption.title || folder;
@@ -6153,29 +6832,6 @@ function applyPicsumSettings(card, settings, opts = {}) {
           if (display) display.textContent = 'None';
           saveSettings(streamId, { folder, selected_image: null, selected_media_kind: null });
           loadMediaFor(streamId, folder);
-        });
-      }
-      const hideNsfwToggle = card.querySelector('.hide-nsfw-toggle');
-      if (hideNsfwToggle) {
-        hideNsfwToggle.addEventListener('change', e => {
-          const enabled = e.target.checked;
-          hideNsfwToggle.disabled = true;
-          saveSettings(streamId, { hide_nsfw: enabled }, {
-            onSuccess: () => {
-              const refreshResult = refreshFoldersForCard(card, enabled);
-              if (refreshResult && typeof refreshResult.then === 'function') {
-                refreshResult.finally(() => {
-                  hideNsfwToggle.disabled = false;
-                });
-              } else {
-                hideNsfwToggle.disabled = false;
-              }
-            },
-            onError: () => {
-              hideNsfwToggle.checked = !enabled;
-              hideNsfwToggle.disabled = false;
-            }
-          });
         });
       }
       const imageQualitySelect = card.querySelector('.image-quality-select');
@@ -6208,6 +6864,7 @@ function applyPicsumSettings(card, settings, opts = {}) {
       }
       const picsumConfig = card.querySelector('.picsum-config');
       if (picsumConfig) {
+        const presetSelect = picsumConfig.querySelector('.picsum-size-preset');
         const widthInput = picsumConfig.querySelector('.picsum-width');
         const heightInput = picsumConfig.querySelector('.picsum-height');
         const blurInput = picsumConfig.querySelector('.picsum-blur');
@@ -6228,6 +6885,29 @@ function applyPicsumSettings(card, settings, opts = {}) {
               setPicsumStatus(card, 'Failed to save Picsum settings', true);
             });
         };
+        applyPicsumSettings(card, collectPicsumSettings(card), { preserveSeedDisplay: true });
+        if (presetSelect) {
+          presetSelect.addEventListener('change', () => {
+            const selected = presetSelect.value || 'custom';
+            const customRow = picsumConfig.querySelector('.picsum-size-custom-row');
+            const preset = PICSUM_SIZE_PRESETS.find(entry => entry.value === selected);
+            if (selected === 'custom') {
+              if (customRow) {
+                customRow.hidden = false;
+              }
+              if (widthInput) widthInput.focus();
+              return;
+            }
+            if (preset) {
+              if (widthInput) widthInput.value = String(preset.width);
+              if (heightInput) heightInput.value = String(preset.height);
+            }
+            if (customRow) {
+              customRow.hidden = true;
+            }
+            maybeSave();
+          });
+        }
         if (widthInput) widthInput.addEventListener('change', maybeSave);
         if (heightInput) heightInput.addEventListener('change', maybeSave);
         if (blurInput) blurInput.addEventListener('change', maybeSave);
@@ -6287,6 +6967,7 @@ function applyPicsumSettings(card, settings, opts = {}) {
         });
       }
       const playbackButtons = card.querySelectorAll('.playback-controls .playback-btn');
+      subscribeToPlaybackStream(streamId);
       playbackButtons.forEach(btn => {
         btn.addEventListener('click', () => {
           const action = btn.dataset.action;
@@ -6296,6 +6977,11 @@ function applyPicsumSettings(card, settings, opts = {}) {
       });
       const volumeSlider = card.querySelector('.video-volume-slider');
       if (volumeSlider) {
+        const updateVolumeSliderUi = value => {
+          const pct = Math.max(0, Math.min(100, Math.round(Number(value) || 0)));
+          volumeSlider.title = `${pct}%`;
+          volumeSlider.setAttribute('aria-label', `Volume ${pct}%`);
+        };
         const fromSlider = value => {
           const num = Number(value);
           if (!Number.isFinite(num)) return 1;
@@ -6305,19 +6991,23 @@ function applyPicsumSettings(card, settings, opts = {}) {
         const datasetVol = (datasetAttr !== undefined && datasetAttr !== '') ? Number(datasetAttr) : NaN;
         const initialVol = Number.isFinite(datasetVol) ? Math.max(0, Math.min(1, datasetVol)) : fromSlider(volumeSlider.value);
         volumeSlider.value = String(Math.round(initialVol * 100));
+        updateVolumeSliderUi(volumeSlider.value);
         card.dataset.videoVolume = String(initialVol);
         card.dataset.videoVolumePersisted = card.dataset.videoVolumePersisted || String(initialVol);
         volumeSlider.addEventListener('input', e => {
           const normalized = fromSlider(e.target.value);
           card.dataset.videoVolume = String(normalized);
+          updateVolumeSliderUi(e.target.value);
           socket.emit('video_control', { stream_id: streamId, action: 'set_volume', volume: normalized });
         });
         volumeSlider.addEventListener('change', e => {
           const normalized = fromSlider(e.target.value);
           card.dataset.videoVolume = String(normalized);
+          updateVolumeSliderUi(e.target.value);
           const persisted = Number(card.dataset.videoVolumePersisted);
           if (Number.isFinite(persisted) && Math.abs(normalized - persisted) <= 0.005) {
             volumeSlider.value = String(Math.round(Math.max(0, Math.min(1, persisted)) * 100));
+            updateVolumeSliderUi(volumeSlider.value);
             return;
           }
           saveSettings(streamId, { video_volume: normalized });
@@ -6378,11 +7068,14 @@ function applyPicsumSettings(card, settings, opts = {}) {
             payload.picsum_settings = collectPicsumSettings(card);
             setPicsumStatus(card, '');
           }
+          if (mediaMode !== 'livestream' && openStreamLinksCard === card) {
+            closeStreamLinksPopover();
+          }
           saveSettings(streamId, payload);
           applyModeState(card, mediaMode, nextMode, getStreamUrl());
-          refreshFoldersForCard(card, card.dataset.hideNsfw === 'true');
+          refreshFoldersForCard(card);
           if ((nextMode === 'specific' && (mediaMode === 'image' || mediaMode === 'video')) || (mediaMode === 'ai' && nextMode === 'specific')) {
-            const effectiveFolder = folderSelect ? (folderSelect.value === '__filtered__' ? (folderSelect.dataset.currentFolder || 'all') : folderSelect.value) : 'all';
+            const effectiveFolder = folderSelect ? (folderSelect.value || folderSelect.dataset.currentFolder || 'all') : 'all';
             loadMediaFor(streamId, effectiveFolder);
           }
         });
@@ -6408,7 +7101,7 @@ function applyPicsumSettings(card, settings, opts = {}) {
           saveSettings(streamId, payload);
           applyModeState(card, mediaMode, mode, getStreamUrl());
           if ((mode === 'specific' && (mediaMode === 'image' || mediaMode === 'video')) || (mediaMode === 'ai' && mode === 'specific')) {
-            const effectiveFolder = folderSelect ? (folderSelect.value === '__filtered__' ? (folderSelect.dataset.currentFolder || 'all') : folderSelect.value) : 'all';
+            const effectiveFolder = folderSelect ? (folderSelect.value || folderSelect.dataset.currentFolder || 'all') : 'all';
             loadMediaFor(streamId, effectiveFolder);
           }
         });
@@ -6542,6 +7235,25 @@ function applyPicsumSettings(card, settings, opts = {}) {
           }
         });
       }
+      const streamLinksToggle = card.querySelector('.stream-links-toggle');
+      if (streamLinksToggle) {
+        streamLinksToggle.setAttribute('aria-expanded', 'false');
+        streamLinksToggle.addEventListener('click', async (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          const mediaMode = getCurrentMediaMode();
+          if (mediaMode !== 'livestream') {
+            showNotification('Switch this stream to URL / Embed mode to use Links');
+            return;
+          }
+          const isOpen = openStreamLinksCard === card && streamLinksPopover && !streamLinksPopover.hidden;
+          if (isOpen) {
+            closeStreamLinksPopover();
+            return;
+          }
+          await openStreamLinksPopover(card, streamLinksToggle);
+        });
+      }
       // YT settings changes
       const ccChk = card.querySelector('.yt-cc-chk');
       const muteChk = card.querySelector('.yt-mute-chk');
@@ -6621,7 +7333,7 @@ function applyPicsumSettings(card, settings, opts = {}) {
       const reloadBtn = card.querySelector('.reload-images-btn');
       if (reloadBtn) {
         reloadBtn.addEventListener('click', () => {
-          const folder = folderSelect ? (folderSelect.value === '__filtered__' ? (folderSelect.dataset.currentFolder || 'all') : folderSelect.value) : 'all';
+          const folder = folderSelect ? (folderSelect.value || folderSelect.dataset.currentFolder || 'all') : 'all';
           loadMediaFor(streamId, folder);
         });
       }
@@ -6632,10 +7344,82 @@ function applyPicsumSettings(card, settings, opts = {}) {
         String(card.dataset.mode || getModeValue(card, initialMediaMode) || (initialMediaMode === 'livestream' ? 'livestream' : (initialMediaMode === 'ai' ? 'generate' : 'random'))).toLowerCase()
       );
       applyModeState(card, initialMediaMode, initialModeValue, urlInput ? urlInput.value : '');
-      refreshFoldersForCard(card, card.dataset.hideNsfw === 'true');
+      refreshFoldersForCard(card);
       if (((initialMediaMode === 'image' || initialMediaMode === 'video') && initialModeValue === 'specific') || (initialMediaMode === 'ai' && initialModeValue === 'specific')) {
-        const effectiveFolder = folderSelect ? (folderSelect.value === '__filtered__' ? (folderSelect.dataset.currentFolder || 'all') : (folderSelect.value || folderSelect.dataset.currentFolder || 'all')) : 'all';
+        const effectiveFolder = folderSelect ? (folderSelect.value || folderSelect.dataset.currentFolder || 'all') : 'all';
         loadMediaFor(streamId, effectiveFolder);
+      }
+    });
+    if (linksManagerCreateForm) {
+      linksManagerCreateForm.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        const payload = {
+          label: String(linksManagerCreateForm.querySelector('[name="label"]').value || '').trim(),
+          category: String(linksManagerCreateForm.querySelector('[name="category"]').value || '').trim(),
+          url: String(linksManagerCreateForm.querySelector('[name="url"]').value || '').trim(),
+        };
+        if (!payload.label || !payload.category || !payload.url) {
+          setLinksManagerStatus('Label, URL, and category are required.', true);
+          return;
+        }
+        const submit = linksManagerCreateForm.querySelector('button[type="submit"]');
+        if (submit) submit.disabled = true;
+        setLinksManagerStatus('Saving link...');
+        try {
+          const response = await fetch('/api/links', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+          });
+          const data = await response.json().catch(() => ({}));
+          if (!response.ok) {
+            throw new Error(data.error || `Unable to save link (${response.status})`);
+          }
+          globalLinksState.links = Array.isArray(data.links) ? data.links : [];
+          globalLinksState.categories = Array.isArray(data.categories) ? data.categories : [];
+          globalLinksState.loaded = true;
+          linksManagerCreateForm.reset();
+          populateLinkCategories(linksManagerCategoryFilter, linksManagerCategoryFilter ? linksManagerCategoryFilter.value : '');
+          populateLinkCategories(streamLinksPopoverCategory, streamLinksPopoverCategory ? streamLinksPopoverCategory.value : '');
+          renderLinksManager();
+          renderStreamLinksPopover();
+          setLinksManagerStatus(`Saved "${payload.label}".`);
+        } catch (err) {
+          setLinksManagerStatus(err && err.message ? err.message : 'Link creation failed.', true);
+        } finally {
+          if (submit) submit.disabled = false;
+        }
+      });
+    }
+    if (linksManagerSearch) {
+      linksManagerSearch.addEventListener('input', renderLinksManager);
+    }
+    if (linksManagerCategoryFilter) {
+      linksManagerCategoryFilter.addEventListener('change', renderLinksManager);
+    }
+    if (streamLinksPopoverSearch) {
+      streamLinksPopoverSearch.addEventListener('input', renderStreamLinksPopover);
+    }
+    if (streamLinksPopoverCategory) {
+      streamLinksPopoverCategory.addEventListener('change', renderStreamLinksPopover);
+    }
+    if (streamLinksPopoverClose) {
+      streamLinksPopoverClose.addEventListener('click', closeStreamLinksPopover);
+    }
+    window.addEventListener('resize', () => {
+      if (!openStreamLinksCard || !streamLinksPopover || streamLinksPopover.hidden) return;
+      const toggle = openStreamLinksCard.querySelector('.stream-links-toggle');
+      if (toggle) positionStreamLinksPopover(toggle);
+    });
+    document.addEventListener('click', (event) => {
+      if (!streamLinksPopover || streamLinksPopover.hidden) return;
+      if (streamLinksPopover.contains(event.target)) return;
+      if (event.target.closest('.stream-links-toggle')) return;
+      closeStreamLinksPopover();
+    });
+    document.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape' && streamLinksPopover && !streamLinksPopover.hidden) {
+        closeStreamLinksPopover();
       }
     });
     syncMinimizedGridState();

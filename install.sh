@@ -1,64 +1,133 @@
 #!/usr/bin/env bash
-# This installation script automates the setup of the EchoMosaic
-# application. It performs the following steps:
-#   1. Installs system packages required for Python and virtual environments.
-#   2. Copies the application files to a dedicated installation directory.
-#   3. Creates a Python virtual environment and installs dependencies.
-#   4. Configures and enables a systemd service so the app starts on boot.
+# Install EchoMosaic from the current cloned repository.
+# The installer configures the current repo as the live app location,
+# creates a local virtual environment, and manages a systemd --user service.
+
 set -euo pipefail
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# Parse arguments
-IS_DEV=false
-if [[ "${1:-}" == "--dev" ]]; then
-  IS_DEV=true
-  echo "Development mode enabled via --dev flag."
-fi
+usage() {
+  cat <<'EOF'
+Usage: ./install.sh [--dev] [--help]
 
-# Set defaults based on mode
+Options:
+  --dev   Install with development defaults (port 5001, echomosaic-dev.service, dev branch tracking)
+  --help  Show this help message
+
+This installer now runs EchoMosaic directly from the current cloned repository.
+Do not run it from a copied tree or extracted archive.
+EOF
+}
+
+IS_DEV=false
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --dev)
+      IS_DEV=true
+      shift
+      ;;
+    --help|-h)
+      usage
+      exit 0
+      ;;
+    *)
+      echo "Unknown argument: $1" >&2
+      usage >&2
+      exit 1
+      ;;
+  esac
+done
+
 if [ "$IS_DEV" = true ]; then
-  default_install_dir="$HOME/.local/share/echomosaic-dev"
   default_port="5001"
   default_service="echomosaic-dev.service"
   BRANCH="dev"
   UPDATE_CHANNEL="branch"
 else
-  default_install_dir="$HOME/.local/share/echomosaic"
   default_port="5000"
   default_service="echomosaic.service"
   BRANCH="main"
   UPDATE_CHANNEL="release"
 fi
-REPO_SLUG="tpersp/EchoMosaic"
 
-# The installer manages a systemd --user service, so it always runs as the
-# invoking user. Keep that explicit to avoid mismatched ownership/runtime state.
+REPO_SLUG="tpersp/EchoMosaic"
+INSTALL_DIR="$SCRIPT_DIR"
 SERVICE_USER="$(whoami)"
+
+if ! git -C "$SCRIPT_DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  echo "Error: $SCRIPT_DIR is not a git repository."
+  echo "Clone the repo first, then run install.sh from inside that clone."
+  exit 1
+fi
+
+if ! git -C "$SCRIPT_DIR" remote get-url origin >/dev/null 2>&1; then
+  echo "Error: git remote 'origin' is not configured for $SCRIPT_DIR."
+  echo "EchoMosaic installs are expected to run from a normal git clone."
+  exit 1
+fi
+
+if [ "$UPDATE_CHANNEL" = "release" ] && [ -n "$(git -C "$SCRIPT_DIR" status --porcelain --untracked-files=no)" ]; then
+  echo "Error: release install requires a clean working tree."
+  echo "Commit, stash, or discard local changes before running install.sh."
+  exit 1
+fi
+
+EXISTING_INSTALL_DIR=""
+if command -v python3 >/dev/null 2>&1; then
+EXISTING_INSTALL_DIR="$(
+python3 - "$INSTALL_DIR" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+repo = Path(sys.argv[1]).resolve()
+config_path = repo / "config.json"
+default_path = repo / "config.default.json"
+data = {}
+for candidate in (default_path, config_path):
+    if not candidate.is_file():
+        continue
+    try:
+        loaded = json.loads(candidate.read_text(encoding="utf-8"))
+    except Exception:
+        continue
+    if isinstance(loaded, dict):
+        data.update(loaded)
+value = str(data.get("INSTALL_DIR") or "").strip()
+print(value, end="")
+PY
+)"
+fi
+
+if [ -n "$EXISTING_INSTALL_DIR" ] && [ "$EXISTING_INSTALL_DIR" != "$INSTALL_DIR" ]; then
+  echo "Existing install path detected in config:"
+  echo "  $EXISTING_INSTALL_DIR"
+  echo
+  echo "This installer now runs EchoMosaic from the folder you launched it from:"
+  echo "  $INSTALL_DIR"
+  echo
+  echo "If you continue, this repo folder will become the active app location."
+  read -r -p "Continue with this folder as the active app location? [y/N]: " CONTINUE_RETARGET
+  if [[ ! "$CONTINUE_RETARGET" =~ ^[Yy]$ ]]; then
+    echo "Install cancelled."
+    exit 1
+  fi
+fi
+
 echo "Installing as user: ${SERVICE_USER}"
-# Prompt for installation directory
-read -r -p "Enter installation directory [${default_install_dir}]: " INSTALL_DIR
-INSTALL_DIR="${INSTALL_DIR:-$default_install_dir}"
-# Expand tilde if present
-INSTALL_DIR="${INSTALL_DIR/#\~/$HOME}"
-# Prompt for HTTP port
+echo "Install location: ${INSTALL_DIR}"
+
 read -r -p "Enter the port the server should listen on [${default_port}]: " PORT
 PORT="${PORT:-$default_port}"
 
-# Prompt for systemd service name
 read -r -p "Enter the systemd service name [${default_service}]: " SERVICE_NAME
 SERVICE_NAME="${SERVICE_NAME:-$default_service}"
 
-echo -e "\nInstalling system packages…"
+echo -e "\nInstalling system packages..."
 sudo apt-get update
 sudo apt-get install < /dev/null -y python3 python3-venv python3-pip ffmpeg git
-echo -e "\nCopying files to ${INSTALL_DIR}…"
-mkdir -p "$INSTALL_DIR"
-# Copy everything in this repository into the installation directory.  We avoid
-# copying any pre‑existing virtual environment directory.
-cp -r "$SCRIPT_DIR/." "$INSTALL_DIR/"
-# == Step: Configure MEDIA_PATHS and AI_MEDIA_PATHS independently ==
-# Normal media and AI media are configured separately on purpose.
-# AI media defaults to a local path unless the user explicitly chooses otherwise.
+
 update_config_path() {
   local config_key="$1"
   local target_path="$2"
@@ -78,17 +147,14 @@ config_path = install_dir / "config.json"
 default_path = install_dir / "config.default.json"
 
 data = {}
-for candidate in (config_path, default_path):
+for candidate in (default_path, config_path):
     if candidate.is_file():
         try:
-            data = json.loads(candidate.read_text(encoding="utf-8"))
+            loaded = json.loads(candidate.read_text(encoding="utf-8"))
         except Exception:
-            data = {}
-        if isinstance(data, dict) and data:
-            break
-
-if not isinstance(data, dict):
-    data = {}
+            loaded = {}
+        if isinstance(loaded, dict):
+            data.update(loaded)
 
 data[config_key] = [target_path]
 data["INSTALL_DIR"] = str(install_dir)
@@ -101,7 +167,7 @@ PY
 }
 
 write_install_metadata() {
-  python3 - "$INSTALL_DIR" "$BRANCH" "$UPDATE_CHANNEL" "$REPO_SLUG" <<'PY'
+  python3 - "$INSTALL_DIR" "$BRANCH" "$UPDATE_CHANNEL" "$REPO_SLUG" "$SERVICE_NAME" <<'PY'
 import json
 import subprocess
 import sys
@@ -111,6 +177,7 @@ install_dir = Path(sys.argv[1]).expanduser().resolve()
 branch = sys.argv[2]
 update_channel = sys.argv[3]
 repo_slug = sys.argv[4]
+service_name = sys.argv[5]
 config_path = install_dir / "config.json"
 default_path = install_dir / "config.default.json"
 
@@ -133,11 +200,15 @@ def git_safe(cmd):
 installed_commit = git_safe(["git", "rev-parse", "HEAD"])
 installed_version = ""
 if update_channel == "release":
-    installed_version = git_safe(["git", "describe", "--tags", "--exact-match", "HEAD"]) or git_safe(["git", "describe", "--tags", "--abbrev=0"])
+    installed_version = (
+        git_safe(["git", "describe", "--tags", "--exact-match", "HEAD"])
+        or git_safe(["git", "describe", "--tags", "--abbrev=0"])
+    )
 if not installed_version:
     installed_version = branch
 
 data["INSTALL_DIR"] = str(install_dir)
+data["SERVICE_NAME"] = service_name
 data["UPDATE_BRANCH"] = branch
 data["UPDATE_CHANNEL"] = update_channel
 data["REPO_SLUG"] = repo_slug
@@ -151,12 +222,9 @@ checkout_latest_release() {
   if [ "$UPDATE_CHANNEL" != "release" ]; then
     return
   fi
-  if ! git -C "$INSTALL_DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-    echo "Skipping release checkout because $INSTALL_DIR is not a git repository."
-    return
-  fi
-  echo -e "\nResolving latest stable release…"
-  RELEASE_TAG="$(python3 - "$REPO_SLUG" <<'PY'
+  echo -e "\nResolving latest stable release..."
+  RELEASE_TAG="$(
+  python3 - "$REPO_SLUG" <<'PY'
 import json
 import sys
 import urllib.request
@@ -175,8 +243,8 @@ print(str(payload.get("tag_name") or "").strip(), end="")
 PY
 )"
   if [ -z "$RELEASE_TAG" ]; then
-    echo "Unable to determine latest release tag; leaving copied version as-is."
-    return
+    echo "Unable to determine latest release tag."
+    exit 1
   fi
   git -C "$INSTALL_DIR" fetch origin --tags
   git -C "$INSTALL_DIR" checkout "$RELEASE_TAG"
@@ -259,7 +327,8 @@ configure_library_path() {
 }
 
 checkout_latest_release
-echo -e "\nCreating virtual environment…"
+
+echo -e "\nCreating virtual environment..."
 python3 -m venv "$INSTALL_DIR/venv"
 "$INSTALL_DIR/venv/bin/pip" install --upgrade pip
 "$INSTALL_DIR/venv/bin/pip" install -r "$INSTALL_DIR/requirements.txt"
@@ -268,7 +337,7 @@ configure_library_path "MEDIA_PATHS" "main media" "$INSTALL_DIR/media" "//192.16
 configure_library_path "AI_MEDIA_PATHS" "AI media" "$INSTALL_DIR/ai_media" "//192.168.1.0/ai-images" "/mnt/echomosaic-ai"
 write_install_metadata
 
-echo -e "\nCreating systemd user service…"
+echo -e "\nCreating systemd user service..."
 SERVICE_DIR="$HOME/.config/systemd/user"
 mkdir -p "$SERVICE_DIR"
 SERVICE_PATH="$SERVICE_DIR/${SERVICE_NAME}"
@@ -286,13 +355,18 @@ Restart=always
 [Install]
 WantedBy=default.target
 EOF
-echo -e "\nEnabling and starting systemd user service…"
+
+echo -e "\nEnabling and starting systemd user service..."
 systemctl --user daemon-reload
 systemctl --user enable "$SERVICE_NAME"
 systemctl --user restart "$SERVICE_NAME"
 if ! loginctl show-user "$USER" | grep -q "Linger=yes"; then
-  echo "Enabling linger for user $USER so the service runs on boot…"
+  echo "Enabling linger for user $USER so the service runs on boot..."
   sudo loginctl enable-linger "$USER" || true
 fi
-echo "\nInstallation complete!"
-echo "The EchoMosaic Dashboard should now be accessible at http://<your-host>:$PORT/"
+
+echo
+echo "Installation complete."
+echo "EchoMosaic now runs directly from this repository:"
+echo "  $INSTALL_DIR"
+echo "The dashboard should be available at http://<your-host>:$PORT/"

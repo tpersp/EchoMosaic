@@ -45,6 +45,7 @@ let currentMediaController = null;
 let serverPlaybackState = null;
 let activeMediaPath = null;
 let usingSynchronizedPlayback = false;
+let syncStateRetryTimer = null;
 let pendingSwitchTimeout = null;
 let pendingSwitchPayload = null;
 let pendingSyncPreload = null;
@@ -546,6 +547,41 @@ function clearPlaybackTimer() {
   }
 }
 
+function clearSyncStateRetry() {
+  if (syncStateRetryTimer) {
+    clearTimeout(syncStateRetryTimer);
+    syncStateRetryTimer = null;
+  }
+}
+
+function scheduleSyncStateRetry(delayMs = 3000) {
+  clearSyncStateRetry();
+  if (!usingSynchronizedPlayback) {
+    return;
+  }
+  syncStateRetryTimer = setTimeout(() => {
+    syncStateRetryTimer = null;
+    if (!usingSynchronizedPlayback) {
+      return;
+    }
+    fetch(`/stream/state/${encodeURIComponent(streamId)}`)
+      .then(res => (res.ok ? res.json() : null))
+      .then(state => {
+        if (state && usingSynchronizedPlayback) {
+          handleStreamUpdate(state);
+        } else if (usingSynchronizedPlayback) {
+          scheduleSyncStateRetry(delayMs);
+        }
+      })
+      .catch(err => {
+        console.debug('Retry failed to fetch synchronized stream state', err);
+        if (usingSynchronizedPlayback) {
+          scheduleSyncStateRetry(delayMs);
+        }
+      });
+  }, Math.max(1000, delayMs));
+}
+
 function teardownActiveVideo() {
   if (!activeVideoElement) {
     return;
@@ -678,6 +714,7 @@ function disableSynchronizedStream() {
   if (!usingSynchronizedPlayback) {
     return;
   }
+  clearSyncStateRetry();
   clearPendingSwitch();
   usingSynchronizedPlayback = false;
   serverPlaybackState = null;
@@ -1037,6 +1074,7 @@ function renderServerVideo(media, state, container) {
 }
 
 function startSynchronizedStream(config, container) {
+  clearSyncStateRetry();
   clearPendingSwitch();
   usingSynchronizedPlayback = true;
   cancelRotation = () => {};
@@ -1084,6 +1122,7 @@ function handleStreamUpdate(payload) {
   }
   const media = payload.media;
   if (!media || !media.path) {
+    scheduleSyncStateRetry();
     clearPendingSwitch();
     activeMediaPath = null;
     teardownActiveVideo();
@@ -1092,6 +1131,7 @@ function handleStreamUpdate(payload) {
     updateBackdropSource('');
     return;
   }
+  clearSyncStateRetry();
   const kind = detectMediaKind(media.path, media.kind);
   if (kind === 'image') {
     const switchAt = Number(payload.switch_at);

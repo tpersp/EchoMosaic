@@ -24,7 +24,11 @@ class _MediaManagerStub:
                 "relative_paths": list(relative_paths or []),
             }
         )
-        return []
+        base = str(destination or "").rstrip("/")
+        return [
+            f"{base}/collection/image1.png",
+            f"{base}/collection/nested/image2.png",
+        ]
 
 
 def test_media_blueprint_registers_expected_routes() -> None:
@@ -48,7 +52,7 @@ def test_media_blueprint_registers_expected_routes() -> None:
             media_error_response=lambda exc: ("error", 400),
             require_media_edit=lambda: None,
             invalidate_media_cache=lambda path: None,
-            parse_truthy=bool,
+            refresh_streams_for_media_path=lambda path: None,
             normalize_library_key=lambda value, default="media": default,
             get_folder_inventory=lambda **kwargs: [],
             as_int=lambda value, default=0: default,
@@ -73,6 +77,7 @@ def test_media_blueprint_registers_expected_routes() -> None:
 def test_media_upload_passes_relative_paths_to_media_manager() -> None:
     app = Flask(__name__)
     media_manager = _MediaManagerStub()
+    refreshed_paths = []
     app.register_blueprint(
         create_media_blueprint(
             media_manager=media_manager,
@@ -91,7 +96,7 @@ def test_media_upload_passes_relative_paths_to_media_manager() -> None:
             media_error_response=lambda exc: ("error", 400),
             require_media_edit=lambda: None,
             invalidate_media_cache=lambda path: None,
-            parse_truthy=bool,
+            refresh_streams_for_media_path=lambda path: refreshed_paths.append(path),
             normalize_library_key=lambda value, default="media": default,
             get_folder_inventory=lambda **kwargs: [],
             as_int=lambda value, default=0: default,
@@ -120,4 +125,9 @@ def test_media_upload_passes_relative_paths_to_media_manager() -> None:
     assert media_manager.upload_calls[0]["relative_paths"] == [
         "collection/image1.png",
         "collection/nested/image2.png",
+    ]
+    assert refreshed_paths == [
+        "media:/viewers",
+        "media:/viewers/collection/image1.png",
+        "media:/viewers/collection/nested/image2.png",
     ]

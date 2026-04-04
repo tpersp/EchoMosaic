@@ -12,6 +12,8 @@ def test_library_blueprint_registers_expected_routes() -> None:
             list_tags_handler=lambda: ("ok", 200),
             create_tag_handler=lambda: ("ok", 200),
             delete_tag_handler=lambda tag_name: (tag_name, 200),
+            links_collection_handler=lambda: ("ok", 200),
+            link_item_handler=lambda link_id: (link_id, 200),
             timer_settings_handler=lambda: ("ok", 200),
             sync_timers_collection_handler=lambda: ("ok", 200),
             sync_timer_item_handler=lambda timer_id: (timer_id, 200),
@@ -26,6 +28,8 @@ def test_library_blueprint_registers_expected_routes() -> None:
     routes = {rule.rule for rule in app.url_map.iter_rules()}
     assert "/tags" in routes
     assert "/tags/<path:tag_name>" in routes
+    assert "/api/links" in routes
+    assert "/api/links/<link_id>" in routes
     assert "/api/settings/timers" in routes
     assert "/api/sync_timers" in routes
     assert "/api/sync_timers/<timer_id>" in routes

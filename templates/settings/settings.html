@@ -9,6 +9,10 @@
         if (window.localStorage.getItem('sidebar-collapsed') === '1') {
           document.documentElement.classList.add('sidebar-collapsed');
         }
+        const savedTheme = window.localStorage.getItem('theme');
+        if (savedTheme === 'light' || savedTheme === 'dark') {
+          document.documentElement.setAttribute('data-theme', savedTheme);
+        }
       } catch (err) {}
     })();
   </script>
@@ -459,6 +463,308 @@
   }
 
   document.addEventListener('DOMContentLoaded', initMediaSettingsControls);
+
+  function normalizeLinkText(value) {
+    return String(value || '').trim();
+  }
+
+  function setLinksManagerStatus(message, ok = true) {
+    const note = document.getElementById('links-manager-note');
+    if (!note) return;
+    const text = normalizeLinkText(message);
+    if (!text) {
+      note.textContent = '';
+      note.style.display = 'none';
+      return;
+    }
+    note.textContent = text;
+    note.style.display = 'block';
+    note.style.color = ok ? 'inherit' : '#f66';
+    note.style.opacity = ok ? 0.85 : 1;
+  }
+
+  function linkProviderLabel(value) {
+    const key = normalizeLinkText(value).toLowerCase();
+    if (!key) return '';
+    if (key === 'youtube') return 'YouTube';
+    if (key === 'hls') return 'HLS';
+    if (key === 'website') return 'Website';
+    return key.charAt(0).toUpperCase() + key.slice(1);
+  }
+
+  function linkTypeLabel(value) {
+    const key = normalizeLinkText(value).toLowerCase();
+    if (!key) return '';
+    if (key === 'playlist') return 'Playlist';
+    if (key === 'live') return 'Live';
+    if (key === 'video') return 'Video';
+    if (key === 'website') return 'Website';
+    return key.charAt(0).toUpperCase() + key.slice(1);
+  }
+
+  function buildLinkBadgeRow(link) {
+    const wrap = document.createElement('div');
+    wrap.className = 'settings-links-badges';
+    const provider = linkProviderLabel(link && link.provider);
+    const type = linkTypeLabel(link && link.content_type);
+    [provider, type].forEach((label, index) => {
+      if (!label) return;
+      if (index === 1 && label === provider) return;
+      const badge = document.createElement('span');
+      badge.className = 'settings-links-badge';
+      badge.textContent = label;
+      wrap.appendChild(badge);
+    });
+    return wrap;
+  }
+
+  function collectLinkFormData(form) {
+    if (!form) return null;
+    const label = normalizeLinkText(form.querySelector('[name="label"]')?.value);
+    const url = normalizeLinkText(form.querySelector('[name="url"]')?.value);
+    const category = normalizeLinkText(form.querySelector('[name="category"]')?.value);
+    if (!label || !url || !category) {
+      return null;
+    }
+    return { label, url, category };
+  }
+
+  async function requestLinks(path, options = {}) {
+    const response = await fetch(path, {
+      cache: 'no-store',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-API-Key': SETTINGS_API_KEY,
+        ...(options.headers || {})
+      },
+      ...options
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(data.error || `Links request failed (${response.status})`);
+    }
+    return data;
+  }
+
+  function renderLinksManager(data) {
+    const list = document.getElementById('links-manager-list');
+    const categoryFilter = document.getElementById('links-manager-category-filter');
+    const searchInput = document.getElementById('links-manager-search');
+    const empty = document.getElementById('links-manager-empty');
+    if (!list || !categoryFilter || !searchInput || !empty) return;
+
+    const links = Array.isArray(data && data.links) ? data.links : [];
+    const categories = Array.isArray(data && data.categories) ? data.categories : [];
+    const currentCategory = normalizeLinkText(categoryFilter.value);
+    const searchTerm = normalizeLinkText(searchInput.value).toLowerCase();
+
+    categoryFilter.innerHTML = '<option value="">All categories</option>';
+    categories.forEach((category) => {
+      const option = document.createElement('option');
+      option.value = category;
+      option.textContent = category;
+      categoryFilter.appendChild(option);
+    });
+    categoryFilter.value = categories.includes(currentCategory) ? currentCategory : '';
+
+    const filtered = links.filter((link) => {
+      const category = normalizeLinkText(link.category);
+      if (currentCategory && category !== currentCategory) {
+        return false;
+      }
+      if (!searchTerm) {
+        return true;
+      }
+      const haystack = [
+        link.label,
+        link.url,
+        link.category,
+        linkProviderLabel(link.provider),
+        linkTypeLabel(link.content_type),
+      ].join(' ').toLowerCase();
+      return haystack.includes(searchTerm);
+    });
+
+    list.innerHTML = '';
+    if (!filtered.length) {
+      empty.hidden = false;
+      empty.textContent = links.length ? 'No links match the current filters.' : 'No saved links available.';
+      return;
+    }
+    empty.hidden = true;
+
+    filtered.forEach((link) => {
+      const item = document.createElement('article');
+      item.className = 'settings-links-item';
+      item.dataset.linkId = link.id || '';
+
+      const head = document.createElement('div');
+      head.className = 'settings-links-item-head';
+
+      const titleWrap = document.createElement('div');
+      titleWrap.className = 'settings-links-item-title';
+      const title = document.createElement('strong');
+      title.textContent = link.label || 'Untitled link';
+      const category = document.createElement('span');
+      category.className = 'settings-links-category';
+      category.textContent = link.category || 'Uncategorized';
+      titleWrap.append(title, category);
+      head.appendChild(titleWrap);
+
+      const badgeRow = buildLinkBadgeRow(link);
+      if (badgeRow.childNodes.length) {
+        head.appendChild(badgeRow);
+      }
+
+      const url = document.createElement('div');
+      url.className = 'settings-links-url';
+      url.textContent = link.url || '';
+
+      const form = document.createElement('form');
+      form.className = 'settings-links-edit-form';
+      form.innerHTML = `
+        <label>
+          <span>Label</span>
+          <input type="text" name="label" value="">
+        </label>
+        <label>
+          <span>Category</span>
+          <input type="text" name="category" value="">
+        </label>
+        <label class="settings-links-edit-url">
+          <span>URL</span>
+          <input type="text" name="url" value="">
+        </label>
+      `;
+      form.querySelector('[name="label"]').value = link.label || '';
+      form.querySelector('[name="category"]').value = link.category || '';
+      form.querySelector('[name="url"]').value = link.url || '';
+
+      const actions = document.createElement('div');
+      actions.className = 'settings-links-item-actions';
+      const saveButton = document.createElement('button');
+      saveButton.type = 'submit';
+      saveButton.textContent = 'Save';
+      const deleteButton = document.createElement('button');
+      deleteButton.type = 'button';
+      deleteButton.className = 'danger';
+      deleteButton.textContent = 'Delete';
+      actions.append(saveButton, deleteButton);
+      form.appendChild(actions);
+
+      form.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        const payload = collectLinkFormData(form);
+        if (!payload) {
+          setLinksManagerStatus('Label, URL, and category are required.', false);
+          return;
+        }
+        saveButton.disabled = true;
+        deleteButton.disabled = true;
+        setLinksManagerStatus('Saving link...');
+        try {
+          const result = await requestLinks(`/api/links/${encodeURIComponent(link.id)}`, {
+            method: 'PUT',
+            body: JSON.stringify(payload)
+          });
+          renderLinksManager(result);
+          setLinksManagerStatus(`Saved "${payload.label}".`);
+        } catch (err) {
+          setLinksManagerStatus(err.message || 'Link update failed.', false);
+        } finally {
+          saveButton.disabled = false;
+          deleteButton.disabled = false;
+        }
+      });
+
+      deleteButton.addEventListener('click', async () => {
+        if (!confirm(`Delete "${link.label}" from Links?`)) return;
+        saveButton.disabled = true;
+        deleteButton.disabled = true;
+        setLinksManagerStatus('Deleting link...');
+        try {
+          const result = await requestLinks(`/api/links/${encodeURIComponent(link.id)}`, {
+            method: 'DELETE'
+          });
+          renderLinksManager(result);
+          setLinksManagerStatus(`Deleted "${link.label}".`);
+        } catch (err) {
+          setLinksManagerStatus(err.message || 'Link deletion failed.', false);
+        } finally {
+          saveButton.disabled = false;
+          deleteButton.disabled = false;
+        }
+      });
+
+      item.append(head, url, form);
+      list.appendChild(item);
+    });
+  }
+
+  async function loadLinksManager() {
+    const list = document.getElementById('links-manager-list');
+    const empty = document.getElementById('links-manager-empty');
+    if (!list) return;
+    list.innerHTML = '';
+    if (empty) {
+      empty.hidden = false;
+      empty.textContent = 'Loading links...';
+    }
+    setLinksManagerStatus('');
+    try {
+      const data = await requestLinks('/api/links', { method: 'GET' });
+      renderLinksManager(data);
+    } catch (err) {
+      if (empty) {
+        empty.hidden = false;
+        empty.textContent = 'Links are unavailable.';
+      }
+      setLinksManagerStatus(err.message || 'Links are unavailable.', false);
+    }
+  }
+
+  function initLinksManagerControls() {
+    const createForm = document.getElementById('links-manager-create-form');
+    const categoryFilter = document.getElementById('links-manager-category-filter');
+    const searchInput = document.getElementById('links-manager-search');
+    if (!createForm) return;
+
+    createForm.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const payload = collectLinkFormData(createForm);
+      if (!payload) {
+        setLinksManagerStatus('Label, URL, and category are required.', false);
+        return;
+      }
+      const submitButton = createForm.querySelector('button[type="submit"]');
+      if (submitButton) submitButton.disabled = true;
+      setLinksManagerStatus('Saving link...');
+      try {
+        const data = await requestLinks('/api/links', {
+          method: 'POST',
+          body: JSON.stringify(payload)
+        });
+        createForm.reset();
+        renderLinksManager(data);
+        setLinksManagerStatus(`Saved "${payload.label}".`);
+      } catch (err) {
+        setLinksManagerStatus(err.message || 'Link creation failed.', false);
+      } finally {
+        if (submitButton) submitButton.disabled = false;
+      }
+    });
+
+    if (categoryFilter) {
+      categoryFilter.addEventListener('change', loadLinksManager);
+    }
+    if (searchInput) {
+      searchInput.addEventListener('input', loadLinksManager);
+    }
+
+    loadLinksManager();
+  }
+
+  document.addEventListener('DOMContentLoaded', initLinksManagerControls);
 </script>
 </head>
 <body class="dashboard-page">
@@ -491,6 +797,20 @@
         </a>
       </nav>
 
+      <section class="dashboard-sidebar-section" aria-labelledby="settings-sections-title">
+        <div class="dashboard-sidebar-title" id="settings-sections-title">Sections</div>
+        <div class="dashboard-sidebar-actions">
+          <button type="button" class="sidebar-action is-active" data-settings-view="general" aria-pressed="true" title="General">
+            <span class="sidebar-item-icon" aria-hidden="true">☰</span>
+            <span class="sidebar-item-label">General</span>
+          </button>
+          <button type="button" class="sidebar-action" data-settings-view="ai" aria-pressed="false" title="AI">
+            <span class="sidebar-item-icon" aria-hidden="true">✦</span>
+            <span class="sidebar-item-label">AI</span>
+          </button>
+        </div>
+      </section>
+
       <div class="dashboard-sidebar-footer">
         <button id="theme-toggle" class="sidebar-theme-toggle" type="button" aria-label="Toggle theme" title="Toggle theme"></button>
       </div>
@@ -503,6 +823,7 @@
         </header>
 
   <div class="container settings-container">
+    <section class="settings-view is-active" data-settings-view-panel="general">
     <section class="settings-summary-card">
       <div class="settings-card-header">
         <div>
@@ -643,6 +964,25 @@
     <section class="settings-card settings-card-wide">
       <div class="settings-card-header">
         <div>
+          <p class="settings-kicker">Portability</p>
+          <h3>Backup / Restore</h3>
+        </div>
+        <p class="settings-card-copy">Export or import your dashboard streams, groups, layout, and global links.</p>
+      </div>
+      <div class="settings-actions">
+        <button type="button" id="export-btn">Export Settings</button>
+        <span id="export-status" class="settings-inline-status settings-inline-status-empty"></span>
+        <input type="file" id="import-file" accept="application/json">
+        <button type="button" id="import-btn">Import</button>
+        <span id="import-status" class="settings-inline-status"></span>
+      </div>
+    </section>
+    </section>
+
+    <section class="settings-view" data-settings-view-panel="ai" hidden>
+    <section class="settings-card settings-card-wide">
+      <div class="settings-card-header">
+        <div>
           <p class="settings-kicker">AI</p>
           <h3>Stable Horde Defaults</h3>
         </div>
@@ -779,22 +1119,6 @@
         </div>
       </form>
     </section>
-
-    <section class="settings-card settings-card-wide">
-      <div class="settings-card-header">
-        <div>
-          <p class="settings-kicker">Portability</p>
-          <h3>Backup / Restore</h3>
-        </div>
-        <p class="settings-card-copy">Export or import your dashboard streams, groups, layout and notes.</p>
-      </div>
-      <div class="settings-actions">
-        <button type="button" id="export-btn">Export Settings</button>
-        <span id="export-status" class="settings-inline-status settings-inline-status-empty"></span>
-        <input type="file" id="import-file" accept="application/json">
-        <button type="button" id="import-btn">Import</button>
-        <span id="import-status" class="settings-inline-status"></span>
-      </div>
     </section>
 
   </div>
@@ -818,6 +1142,63 @@
       apply(next);
       try { localStorage.setItem('theme', next); } catch(e){}
     });
+  })();
+  </script>
+  <script>
+  (function(){
+    const STORAGE_KEY = 'settings-view';
+    const buttons = Array.from(document.querySelectorAll('[data-settings-view]'));
+    const panels = Array.from(document.querySelectorAll('[data-settings-view-panel]'));
+    if (!buttons.length || !panels.length) return;
+
+    const validViews = new Set(buttons.map((button) => button.dataset.settingsView));
+
+    const getHashView = () => {
+      const hash = (window.location.hash || '').replace(/^#/, '');
+      if (!hash.startsWith('settings-')) return '';
+      return hash.replace(/^settings-/, '');
+    };
+
+    const normalizeView = (view) => validViews.has(view) ? view : 'general';
+
+    const applyView = (view, syncHash = true) => {
+      const nextView = normalizeView(view);
+      buttons.forEach((button) => {
+        const active = button.dataset.settingsView === nextView;
+        button.classList.toggle('is-active', active);
+        button.setAttribute('aria-pressed', active ? 'true' : 'false');
+      });
+      panels.forEach((panel) => {
+        const active = panel.dataset.settingsViewPanel === nextView;
+        panel.classList.toggle('is-active', active);
+        panel.hidden = !active;
+      });
+      try {
+        window.localStorage.setItem(STORAGE_KEY, nextView);
+      } catch (err) {}
+      if (syncHash) {
+        const nextHash = `#settings-${nextView}`;
+        if (window.location.hash !== nextHash) {
+          window.history.replaceState(null, '', nextHash);
+        }
+      }
+    };
+
+    buttons.forEach((button) => {
+      button.addEventListener('click', () => {
+        applyView(button.dataset.settingsView);
+      });
+    });
+
+    window.addEventListener('hashchange', () => {
+      applyView(getHashView() || 'general', false);
+    });
+
+    let savedView = '';
+    try {
+      savedView = window.localStorage.getItem(STORAGE_KEY) || '';
+    } catch (err) {}
+    applyView(getHashView() || savedView || 'general');
   })();
   </script>
   <script>

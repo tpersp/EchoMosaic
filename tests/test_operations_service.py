@@ -246,3 +246,88 @@ def test_operations_service_reads_previous_update_from_history(tmp_path: Path) -
 
     assert info["previous_commit"] == "abc1234"
     assert info["previous_desc"] == "abc1234 Previous commit (1 day ago)"
+
+
+def test_operations_service_matches_previous_entry_to_current_commit(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / ".git").mkdir()
+    (repo / "update_history.json").write_text(
+        json.dumps(
+            [
+                {
+                    "timestamp": "2026-03-24T00:00:00Z",
+                    "branch": "main",
+                    "from": "abc1234",
+                    "to": "def5678",
+                },
+                {
+                    "timestamp": "2026-03-25T00:00:00Z",
+                    "branch": "main",
+                    "from": "def5678",
+                    "to": "fedcba9",
+                },
+            ]
+        ),
+        encoding="utf-8",
+    )
+    service = _service(
+        load_config=lambda: {
+            "INSTALL_DIR": str(repo),
+            "UPDATE_CHANNEL": "branch",
+            "UPDATE_BRANCH": "main",
+        }
+    )
+
+    def git_safe(repo_path, cmd):
+        joined = " ".join(cmd)
+        if "rev-parse HEAD" in joined:
+            return "def5678"
+        if "rev-parse origin/main" in joined:
+            return "def5678"
+        if "git log -1 --pretty=%h %s (%cr)" in joined:
+            return "def5678 Current commit (just now)"
+        if "git log -1 origin/main --pretty=%h %s (%cr)" in joined:
+            return "def5678 Current commit (just now)"
+        if "git log -1 abc1234 --pretty=%h %s (%cr)" in joined:
+            return "abc1234 Previous commit (2 days ago)"
+        return None
+
+    service._git_safe = git_safe  # type: ignore[method-assign]
+
+    info = service.read_update_info()
+
+    assert info["previous_commit"] == "abc1234"
+    assert info["previous_desc"] == "abc1234 Previous commit (2 days ago)"
+
+
+def test_operations_service_falls_back_to_orig_head_for_previous_commit(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / ".git").mkdir()
+    service = _service(
+        load_config=lambda: {
+            "INSTALL_DIR": str(repo),
+            "UPDATE_CHANNEL": "release",
+            "INSTALLED_VERSION": "v1.0.1",
+            "INSTALLED_COMMIT": "def5678",
+            "REPO_SLUG": "tpersp/EchoMosaic",
+        },
+        fetch_json=lambda url: {"tag_name": "v1.0.1", "name": "v1.0.1", "published_at": "1970-01-01T00:00:00Z"},
+        time_fn=lambda: 1200.0,
+    )
+
+    def git_safe(repo_path, cmd):
+        joined = " ".join(cmd)
+        if "rev-parse ORIG_HEAD" in joined:
+            return "abc1234"
+        if "git log -1 abc1234 --pretty=%h %s (%cr)" in joined:
+            return "abc1234 Previous commit (1 day ago)"
+        return None
+
+    service._git_safe = git_safe  # type: ignore[method-assign]
+
+    info = service.read_update_info()
+
+    assert info["previous_commit"] == "abc1234"
+    assert info["previous_desc"] == "abc1234 Previous commit (1 day ago)"

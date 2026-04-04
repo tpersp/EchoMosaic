@@ -24,7 +24,6 @@
     pageSize: 100,
     sort: "name",
     order: "asc",
-    hideNsfw: true,
   };
 
   const uploadState = {
@@ -41,7 +40,6 @@
   const grid = document.getElementById("media-grid");
   const pagination = document.getElementById("media-pagination");
   const uploadQueue = document.getElementById("upload-queue");
-  const hideNsfwToggle = document.getElementById("media-hide-nsfw");
   const sortSelect = document.getElementById("media-sort");
   const uploadInput = document.getElementById("upload-input");
   const uploadFolderInput = document.getElementById("upload-folder-input");
@@ -334,7 +332,6 @@
     params.set("page_size", opts.pageSize || state.pageSize || 100);
     params.set("sort", state.sort);
     params.set("order", state.order);
-    params.set("hide_nsfw", state.hideNsfw ? "1" : "0");
     try {
       const res = await fetch(`/api/media/list?${params.toString()}`);
       if (!res.ok) {
@@ -1210,13 +1207,6 @@
       }
     });
     window.addEventListener("blur", stopAllPreviews);
-    if (hideNsfwToggle) {
-      hideNsfwToggle.addEventListener("change", () => {
-        state.hideNsfw = hideNsfwToggle.checked;
-        state.page = 1;
-        loadContent();
-      });
-    }
     if (sortSelect) {
       sortSelect.addEventListener("change", () => {
         const [sort, order] = sortSelect.value.split("|");

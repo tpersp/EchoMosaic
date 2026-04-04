@@ -12,6 +12,8 @@ def create_library_blueprint(
     list_tags_handler: Callable[[], object],
     create_tag_handler: Callable[[], object],
     delete_tag_handler: Callable[[str], object],
+    links_collection_handler: Callable[[], object],
+    link_item_handler: Callable[[str], object],
     timer_settings_handler: Callable[[], object],
     sync_timers_collection_handler: Callable[[], object],
     sync_timer_item_handler: Callable[[str], object],
@@ -34,6 +36,14 @@ def create_library_blueprint(
     @blueprint.route("/tags/<path:tag_name>", methods=["DELETE"])
     def delete_tag(tag_name: str):
         return delete_tag_handler(tag_name)
+
+    @blueprint.route("/api/links", methods=["GET", "POST"])
+    def links_collection():
+        return links_collection_handler()
+
+    @blueprint.route("/api/links/<link_id>", methods=["PUT", "DELETE"])
+    def link_item(link_id: str):
+        return link_item_handler(link_id)
 
     @blueprint.route("/api/settings/timers", methods=["GET", "POST"])
     def api_timer_settings():

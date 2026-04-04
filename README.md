@@ -78,39 +78,116 @@ Python dependencies are listed in `requirements.txt`. Core runtime packages incl
 
 ### Quick install script
 
-The installer creates a local user-space install and a `systemd --user` service.
+Clone the repository first, then run the installer from inside that clone. The installer now treats the current cloned repo as the live app location and creates a `systemd --user` service that runs from this folder.
 
 ```bash
+git clone https://github.com/tpersp/EchoMosaic.git
+cd EchoMosaic
 chmod +x install.sh
 ./install.sh
 ```
 
 Defaults:
-- install dir: `~/.local/share/echomosaic`
+- repo path: current clone
 - port: `5000`
 - service: `echomosaic.service`
 - update channel: GitHub releases
 
-For a development install:
+For a development install, clone the `dev` branch directly:
 
 ```bash
+git clone --branch dev https://github.com/tpersp/EchoMosaic.git EchoMosaic-dev
+cd EchoMosaic-dev
 chmod +x install.sh
 ./install.sh --dev
 ```
 
 Development defaults:
-- install dir: `~/.local/share/echomosaic-dev`
+- repo path: current clone
 - port: `5001`
 - service: `echomosaic-dev.service`
 - update channel: `dev` branch
 
 The installer will:
 - install required system packages
-- copy the repo into the chosen install directory
+- validate that the current folder is a real git clone
 - create a virtual environment
 - install Python dependencies
 - optionally configure separate main-media and AI-media paths
 - create and start a `systemd --user` service
+
+### Uninstall
+
+To remove only the `systemd --user` service wiring from the current clone:
+
+```bash
+chmod +x uninstall.sh
+./uninstall.sh
+```
+
+To also remove the local virtual environment in this repo:
+
+```bash
+./uninstall.sh --remove-venv
+```
+
+By default, `uninstall.sh` leaves the repo, config, settings, and media paths intact.
+
+### Migrate From `v2026.04.02` And Earlier
+
+Releases up to `v2026.04.02` used the older copied-install layout, where EchoMosaic was cloned in one place and then copied into a separate install directory. The new installer no longer uses that model.
+
+If you are migrating from `v2026.04.02` or earlier, the safest path is:
+
+1. Back up anything you need from the old install:
+   - `settings.json`
+   - `config.json`
+   - media folders if they lived inside the old install dir
+2. Stop and remove the old user service.
+3. Remove the old copied install directory.
+4. Clone EchoMosaic fresh into the folder you want to use long-term.
+5. Run the new installer from inside that clone.
+6. Re-import settings and restore media if needed.
+
+Example cleanup for an older production-style install:
+
+```bash
+systemctl --user stop echomosaic.service
+systemctl --user disable echomosaic.service
+rm -f ~/.config/systemd/user/echomosaic.service
+systemctl --user daemon-reload
+rm -rf ~/.local/share/echomosaic
+```
+
+Example cleanup for an older development install:
+
+```bash
+systemctl --user stop echomosaic-dev.service
+systemctl --user disable echomosaic-dev.service
+rm -f ~/.config/systemd/user/echomosaic-dev.service
+systemctl --user daemon-reload
+rm -rf ~/.local/share/echomosaic-dev
+```
+
+Then install again from a real clone:
+
+```bash
+git clone https://github.com/tpersp/EchoMosaic.git
+cd EchoMosaic
+chmod +x install.sh
+./install.sh
+```
+
+Or for the development branch:
+
+```bash
+git clone --branch dev https://github.com/tpersp/EchoMosaic.git EchoMosaic-dev
+cd EchoMosaic-dev
+chmod +x install.sh
+./install.sh --dev
+```
+
+The new installer runs EchoMosaic directly from that cloned repo, so update history and git-based update behavior remain consistent.
 
 ### Manual setup
 
@@ -141,7 +218,7 @@ Key configuration lives in:
 Important config keys:
 - `MEDIA_PATHS`: main media roots
 - `AI_MEDIA_PATHS`: AI media roots
-- `INSTALL_DIR`: install target used by `update.sh`
+- `INSTALL_DIR`: active repo path used by `update.sh`
 - `SERVICE_NAME`: `systemd --user` service name used by `update.sh`
 - `UPDATE_CHANNEL`: `release` for stable installs, `branch` for branch-tracking installs
 - `UPDATE_BRANCH`: branch pulled by the update flow
@@ -247,10 +324,10 @@ journalctl --user -u echomosaic-dev.service -f
 
 ### Common things to check
 
-- If the app will not update, confirm the installed copy is a valid git repository:
+- If the app will not update, confirm the current EchoMosaic repo is a valid git repository:
 
 ```bash
-git -C ~/.local/share/echomosaic rev-parse --is-inside-work-tree
+git -C /path/to/EchoMosaic rev-parse --is-inside-work-tree
 ```
 
 - If the dashboard loads but media is missing, verify `MEDIA_PATHS` and `AI_MEDIA_PATHS` in `config.json`.
@@ -272,13 +349,13 @@ You can also check:
 - Feature routes live under `echomosaic_app/routes`.
 - Socket handlers live under `echomosaic_app/sockets`.
 - Durable architecture guidance lives in `docs/architecture-guide.md`.
-- Running `install.sh --dev` creates a development install with dev defaults and configures updates to follow the `dev` branch.
+- Running `install.sh --dev` configures the current dev clone as a development install and sets updates to follow the `dev` branch.
 
 ## Limitations
 
 - No built-in authentication or multi-user permission model.
 - Eventlet is still in use and emits a deprecation warning; it works today, but it is not a future-proof long-term async stack.
-- The update flow assumes the installed copy remains a valid git checkout.
+- The update flow assumes the active repo remains a valid git checkout with a working `origin` remote.
 - Media roots are still config-driven rather than managed through a richer storage UI.
 
 ## License
