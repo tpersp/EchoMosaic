@@ -101,11 +101,14 @@ PY
 fi
 
 if [ -n "$EXISTING_INSTALL_DIR" ] && [ "$EXISTING_INSTALL_DIR" != "$INSTALL_DIR" ]; then
-  echo "Legacy split-install metadata detected."
-  echo "Current repo path: $INSTALL_DIR"
-  echo "Configured install path: $EXISTING_INSTALL_DIR"
-  echo "This installer will retarget the app to run from the current cloned repo."
-  read -r -p "Continue? [y/N]: " CONTINUE_RETARGET
+  echo "Existing install path detected in config:"
+  echo "  $EXISTING_INSTALL_DIR"
+  echo
+  echo "This installer now runs EchoMosaic from the folder you launched it from:"
+  echo "  $INSTALL_DIR"
+  echo
+  echo "If you continue, this repo folder will become the active app location."
+  read -r -p "Continue with this folder as the active app location? [y/N]: " CONTINUE_RETARGET
   if [[ ! "$CONTINUE_RETARGET" =~ ^[Yy]$ ]]; then
     echo "Install cancelled."
     exit 1
