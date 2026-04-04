@@ -6107,13 +6107,17 @@
         option.hidden = false;
         return;
       }
+      if (option.dataset.missing === 'true') {
+        option.hidden = false;
+        return;
+      }
       const hasImages = option.dataset.hasImages === 'true';
       const hasVideos = option.dataset.hasVideos === 'true';
       const isVisible = wantsImages ? hasImages : hasVideos;
       option.hidden = !isVisible;
     });
     const selectedOption = select.options[select.selectedIndex];
-    if (selectedOption && selectedOption.hidden) {
+    if (selectedOption && selectedOption.hidden && selectedOption.dataset.missing !== 'true') {
       const fallback = options.find(opt => !opt.hidden && opt.dataset.filtered !== 'true');
       if (fallback) {
         select.value = fallback.value;
@@ -6458,9 +6462,12 @@ function applyPicsumSettings(card, settings, opts = {}) {
       if (shouldShowPlaceholder) {
         const placeholder = document.createElement('option');
         placeholder.value = assigned;
-        placeholder.textContent = assignedLabel;
+        placeholder.textContent = `${assignedLabel} (missing)`;
         placeholder.title = assigned;
         placeholder.dataset.displayName = placeholder.textContent;
+        placeholder.dataset.missing = 'true';
+        placeholder.dataset.hasImages = 'true';
+        placeholder.dataset.hasVideos = 'true';
         placeholder.selected = true;
         frag.appendChild(placeholder);
       }
