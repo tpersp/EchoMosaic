@@ -133,6 +133,62 @@ To also remove the local virtual environment in this repo:
 
 By default, `uninstall.sh` leaves the repo, config, settings, and media paths intact.
 
+### Migrate From `v2026.04.02` And Earlier
+
+Releases up to `v2026.04.02` used the older copied-install layout, where EchoMosaic was cloned in one place and then copied into a separate install directory. The new installer no longer uses that model.
+
+If you are migrating from `v2026.04.02` or earlier, the safest path is:
+
+1. Back up anything you need from the old install:
+   - `settings.json`
+   - `config.json`
+   - media folders if they lived inside the old install dir
+2. Stop and remove the old user service.
+3. Remove the old copied install directory.
+4. Clone EchoMosaic fresh into the folder you want to use long-term.
+5. Run the new installer from inside that clone.
+6. Re-import settings and restore media if needed.
+
+Example cleanup for an older production-style install:
+
+```bash
+systemctl --user stop echomosaic.service
+systemctl --user disable echomosaic.service
+rm -f ~/.config/systemd/user/echomosaic.service
+systemctl --user daemon-reload
+rm -rf ~/.local/share/echomosaic
+```
+
+Example cleanup for an older development install:
+
+```bash
+systemctl --user stop echomosaic-dev.service
+systemctl --user disable echomosaic-dev.service
+rm -f ~/.config/systemd/user/echomosaic-dev.service
+systemctl --user daemon-reload
+rm -rf ~/.local/share/echomosaic-dev
+```
+
+Then install again from a real clone:
+
+```bash
+git clone https://github.com/tpersp/EchoMosaic.git
+cd EchoMosaic
+chmod +x install.sh
+./install.sh
+```
+
+Or for the development branch:
+
+```bash
+git clone --branch dev https://github.com/tpersp/EchoMosaic.git EchoMosaic-dev
+cd EchoMosaic-dev
+chmod +x install.sh
+./install.sh --dev
+```
+
+The new installer runs EchoMosaic directly from that cloned repo, so update history and git-based update behavior remain consistent.
+
 ### Manual setup
 
 If you prefer to run EchoMosaic directly from a working checkout:
