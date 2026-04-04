@@ -955,6 +955,7 @@ YOUTUBE_LIVE_HTML_MARKERS = (
 
 PLAYBACK_RUNTIME = build_playback_runtime()
 STREAM_PLAYBACK_HISTORY_LIMIT = PLAYBACK_RUNTIME.stream_playback_history_limit
+STREAM_RANDOM_RECENT_AVOID_COUNT = PLAYBACK_RUNTIME.stream_random_recent_avoid_count
 STREAM_UPDATE_EVENT = PLAYBACK_RUNTIME.stream_update_event
 STREAM_INIT_EVENT = PLAYBACK_RUNTIME.stream_init_event
 SYNC_TIME_EVENT = PLAYBACK_RUNTIME.sync_time_event
@@ -3077,6 +3078,7 @@ if playback_manager is None:
         sync_config_key=SYNC_CONFIG_KEY,
         sync_supported_media_modes=SYNC_SUPPORTED_MEDIA_MODES,
         stream_playback_history_limit=STREAM_PLAYBACK_HISTORY_LIMIT,
+        stream_random_recent_avoid_count=STREAM_RANDOM_RECENT_AVOID_COUNT,
         stream_update_event=STREAM_UPDATE_EVENT,
         sync_time_event=SYNC_TIME_EVENT,
         stream_sync_interval_seconds=STREAM_SYNC_INTERVAL_SECONDS,
