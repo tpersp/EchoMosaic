@@ -797,7 +797,10 @@ class StreamPlaybackManager:
             media = self._next_media(state)
             media_mode = state.media_mode
             if media is None:
-                state.set_error("no_media", retry_after=self.stream_no_media_retry_seconds)
+                retry_after = None
+                if state.media_mode in {self.media_mode_image, self.media_mode_video} and state.mode == "random":
+                    retry_after = self.stream_no_media_retry_seconds
+                state.set_error("no_media", retry_after=retry_after)
                 payload = state.to_payload()
                 runtime_args = {
                     "path": None,
