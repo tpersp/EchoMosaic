@@ -351,37 +351,6 @@ body.dashboard-page.dashboard-panel-open {
   gap: 1rem;
 }
 
-.settings-subnav {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.7rem;
-  margin-bottom: 1rem;
-}
-
-.settings-subnav-link {
-  min-width: 120px;
-  padding: 0.72rem 1rem;
-  border: 1px solid var(--border);
-  border-radius: 14px;
-  background: var(--surface);
-  color: var(--text);
-  font-size: 0.95rem;
-  font-weight: 600;
-  cursor: pointer;
-  transition: border-color 140ms ease, background 140ms ease, color 140ms ease, transform 140ms ease;
-}
-
-.settings-subnav-link:hover {
-  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
-  background: color-mix(in srgb, var(--accent) 8%, var(--surface));
-}
-
-.settings-subnav-link.is-active {
-  border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
-  background: color-mix(in srgb, var(--accent) 14%, var(--surface));
-  color: var(--text-strong, var(--text));
-}
-
 .settings-view {
   display: flex;
   flex-direction: column;
