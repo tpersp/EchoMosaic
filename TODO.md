@@ -6,6 +6,8 @@ A cleaned-up list of what is still open, what is done, and what was tried and la
 - [ ] Add a `System Events` panel for recent high-signal app activity.
   Note: this should be a curated in-app event feed, not a raw server log viewer. Good candidates are updates, media/upload failures, broken stream sources, and AI job warnings/errors.
 - [ ] Reduce RAM usage without limiting usability or performance.
+- [ ] Rework the installer so EchoMosaic runs from the actual cloned repo instead of copying files into a second install directory.
+  Note: this should make updates, rollback metadata, and update history reliable again, and should include a matching `uninstall.sh` for clean service removal. See [`plans/installer-flow-rework.md`](/home/doden/workspace/EchoMosaic-Project/EchoMosaic-dev/plans/installer-flow-rework.md).
 
 ## Open Suggestions / Future Ideas
 - [ ] [2025-09-08] Add optional authentication or simple login with a session cache so the dashboard and update endpoints are protected from anyone on the network.
