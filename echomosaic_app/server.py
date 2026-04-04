@@ -1174,6 +1174,7 @@ def _refresh_streams_for_media_path(path: Optional[str]) -> None:
         if not _folders_overlap(stream_folder, changed_folder):
             continue
         playback_manager.update_stream_config(stream_id, conf)
+        safe_emit("refresh", {"stream_id": stream_id, "config": conf, "tags": tags_snapshot})
 
 
 def initialize_image_cache() -> None:
