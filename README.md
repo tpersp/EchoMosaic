@@ -93,10 +93,11 @@ Defaults:
 - service: `echomosaic.service`
 - update channel: GitHub releases
 
-For a development install, run it from a clone of the `dev` branch:
+For a development install, clone the `dev` branch directly:
 
 ```bash
-git checkout dev
+git clone --branch dev https://github.com/tpersp/EchoMosaic.git EchoMosaic-dev
+cd EchoMosaic-dev
 chmod +x install.sh
 ./install.sh --dev
 ```
