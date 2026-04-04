@@ -78,39 +78,59 @@ Python dependencies are listed in `requirements.txt`. Core runtime packages incl
 
 ### Quick install script
 
-The installer creates a local user-space install and a `systemd --user` service.
+Clone the repository first, then run the installer from inside that clone. The installer now treats the current cloned repo as the live app location and creates a `systemd --user` service that runs from this folder.
 
 ```bash
+git clone https://github.com/tpersp/EchoMosaic.git
+cd EchoMosaic
 chmod +x install.sh
 ./install.sh
 ```
 
 Defaults:
-- install dir: `~/.local/share/echomosaic`
+- repo path: current clone
 - port: `5000`
 - service: `echomosaic.service`
 - update channel: GitHub releases
 
-For a development install:
+For a development install, run it from a clone of the `dev` branch:
 
 ```bash
+git checkout dev
 chmod +x install.sh
 ./install.sh --dev
 ```
 
 Development defaults:
-- install dir: `~/.local/share/echomosaic-dev`
+- repo path: current clone
 - port: `5001`
 - service: `echomosaic-dev.service`
 - update channel: `dev` branch
 
 The installer will:
 - install required system packages
-- copy the repo into the chosen install directory
+- validate that the current folder is a real git clone
 - create a virtual environment
 - install Python dependencies
 - optionally configure separate main-media and AI-media paths
 - create and start a `systemd --user` service
+
+### Uninstall
+
+To remove only the `systemd --user` service wiring from the current clone:
+
+```bash
+chmod +x uninstall.sh
+./uninstall.sh
+```
+
+To also remove the local virtual environment in this repo:
+
+```bash
+./uninstall.sh --remove-venv
+```
+
+By default, `uninstall.sh` leaves the repo, config, settings, and media paths intact.
 
 ### Manual setup
 
@@ -141,7 +161,7 @@ Key configuration lives in:
 Important config keys:
 - `MEDIA_PATHS`: main media roots
 - `AI_MEDIA_PATHS`: AI media roots
-- `INSTALL_DIR`: install target used by `update.sh`
+- `INSTALL_DIR`: active repo path used by `update.sh`
 - `SERVICE_NAME`: `systemd --user` service name used by `update.sh`
 - `UPDATE_CHANNEL`: `release` for stable installs, `branch` for branch-tracking installs
 - `UPDATE_BRANCH`: branch pulled by the update flow
@@ -247,10 +267,10 @@ journalctl --user -u echomosaic-dev.service -f
 
 ### Common things to check
 
-- If the app will not update, confirm the installed copy is a valid git repository:
+- If the app will not update, confirm the current EchoMosaic repo is a valid git repository:
 
 ```bash
-git -C ~/.local/share/echomosaic rev-parse --is-inside-work-tree
+git -C /path/to/EchoMosaic rev-parse --is-inside-work-tree
 ```
 
 - If the dashboard loads but media is missing, verify `MEDIA_PATHS` and `AI_MEDIA_PATHS` in `config.json`.
@@ -272,13 +292,13 @@ You can also check:
 - Feature routes live under `echomosaic_app/routes`.
 - Socket handlers live under `echomosaic_app/sockets`.
 - Durable architecture guidance lives in `docs/architecture-guide.md`.
-- Running `install.sh --dev` creates a development install with dev defaults and configures updates to follow the `dev` branch.
+- Running `install.sh --dev` configures the current dev clone as a development install and sets updates to follow the `dev` branch.
 
 ## Limitations
 
 - No built-in authentication or multi-user permission model.
 - Eventlet is still in use and emits a deprecation warning; it works today, but it is not a future-proof long-term async stack.
-- The update flow assumes the installed copy remains a valid git checkout.
+- The update flow assumes the active repo remains a valid git checkout with a working `origin` remote.
 - Media roots are still config-driven rather than managed through a richer storage UI.
 
 ## License
