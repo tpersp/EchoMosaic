@@ -132,8 +132,12 @@ def create_media_blueprint(
         if refresh_streams_for_media_path is not None:
             refresh_streams_for_media_path(destination)
             for saved_path in saved:
-                if isinstance(saved_path, str) and saved_path:
-                    refresh_streams_for_media_path(saved_path)
+                if isinstance(saved_path, dict):
+                    candidate = saved_path.get("path")
+                else:
+                    candidate = saved_path
+                if isinstance(candidate, str) and candidate:
+                    refresh_streams_for_media_path(candidate)
         return jsonify({"uploaded": saved, "count": len(saved)})
 
     @blueprint.route("/api/media/thumbnail", methods=["GET"])

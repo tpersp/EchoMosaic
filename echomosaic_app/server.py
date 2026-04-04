@@ -1192,6 +1192,14 @@ def _refresh_streams_for_media_path(path: Optional[str]) -> None:
             save_settings_debounced()
         if not _folders_overlap(stream_folder, changed_folder):
             continue
+        _update_stream_runtime_state(
+            stream_id,
+            path=conf.get("selected_image"),
+            kind=conf.get("selected_media_kind"),
+            media_mode=conf.get("media_mode"),
+            stream_url=conf.get("stream_url"),
+            source="media_refresh",
+        )
         playback_manager.update_stream_config(stream_id, conf)
         safe_emit("refresh", {"stream_id": stream_id, "config": conf, "tags": tags_snapshot})
 
