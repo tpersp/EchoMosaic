@@ -178,13 +178,16 @@ class StreamPlaybackState:
         self.updated_at = time.time()
         self.last_sync_emit = 0.0
 
-    def set_error(self, code: str) -> None:
+    def set_error(self, code: str, *, retry_after: Optional[float] = None) -> None:
         self.current_media = None
         self.started_at = None
         self.position = 0.0
         self.duration = None
         self.is_paused = False
-        self.next_auto_event = None
+        if retry_after is not None and retry_after > 0:
+            self.next_auto_event = time.time() + float(retry_after)
+        else:
+            self.next_auto_event = None
         self.error = code
         self.last_reason = code
         self.updated_at = time.time()
@@ -352,6 +355,7 @@ class StreamPlaybackManager:
         sync_time_event: str,
         stream_sync_interval_seconds: float,
         sync_switch_lead_seconds: float,
+        stream_no_media_retry_seconds: float = 3.0,
     ) -> None:
         self.safe_emit = safe_emit
         self.list_media = list_media
@@ -376,8 +380,9 @@ class StreamPlaybackManager:
         self.stream_playback_history_limit = stream_playback_history_limit
         self.stream_update_event = stream_update_event
         self.sync_time_event = sync_time_event
-        self.stream_sync_interval_seconds = stream_sync_interval_seconds
-        self.sync_switch_lead_seconds = sync_switch_lead_seconds
+        self.stream_sync_interval_seconds = max(0.25, float(stream_sync_interval_seconds))
+        self.sync_switch_lead_seconds = max(0.0, float(sync_switch_lead_seconds))
+        self.stream_no_media_retry_seconds = max(1.0, float(stream_no_media_retry_seconds))
 
         self._lock = threading.Lock()
         self._states: Dict[str, StreamPlaybackState] = {}
@@ -489,7 +494,7 @@ class StreamPlaybackManager:
 
     def ensure_started(self, stream_id: str) -> Optional[Dict[str, Any]]:
         payload = self.get_state(stream_id)
-        if payload and payload.get("status") != "idle":
+        if payload and payload.get("status") not in {"idle", "error"}:
             return payload
         payload = self._advance_stream(stream_id, reason="initial")
         if payload:
@@ -792,7 +797,7 @@ class StreamPlaybackManager:
             media = self._next_media(state)
             media_mode = state.media_mode
             if media is None:
-                state.set_error("no_media")
+                state.set_error("no_media", retry_after=self.stream_no_media_retry_seconds)
                 payload = state.to_payload()
                 runtime_args = {
                     "path": None,
