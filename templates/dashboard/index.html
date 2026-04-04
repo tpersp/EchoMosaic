@@ -6584,7 +6584,12 @@ function applyPicsumSettings(card, settings, opts = {}) {
     selectModeVariant(card, normalizedMedia, normalizedMode);
 
     const syncActive = isImage && syncSelect && (syncSelect.value || card.dataset.syncTimer);
-    if (durationDiv) durationDiv.style.display = ((isRandom && (isImage || isVideo) && !syncActive) || isAiRandom) ? '' : 'none';
+    const videoPlaybackMode = (card.dataset.videoMode || (videoModeSelect ? videoModeSelect.value : '') || 'duration').toLowerCase();
+    const showDuration =
+      (isImage && isRandom && !syncActive) ||
+      (isVideo && isRandom && videoPlaybackMode !== 'until_end') ||
+      isAiRandom;
+    if (durationDiv) durationDiv.style.display = showDuration ? '' : 'none';
     if (shuffleLabel) shuffleLabel.style.display = (isRandom && (isImage || isVideo)) || isAiRandom ? '' : 'none';
     if (syncRow) syncRow.style.display = (isRandom && isImage) ? '' : 'none';
     if (syncSelect && syncOffsetInput) {
@@ -6964,6 +6969,7 @@ function applyPicsumSettings(card, settings, opts = {}) {
           const nextMode = (e.target.value || 'duration').toLowerCase();
           card.dataset.videoMode = nextMode;
           saveSettings(streamId, { video_playback_mode: nextMode });
+          applyModeState(card, getCurrentMediaMode(), card.dataset.mode || 'random', getStreamUrl());
         });
       }
       const playbackButtons = card.querySelectorAll('.playback-controls .playback-btn');
