@@ -12,6 +12,8 @@ A cleaned-up list of what is still open, what is done, and what was tried and la
   Note: still undecided whether this is actually needed for a personal/local service.
 - [ ] [2025-09-08] Offload HLS lookup to a background task and cache results. `try_get_hls()` / live HLS resolution should not block request handling under load.
 - [ ] [2025-09-08] Improve error handling and user feedback. Missing images, broken media paths, and bad stream URLs should surface clearer UI messages instead of generic failures.
+- [ ] Add optional advanced randomization controls for local media and AI-random playback.
+  Note: expose settings like `avoid last N items` and optional smart recency weighting so users can tune how strongly recent media is avoided without removing randomness entirely.
 
 ## Completed
 
