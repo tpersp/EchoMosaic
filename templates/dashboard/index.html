@@ -5818,7 +5818,7 @@
       const handleGenerate = async () => {
         const payload = collectAiPayload(card);
         if (!payload.prompt || !payload.prompt.trim()) {
-          showNotification('Prompt is required for AI generation');
+          showNotification('Enter a prompt to generate an image');
           if (promptInput) promptInput.focus();
           return;
         }

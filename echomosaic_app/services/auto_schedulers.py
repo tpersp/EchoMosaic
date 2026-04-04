@@ -183,7 +183,7 @@ class AutoGenerateScheduler(BaseScheduler):
             self.remove(stream_id)
             return
         if not prompt:
-            self._update_state(stream_id, last_auto_error="Prompt is required for auto-generation")
+            self._update_state(stream_id, last_auto_error="Enter a prompt to generate an image.")
             self.reschedule(stream_id)
             return
         try:

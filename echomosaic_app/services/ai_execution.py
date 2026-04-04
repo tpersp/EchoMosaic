@@ -99,6 +99,24 @@ class AIExecutionService:
         self.stable_horde_cancelled_cls = stable_horde_cancelled_cls
         self.stable_horde_error_cls = stable_horde_error_cls
 
+    @staticmethod
+    def format_user_message(message: Any) -> str:
+        text = str(message or "").strip()
+        normalized = text.lower()
+        if not text:
+            return "Image generation failed"
+        if "lost track of job" in normalized:
+            return "Stable Horde lost the job before completion. Try again."
+        if "timed out waiting for stable horde" in normalized:
+            return "Stable Horde did not respond in time."
+        if "cancelled by user" in normalized:
+            return "Generation cancelled"
+        if "stable horde client is not configured" in normalized:
+            return "Stable Horde is not available."
+        if "prompt is required" in normalized:
+            return "Enter a prompt to generate an image."
+        return text
+
     def cleanup_temp_outputs(self, stream_id: str) -> None:
         temp_dir = self.ai_temp_root / stream_id
         if temp_dir.exists():
@@ -176,13 +194,13 @@ class AIExecutionService:
                 job["wait_time"] = status_payload.get("wait_time")
             elif stage == "fault":
                 job["status"] = "error"
-                job["message"] = str(payload.get("message") or payload)
+                job["message"] = self.format_user_message(payload.get("message") or payload)
             elif stage == "timeout":
                 job["status"] = "timeout"
-                job["message"] = "Timed out waiting for Stable Horde"
+                job["message"] = "Stable Horde did not respond in time."
             elif stage == "cancelled":
                 job["status"] = "cancelled"
-                job["message"] = str(payload.get("message") or "Cancelled by user")
+                job["message"] = self.format_user_message(payload.get("message") or "Cancelled by user")
             elif stage == "completed":
                 job["status"] = "completed"
             self.ai_jobs[stream_id] = job
@@ -212,11 +230,23 @@ class AIExecutionService:
             elif stage == "status":
                 self.job_manager.touch(manager_id)
             elif stage == "fault":
-                self.job_manager.update_status(manager_id, status="error", error=str(payload.get("message") or payload))
+                self.job_manager.update_status(
+                    manager_id,
+                    status="error",
+                    error=self.format_user_message(payload.get("message") or payload),
+                )
             elif stage == "timeout":
-                self.job_manager.update_status(manager_id, status="timeout", error="Timed out waiting for Stable Horde")
+                self.job_manager.update_status(
+                    manager_id,
+                    status="timeout",
+                    error="Stable Horde did not respond in time.",
+                )
             elif stage == "cancelled":
-                self.job_manager.update_status(manager_id, status="cancelled", error=str(payload.get("message") or "Cancelled by user"))
+                self.job_manager.update_status(
+                    manager_id,
+                    status="cancelled",
+                    error=self.format_user_message(payload.get("message") or "Cancelled by user"),
+                )
             elif stage == "completed":
                 self.job_manager.update_status(manager_id, status="completed", result=payload, error=None)
         current_state = self.settings.get(stream_id, {}).get(self.ai_state_key, {})
@@ -231,7 +261,7 @@ class AIExecutionService:
     ) -> None:
         prompt = str(options.get("prompt") or "").strip()
         if not prompt:
-            message = "Prompt is required"
+            message = "Enter a prompt to generate an image."
             self.job_manager.update_status(manager_id, status="error", error=message)
             self.update_ai_state(stream_id, {"status": "error", "message": message, "error": message}, persist=True)
             with self.ai_jobs_lock:
@@ -241,7 +271,7 @@ class AIExecutionService:
 
         persist = bool(options.get("save_output", self.ai_default_persist))
         if cancel_event and cancel_event.is_set():
-            message = "Cancelled by user"
+            message = "Generation cancelled"
             self.job_manager.update_status(manager_id, status="cancelled", error=message)
             job_snapshot = None
             with self.ai_jobs_lock:
@@ -378,14 +408,19 @@ class AIExecutionService:
                         )
                         self.update_ai_state(
                             stream_id,
-                            {"status": "queued", "message": "Stable Horde lost the first job; retrying once", "error": None, "persisted": persist},
+                            {
+                                "status": "queued",
+                                "message": "Stable Horde lost the first request. Retrying once.",
+                                "error": None,
+                                "persisted": persist,
+                            },
                             persist=True,
                         )
                         continue
                     raise
         except self.stable_horde_cancelled_cls as exc:
             self.logger.info("Stable Horde job for %s cancelled: %s", stream_id, exc)
-            message = "Cancelled by user"
+            message = "Generation cancelled"
             self.record_job_progress(stream_id, "cancelled", {"message": message})
             job_snapshot = None
             with self.ai_jobs_lock:
@@ -410,13 +445,14 @@ class AIExecutionService:
             return
         except self.stable_horde_error_cls as exc:
             self.logger.warning("Stable Horde job for %s failed: %s", stream_id, exc)
-            self.record_job_progress(stream_id, "fault", {"message": str(exc)})
+            user_message = self.format_user_message(exc)
+            self.record_job_progress(stream_id, "fault", {"message": user_message})
             self.update_ai_state(
                 stream_id,
-                {"status": "error", "message": str(exc), "error": str(exc), "persisted": persist},
+                {"status": "error", "message": user_message, "error": str(exc), "persisted": persist},
                 persist=True,
             )
-            self.job_manager.update_status(manager_id, status="error", error=str(exc))
+            self.job_manager.update_status(manager_id, status="error", error=user_message)
             with self.ai_jobs_lock:
                 self.ai_jobs.pop(stream_id, None)
                 self.ai_job_controls.pop(stream_id, None)
