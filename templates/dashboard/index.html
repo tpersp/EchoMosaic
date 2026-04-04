@@ -324,7 +324,16 @@
           <label for="duration-{{ stream_id }}">Duration (sec)</label>
           <div class="inline-controls">
             <input id="duration-{{ stream_id }}" type="number" class="duration-input" data-stream="{{ stream_id }}" value="{{ conf.duration }}" min="1" style="max-width: 110px;">
-            <label class="toggle inline" title="Randomize order each time"><input type="checkbox" class="shuffle-chk" data-stream="{{ stream_id }}" {% if conf.shuffle %} checked {% endif %}><span class="toggle-switch"></span><span class="toggle-label">Shuffle</span></label>
+          </div>
+        </div>
+        <div class="form-row shuffle-container" {% if mode_value != 'random' %} style="display:none;" {% endif %}>
+          <label for="shuffle-{{ stream_id }}">Order</label>
+          <div class="inline-controls">
+            <label class="toggle inline" title="Randomize order each time">
+              <input id="shuffle-{{ stream_id }}" type="checkbox" class="shuffle-chk" data-stream="{{ stream_id }}" {% if conf.shuffle %} checked {% endif %}>
+              <span class="toggle-switch"></span>
+              <span class="toggle-label">Shuffle</span>
+            </label>
           </div>
         </div>
 
@@ -6557,6 +6566,7 @@ function applyPicsumSettings(card, settings, opts = {}) {
 
     const durationDiv = card.querySelector('.duration-container');
     const shuffleChk = card.querySelector('.shuffle-chk');
+    const shuffleDiv = card.querySelector('.shuffle-container');
     const shuffleLabel = shuffleChk ? shuffleChk.closest('label') : null;
     const syncRow = card.querySelector('.sync-row');
     const syncSelect = card.querySelector('.sync-timer-select');
@@ -6590,7 +6600,9 @@ function applyPicsumSettings(card, settings, opts = {}) {
       (isVideo && isRandom && videoPlaybackMode !== 'until_end') ||
       isAiRandom;
     if (durationDiv) durationDiv.style.display = showDuration ? '' : 'none';
-    if (shuffleLabel) shuffleLabel.style.display = (isRandom && (isImage || isVideo)) || isAiRandom ? '' : 'none';
+    const showShuffle = (isRandom && (isImage || isVideo)) || isAiRandom;
+    if (shuffleDiv) shuffleDiv.style.display = showShuffle ? '' : 'none';
+    if (shuffleLabel) shuffleLabel.style.display = showShuffle ? '' : 'none';
     if (syncRow) syncRow.style.display = (isRandom && isImage) ? '' : 'none';
     if (syncSelect && syncOffsetInput) {
       const disabled = !(syncSelect.value || '').trim();
