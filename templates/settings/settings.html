@@ -808,7 +808,13 @@
           <h2>Settings</h2>
         </header>
 
+        <nav class="settings-subnav" aria-label="Settings sections">
+          <button type="button" class="settings-subnav-link is-active" data-settings-view="general" aria-pressed="true">General</button>
+          <button type="button" class="settings-subnav-link" data-settings-view="ai" aria-pressed="false">AI</button>
+        </nav>
+
   <div class="container settings-container">
+    <section class="settings-view is-active" data-settings-view-panel="general">
     <section class="settings-summary-card">
       <div class="settings-card-header">
         <div>
@@ -949,6 +955,25 @@
     <section class="settings-card settings-card-wide">
       <div class="settings-card-header">
         <div>
+          <p class="settings-kicker">Portability</p>
+          <h3>Backup / Restore</h3>
+        </div>
+        <p class="settings-card-copy">Export or import your dashboard streams, groups, layout, and global links.</p>
+      </div>
+      <div class="settings-actions">
+        <button type="button" id="export-btn">Export Settings</button>
+        <span id="export-status" class="settings-inline-status settings-inline-status-empty"></span>
+        <input type="file" id="import-file" accept="application/json">
+        <button type="button" id="import-btn">Import</button>
+        <span id="import-status" class="settings-inline-status"></span>
+      </div>
+    </section>
+    </section>
+
+    <section class="settings-view" data-settings-view-panel="ai" hidden>
+    <section class="settings-card settings-card-wide">
+      <div class="settings-card-header">
+        <div>
           <p class="settings-kicker">AI</p>
           <h3>Stable Horde Defaults</h3>
         </div>
@@ -1085,22 +1110,6 @@
         </div>
       </form>
     </section>
-
-    <section class="settings-card settings-card-wide">
-      <div class="settings-card-header">
-        <div>
-          <p class="settings-kicker">Portability</p>
-          <h3>Backup / Restore</h3>
-        </div>
-        <p class="settings-card-copy">Export or import your dashboard streams, groups, layout, and global links.</p>
-      </div>
-      <div class="settings-actions">
-        <button type="button" id="export-btn">Export Settings</button>
-        <span id="export-status" class="settings-inline-status settings-inline-status-empty"></span>
-        <input type="file" id="import-file" accept="application/json">
-        <button type="button" id="import-btn">Import</button>
-        <span id="import-status" class="settings-inline-status"></span>
-      </div>
     </section>
 
   </div>
@@ -1124,6 +1133,63 @@
       apply(next);
       try { localStorage.setItem('theme', next); } catch(e){}
     });
+  })();
+  </script>
+  <script>
+  (function(){
+    const STORAGE_KEY = 'settings-view';
+    const buttons = Array.from(document.querySelectorAll('[data-settings-view]'));
+    const panels = Array.from(document.querySelectorAll('[data-settings-view-panel]'));
+    if (!buttons.length || !panels.length) return;
+
+    const validViews = new Set(buttons.map((button) => button.dataset.settingsView));
+
+    const getHashView = () => {
+      const hash = (window.location.hash || '').replace(/^#/, '');
+      if (!hash.startsWith('settings-')) return '';
+      return hash.replace(/^settings-/, '');
+    };
+
+    const normalizeView = (view) => validViews.has(view) ? view : 'general';
+
+    const applyView = (view, syncHash = true) => {
+      const nextView = normalizeView(view);
+      buttons.forEach((button) => {
+        const active = button.dataset.settingsView === nextView;
+        button.classList.toggle('is-active', active);
+        button.setAttribute('aria-pressed', active ? 'true' : 'false');
+      });
+      panels.forEach((panel) => {
+        const active = panel.dataset.settingsViewPanel === nextView;
+        panel.classList.toggle('is-active', active);
+        panel.hidden = !active;
+      });
+      try {
+        window.localStorage.setItem(STORAGE_KEY, nextView);
+      } catch (err) {}
+      if (syncHash) {
+        const nextHash = `#settings-${nextView}`;
+        if (window.location.hash !== nextHash) {
+          window.history.replaceState(null, '', nextHash);
+        }
+      }
+    };
+
+    buttons.forEach((button) => {
+      button.addEventListener('click', () => {
+        applyView(button.dataset.settingsView);
+      });
+    });
+
+    window.addEventListener('hashchange', () => {
+      applyView(getHashView() || 'general', false);
+    });
+
+    let savedView = '';
+    try {
+      savedView = window.localStorage.getItem(STORAGE_KEY) || '';
+    } catch (err) {}
+    applyView(getHashView() || savedView || 'general');
   })();
   </script>
   <script>
