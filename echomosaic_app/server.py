@@ -1151,6 +1151,7 @@ def _refresh_streams_for_media_path(path: Optional[str]) -> None:
         return
     changed_virtual_path = _virtualize_path(path)
     changed_folder = _cache_folder_for_path(path) or _normalize_folder_key(path)
+    folder_level_refresh = changed_virtual_path == changed_folder
     changed_alias, _ = _split_virtual_media_path(changed_folder)
     changed_root = MEDIA_ROOT_LOOKUP.get(changed_alias)
     changed_library = changed_root.library if changed_root is not None else MEDIA_LIBRARY_DEFAULT
@@ -1190,7 +1191,7 @@ def _refresh_streams_for_media_path(path: Optional[str]) -> None:
             conf["folder"] = changed_folder
             stream_folder = changed_folder
             save_settings_debounced()
-        if not _folders_overlap(stream_folder, changed_folder):
+        if not folder_level_refresh and not _folders_overlap(stream_folder, changed_folder):
             continue
         STREAM_CONFIG_SERVICE.update_stream(stream_id, {"folder": conf.get("folder")})
 
