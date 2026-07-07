@@ -50,9 +50,11 @@ class _ChunkedResponse(_Response):
 
 class _FakeYoutubeDL:
     payload = None
+    options = None
 
     def __init__(self, options):
         self.options = options
+        type(self).options = options
 
     def __enter__(self):
         return self
@@ -101,6 +103,10 @@ def _build_service(**overrides):
         youtube_sync_role_event="youtube_sync_role",
         youtube_sync_max_age_seconds=20.0,
         media_mode_livestream="livestream",
+        youtube_user_agent=overrides.get("youtube_user_agent"),
+        youtube_cookie_file=overrides.get("youtube_cookie_file"),
+        youtube_js_runtime=overrides.get("youtube_js_runtime"),
+        youtube_remote_components=overrides.get("youtube_remote_components"),
     )
     return service, emitted, runtime_state
 
@@ -176,6 +182,37 @@ def test_youtube_embed_service_live_probe_reads_late_markers() -> None:
     assert looks_live is True
 
 
+def test_youtube_embed_service_live_probe_uses_browser_user_agent() -> None:
+    calls = []
+    requests_module = type(
+        "Requests",
+        (),
+        {
+            "get": staticmethod(
+                lambda *args, **kwargs: calls.append((args, kwargs))
+                or _ChunkedResponse([b'"livebroadcastdetails":{"islivenow":true}'])
+            )
+        },
+    )
+    service, _, _ = _build_service(
+        requests_module=requests_module,
+        youtube_live_probe_cache={},
+    )
+
+    looks_live = service.youtube_page_looks_live(
+        {
+            "video_id": "abc123",
+            "canonical_url": "https://www.youtube.com/watch?v=abc123",
+        }
+    )
+
+    assert looks_live is True
+    assert calls
+    headers = calls[0][1]["headers"]
+    assert headers["User-Agent"].startswith("Mozilla/5.0")
+    assert "Chrome/" in headers["User-Agent"]
+
+
 def test_youtube_embed_service_fetches_playlist_entries_and_current_item() -> None:
     _FakeYoutubeDL.payload = {
         "id": "pl1",
@@ -199,6 +236,31 @@ def test_youtube_embed_service_fetches_playlist_entries_and_current_item() -> No
     assert current is not None
     assert current["video_id"] == "vid-b"
     assert current["index"] == 2
+
+
+def test_youtube_embed_service_passes_browser_identity_to_playlist_youtube_dl() -> None:
+    _FakeYoutubeDL.payload = {
+        "id": "pl1",
+        "title": "Cartoon Queue",
+        "entries": [{"id": "vid-a", "title": "Episode A", "playlist_index": 1}],
+    }
+    service, _, _ = _build_service(
+        youtube_dl_cls=_FakeYoutubeDL,
+        youtube_playlist_cache={},
+        youtube_user_agent="Custom Browser UA",
+        youtube_cookie_file="/tmp/youtube-cookies.txt",
+        youtube_js_runtime="node:/usr/bin/node",
+        youtube_remote_components="ejs:github",
+    )
+    details = service.parse_youtube_url_details("https://www.youtube.com/playlist?list=pl1")
+
+    playlist = service.fetch_youtube_playlist("https://www.youtube.com/playlist?list=pl1", details, force=True)
+
+    assert playlist is not None
+    assert _FakeYoutubeDL.options["user_agent"] == "Custom Browser UA"
+    assert _FakeYoutubeDL.options["cookiefile"] == "/tmp/youtube-cookies.txt"
+    assert _FakeYoutubeDL.options["js_runtimes"] == {"node": {"path": "/usr/bin/node"}}
+    assert _FakeYoutubeDL.options["remote_components"] == {"ejs:github"}
 
 
 def test_youtube_embed_service_resolves_first_playlist_item_when_url_has_no_video() -> None:

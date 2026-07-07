@@ -147,6 +147,10 @@ Important config keys:
 - `UPDATE_BRANCH`: branch pulled by the update flow
 - `REPO_SLUG`: GitHub repository used for release checks
 - `INSTALLED_VERSION` / `INSTALLED_COMMIT`: tracked install metadata used by update status checks
+- `YOUTUBE_USER_AGENT`: optional browser user-agent override for YouTube probes and yt-dlp requests
+- `YOUTUBE_COOKIE_FILE`: optional path to a Netscape-format cookies.txt file for yt-dlp YouTube extraction
+- `YOUTUBE_JS_RUNTIME`: optional yt-dlp JavaScript runtime, for example `node:/usr/bin/node`
+- `YOUTUBE_REMOTE_COMPONENTS`: optional comma-separated yt-dlp remote components, for example `ejs:github`
 
 Notes:
 - Gunicorn should stay on a single worker unless you redesign the shared runtime state and add a proper Socket.IO message queue.

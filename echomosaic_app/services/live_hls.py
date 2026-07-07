@@ -7,6 +7,8 @@ import time
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, Optional
 
+from echomosaic_app.services.youtube_options import add_youtube_dl_request_options
+
 
 @dataclass
 class HLSCacheEntry:
@@ -34,6 +36,10 @@ class LiveHLSService:
         logger,
         app_context_factory: Callable[[], Any],
         safe_emit: Callable[..., None],
+        youtube_user_agent: Optional[str] = None,
+        youtube_cookie_file: Optional[str] = None,
+        youtube_js_runtime: Optional[str] = None,
+        youtube_remote_components: Optional[str] = None,
         live_hls_ready_event: str = "live_hls_ready",
     ) -> None:
         self.live_hls_async = bool(live_hls_async)
@@ -49,6 +55,10 @@ class LiveHLSService:
         self.logger = logger
         self.app_context_factory = app_context_factory
         self.safe_emit = safe_emit
+        self.youtube_user_agent = youtube_user_agent
+        self.youtube_cookie_file = youtube_cookie_file
+        self.youtube_js_runtime = youtube_js_runtime
+        self.youtube_remote_components = youtube_remote_components
         self.live_hls_ready_event = live_hls_ready_event
 
     def hls_url_fingerprint(self, original_url: str) -> str:
@@ -132,13 +142,19 @@ class LiveHLSService:
             return None
         if self.youtube_dl_cls is None:
             raise RuntimeError("yt_dlp module is not available")
-        ydl_opts = {
-            "quiet": True,
-            "nocheckcertificate": True,
-            "skip_download": True,
-            "noplaylist": True,
-            "extract_flat": False,
-        }
+        ydl_opts = add_youtube_dl_request_options(
+            {
+                "quiet": True,
+                "nocheckcertificate": True,
+                "skip_download": True,
+                "noplaylist": True,
+                "extract_flat": False,
+            },
+            user_agent=self.youtube_user_agent,
+            cookie_file=self.youtube_cookie_file,
+            js_runtime=self.youtube_js_runtime,
+            remote_components=self.youtube_remote_components,
+        )
         with self.youtube_dl_cls(ydl_opts) as ydl:
             info = ydl.extract_info(original_url, download=False)
         if not info:

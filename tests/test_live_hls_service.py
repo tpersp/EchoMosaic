@@ -37,6 +37,22 @@ class _ImmediateExecutor:
         return _DoneFuture()
 
 
+class _CapturingYoutubeDL:
+    options = None
+
+    def __init__(self, opts):
+        type(self).options = opts
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        return False
+
+    def extract_info(self, url, download=False):
+        return {"url": "https://cdn/test.m3u8"}
+
+
 def _build_service(**overrides):
     emitted = []
     logger_messages = []
@@ -54,6 +70,10 @@ def _build_service(**overrides):
         logger=type("Logger", (), {"info": lambda *args, **kwargs: logger_messages.append((args, kwargs))})(),
         app_context_factory=lambda: _DummyContext(),
         safe_emit=lambda *args, **kwargs: emitted.append((args, kwargs)),
+        youtube_user_agent=overrides.get("youtube_user_agent"),
+        youtube_cookie_file=overrides.get("youtube_cookie_file"),
+        youtube_js_runtime=overrides.get("youtube_js_runtime"),
+        youtube_remote_components=overrides.get("youtube_remote_components"),
     )
     return service, emitted, logger_messages
 
@@ -97,3 +117,21 @@ def test_live_hls_service_invalidates_matching_cache_and_reschedules() -> None:
     assert payload["removed"] == 1
     assert payload["rescheduled"] is True
     assert "live:stream1:https://example.com/live" in cache
+
+
+def test_live_hls_service_passes_browser_identity_to_youtube_dl() -> None:
+    service, _, _ = _build_service(
+        youtube_dl_cls=_CapturingYoutubeDL,
+        youtube_user_agent="Custom Browser UA",
+        youtube_cookie_file="~/youtube-cookies.txt",
+        youtube_js_runtime="node:/usr/bin/node",
+        youtube_remote_components="ejs:github",
+    )
+
+    url = service.detect_hls_stream_url("https://www.youtube.com/watch?v=abc123")
+
+    assert url == "https://cdn/test.m3u8"
+    assert _CapturingYoutubeDL.options["user_agent"] == "Custom Browser UA"
+    assert _CapturingYoutubeDL.options["cookiefile"].endswith("/youtube-cookies.txt")
+    assert _CapturingYoutubeDL.options["js_runtimes"] == {"node": {"path": "/usr/bin/node"}}
+    assert _CapturingYoutubeDL.options["remote_components"] == {"ejs:github"}
