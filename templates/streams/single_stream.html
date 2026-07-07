@@ -1348,6 +1348,11 @@ async function render(config) {
         const data = await response.json();
         if (data.embed_type === 'youtube') {
           await loadYouTubeEmbed(container, config, data);
+        } else if (data.embed_type === 'youtube_blocked') {
+          const notice = document.createElement('div');
+          notice.className = 'stream-status-message';
+          notice.textContent = 'YouTube blocked playback on this host. Use a direct HLS stream URL for reliable unattended playback.';
+          container.appendChild(notice);
         } else if (data.embed_type === 'twitch') {
           const iframe = document.createElement('iframe');
           iframe.src = `https://player.twitch.tv/?channel=${data.embed_id}&parent=${location.hostname}&autoplay=true`;

@@ -351,6 +351,7 @@ class StreamPlaybackManager:
         sync_config_key,
         sync_supported_media_modes,
         stream_playback_history_limit: int,
+        stream_random_recent_avoid_count: int,
         stream_update_event: str,
         sync_time_event: str,
         stream_sync_interval_seconds: float,
@@ -378,6 +379,7 @@ class StreamPlaybackManager:
         self.sync_config_key = sync_config_key
         self.sync_supported_media_modes = sync_supported_media_modes
         self.stream_playback_history_limit = stream_playback_history_limit
+        self.stream_random_recent_avoid_count = max(1, int(stream_random_recent_avoid_count))
         self.stream_update_event = stream_update_event
         self.sync_time_event = sync_time_event
         self.stream_sync_interval_seconds = max(0.25, float(stream_sync_interval_seconds))
@@ -679,9 +681,22 @@ class StreamPlaybackManager:
             return None
         if state.shuffle:
             pool = entries
-            if state.current_media and len(entries) > 1:
-                current_path = state.current_media.get("path")
-                filtered = [item for item in entries if item.get("path") != current_path]
+            recent_paths: List[str] = []
+            if state.current_media and state.current_media.get("path"):
+                recent_paths.append(str(state.current_media.get("path")))
+            for entry in reversed(state.history):
+                media = entry.get("media") if isinstance(entry, dict) else None
+                path = media.get("path") if isinstance(media, dict) else None
+                if not path:
+                    continue
+                path_text = str(path)
+                if path_text in recent_paths:
+                    continue
+                recent_paths.append(path_text)
+                if len(recent_paths) >= self.stream_random_recent_avoid_count:
+                    break
+            if recent_paths and len(entries) > len(recent_paths):
+                filtered = [item for item in entries if str(item.get("path") or "") not in recent_paths]
                 if filtered:
                     pool = filtered
             choice = random.choice(pool)

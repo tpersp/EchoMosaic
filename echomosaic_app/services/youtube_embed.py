@@ -7,6 +7,11 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import parse_qs, urlparse
 
+from echomosaic_app.services.youtube_options import (
+    add_youtube_dl_request_options,
+    normalize_youtube_user_agent,
+)
+
 
 class YouTubeEmbedService:
     def __init__(
@@ -41,6 +46,10 @@ class YouTubeEmbedService:
         youtube_sync_role_event: str,
         youtube_sync_max_age_seconds: float,
         media_mode_livestream: str,
+        youtube_user_agent: Optional[str] = None,
+        youtube_cookie_file: Optional[str] = None,
+        youtube_js_runtime: Optional[str] = None,
+        youtube_remote_components: Optional[str] = None,
     ) -> None:
         self.requests = requests_module
         self.youtube_dl_cls = youtube_dl_cls
@@ -71,6 +80,10 @@ class YouTubeEmbedService:
         self.youtube_sync_role_event = youtube_sync_role_event
         self.youtube_sync_max_age_seconds = float(youtube_sync_max_age_seconds)
         self.media_mode_livestream = media_mode_livestream
+        self.youtube_user_agent = normalize_youtube_user_agent(youtube_user_agent)
+        self.youtube_cookie_file = youtube_cookie_file
+        self.youtube_js_runtime = youtube_js_runtime
+        self.youtube_remote_components = youtube_remote_components
 
     def _oembed_like_payload(self, raw: Any) -> Optional[Dict[str, Any]]:
         if not isinstance(raw, dict):
@@ -308,7 +321,7 @@ class YouTubeEmbedService:
         if not url_candidates:
             return None
         headers = {
-            "User-Agent": "EchoMosaic/1.0 (+https://github.com/tpersp/EchoMosaic)",
+            "User-Agent": self.youtube_user_agent,
             "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
         }
         result: Optional[bool] = None
@@ -513,13 +526,19 @@ class YouTubeEmbedService:
                 return dict(cached.get("data") or {})
 
         info: Optional[Dict[str, Any]] = None
-        options = {
-            "quiet": True,
-            "skip_download": True,
-            "extract_flat": "in_playlist",
-            "lazy_playlist": False,
-            "noplaylist": False,
-        }
+        options = add_youtube_dl_request_options(
+            {
+                "quiet": True,
+                "skip_download": True,
+                "extract_flat": "in_playlist",
+                "lazy_playlist": False,
+                "noplaylist": False,
+            },
+            user_agent=self.youtube_user_agent,
+            cookie_file=self.youtube_cookie_file,
+            js_runtime=self.youtube_js_runtime,
+            remote_components=self.youtube_remote_components,
+        )
         try:
             with self.youtube_dl_cls(options) as ydl:
                 extracted = ydl.extract_info(url, download=False)

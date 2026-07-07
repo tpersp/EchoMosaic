@@ -82,7 +82,7 @@ class AIOrchestrationService:
 
     def list_models_payload(self) -> Dict[str, Any]:
         if self.stable_horde_client is None:
-            raise self.auto_generation_unavailable_cls("Stable Horde client is not configured")
+            raise self.auto_generation_unavailable_cls("Stable Horde is not available")
         now = time.time()
         cache_ttl = 300
         if (now - self.ai_model_cache["timestamp"]) > cache_ttl or not self.ai_model_cache["data"]:
@@ -140,7 +140,7 @@ class AIOrchestrationService:
 
     def queue_generation(self, stream_id: str, ai_settings: Dict[str, Any], *, trigger_source: str = "manual") -> Dict[str, Any]:
         if self.stable_horde_client is None:
-            raise self.auto_generation_unavailable_cls("Stable Horde client is not configured")
+            raise self.auto_generation_unavailable_cls("Stable Horde is not available")
 
         conf = self.settings.get(stream_id)
         if not conf:
@@ -151,7 +151,7 @@ class AIOrchestrationService:
         sanitized = self.sanitize_ai_settings(ai_settings, conf[self.ai_settings_key])
         prompt = str(sanitized.get("prompt") or "").strip()
         if not prompt:
-            raise self.auto_generation_prompt_missing_cls("Prompt is required")
+            raise self.auto_generation_prompt_missing_cls("Enter a prompt to generate an image.")
 
         conf[self.ai_settings_key] = sanitized
         conf["_ai_customized"] = not self.ai_settings_match_defaults(conf[self.ai_settings_key])
@@ -234,7 +234,7 @@ class AIOrchestrationService:
 
     def cancel_generation(self, stream_id: str) -> Dict[str, Any]:
         if self.stable_horde_client is None:
-            raise self.auto_generation_unavailable_cls("Stable Horde client is not configured")
+            raise self.auto_generation_unavailable_cls("Stable Horde is not available")
         conf = self.settings.get(stream_id)
         if not conf:
             raise self.auto_generation_error_cls(f"No stream '{stream_id}' found")

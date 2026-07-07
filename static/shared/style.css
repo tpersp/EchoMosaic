@@ -2594,6 +2594,7 @@ a {
 .embed-status-badge[data-state="not_valid"],
 .embed-status-badge[data-state="not-showable"],
 .embed-status-badge[data-state="not_showable"],
+.embed-status-badge[data-state="youtube_blocked"],
 .embed-status-badge[data-state="unreachable"],
 .embed-status-badge[data-state="error"] { color: #e74c3c; border-color: #7e2a22; }
 .embed-type-badge {

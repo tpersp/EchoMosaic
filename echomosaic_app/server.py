@@ -952,9 +952,14 @@ YOUTUBE_LIVE_HTML_MARKERS = (
     '"livebroadcastdetails":{"',
     'itemprop="islivebroadcast"',
 )
+YOUTUBE_USER_AGENT = str(CONFIG.get("YOUTUBE_USER_AGENT") or "").strip()
+YOUTUBE_COOKIE_FILE = str(CONFIG.get("YOUTUBE_COOKIE_FILE") or "").strip()
+YOUTUBE_JS_RUNTIME = str(CONFIG.get("YOUTUBE_JS_RUNTIME") or "").strip()
+YOUTUBE_REMOTE_COMPONENTS = str(CONFIG.get("YOUTUBE_REMOTE_COMPONENTS") or "").strip()
 
 PLAYBACK_RUNTIME = build_playback_runtime()
 STREAM_PLAYBACK_HISTORY_LIMIT = PLAYBACK_RUNTIME.stream_playback_history_limit
+STREAM_RANDOM_RECENT_AVOID_COUNT = PLAYBACK_RUNTIME.stream_random_recent_avoid_count
 STREAM_UPDATE_EVENT = PLAYBACK_RUNTIME.stream_update_event
 STREAM_INIT_EVENT = PLAYBACK_RUNTIME.stream_init_event
 SYNC_TIME_EVENT = PLAYBACK_RUNTIME.sync_time_event
@@ -1012,6 +1017,10 @@ YOUTUBE_EMBED_SERVICE = YouTubeEmbedService(
     youtube_sync_role_event=YOUTUBE_SYNC_ROLE_EVENT,
     youtube_sync_max_age_seconds=YOUTUBE_SYNC_MAX_AGE_SECONDS,
     media_mode_livestream=MEDIA_MODE_LIVESTREAM,
+    youtube_user_agent=YOUTUBE_USER_AGENT,
+    youtube_cookie_file=YOUTUBE_COOKIE_FILE,
+    youtube_js_runtime=YOUTUBE_JS_RUNTIME,
+    youtube_remote_components=YOUTUBE_REMOTE_COMPONENTS,
 )
 
 def _youtube_sync_source_signature(details: Optional[Dict[str, Any]]) -> Tuple[str, str, str]:
@@ -3077,6 +3086,7 @@ if playback_manager is None:
         sync_config_key=SYNC_CONFIG_KEY,
         sync_supported_media_modes=SYNC_SUPPORTED_MEDIA_MODES,
         stream_playback_history_limit=STREAM_PLAYBACK_HISTORY_LIMIT,
+        stream_random_recent_avoid_count=STREAM_RANDOM_RECENT_AVOID_COUNT,
         stream_update_event=STREAM_UPDATE_EVENT,
         sync_time_event=SYNC_TIME_EVENT,
         stream_sync_interval_seconds=STREAM_SYNC_INTERVAL_SECONDS,
@@ -4130,6 +4140,10 @@ LIVE_HLS_SERVICE = LiveHLSService(
     logger=logger,
     app_context_factory=app.app_context,
     safe_emit=safe_emit,
+    youtube_user_agent=YOUTUBE_USER_AGENT,
+    youtube_cookie_file=YOUTUBE_COOKIE_FILE,
+    youtube_js_runtime=YOUTUBE_JS_RUNTIME,
+    youtube_remote_components=YOUTUBE_REMOTE_COMPONENTS,
 )
 
 ASSET_DELIVERY_SERVICE = AssetDeliveryService(
@@ -4405,6 +4419,42 @@ def stream_live():
                 if sanitized_meta is not None:
                     sanitized_meta["video_id"] = resolved_video_id
                     sanitized_meta["start_index"] = resolved_start_index
+        hls_error = None
+        try:
+            hls_url = LIVE_HLS_SERVICE.detect_hls_stream_url(stream_url)
+        except Exception as exc:
+            hls_url = None
+            hls_error = str(exc)
+        if hls_url:
+            return jsonify({
+                "embed_type": "hls",
+                "embed_id": None,
+                "video_id": resolved_video_id,
+                "playlist_id": youtube_details.get("playlist_id"),
+                "content_type": content_type,
+                "start_index": resolved_start_index,
+                "start_seconds": youtube_details.get("start_seconds"),
+                "is_live": bool((sanitized_meta or {}).get("is_live") or youtube_details.get("is_live")),
+                "embed_base": youtube_details.get("embed_base"),
+                "hls_url": hls_url,
+                "original_url": stream_url,
+                "metadata": sanitized_meta,
+            })
+        return jsonify({
+            "embed_type": "youtube_blocked",
+            "embed_id": resolved_video_id,
+            "video_id": resolved_video_id,
+            "playlist_id": youtube_details.get("playlist_id"),
+            "content_type": content_type,
+            "start_index": resolved_start_index,
+            "start_seconds": youtube_details.get("start_seconds"),
+            "is_live": bool((sanitized_meta or {}).get("is_live") or youtube_details.get("is_live")),
+            "embed_base": youtube_details.get("embed_base"),
+            "hls_url": None,
+            "original_url": stream_url,
+            "metadata": sanitized_meta,
+            "error": hls_error or "YouTube playback is blocked on this host.",
+        })
         response_payload: Dict[str, Any] = {
             "embed_type": "youtube",
             "embed_id": resolved_video_id,
@@ -4548,7 +4598,41 @@ def test_embed():
         return jsonify({"status": "not_valid", "note": "Not valid"})
 
     kind, target = _classify_embed_target(url)
-    if kind in ("youtube", "twitch"):
+    if kind == "youtube":
+        youtube_details = _parse_youtube_url_details(url)
+        content_type = ""
+        if youtube_details:
+            metadata = _youtube_oembed_lookup(url, youtube_details, force=False)
+            sanitized_meta = _sanitize_embed_metadata(metadata or {})
+            content_type = str((sanitized_meta or {}).get("content_type") or "").strip().lower()
+            if not content_type:
+                if youtube_details.get("playlist_id"):
+                    content_type = "playlist"
+                elif youtube_details.get("is_live"):
+                    content_type = "live"
+                else:
+                    content_type = "video"
+        try:
+            hls_url = LIVE_HLS_SERVICE.detect_hls_stream_url(url)
+        except Exception as exc:
+            return jsonify({
+                "status": "youtube_blocked",
+                "note": "Blocked",
+                "final_url": target,
+                "kind": kind,
+                "content_type": content_type,
+                "error": str(exc),
+            })
+        if hls_url:
+            return jsonify({"status": "ok", "note": "HLS OK", "final_url": hls_url, "kind": "hls", "content_type": content_type})
+        return jsonify({
+            "status": "youtube_blocked",
+            "note": "Blocked",
+            "final_url": target,
+            "kind": kind,
+            "content_type": content_type,
+        })
+    if kind == "twitch":
         return jsonify({"status": "ok", "note": "OK", "final_url": target, "kind": kind})
 
     if requests is None:

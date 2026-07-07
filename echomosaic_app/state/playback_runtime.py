@@ -9,6 +9,7 @@ from typing import Any, Optional
 @dataclass
 class PlaybackRuntime:
     stream_playback_history_limit: int
+    stream_random_recent_avoid_count: int
     stream_update_event: str
     stream_init_event: str
     sync_time_event: str
@@ -19,6 +20,7 @@ class PlaybackRuntime:
 def build_playback_runtime() -> PlaybackRuntime:
     return PlaybackRuntime(
         stream_playback_history_limit=50,
+        stream_random_recent_avoid_count=10,
         stream_update_event="stream_update",
         stream_init_event="stream_init",
         sync_time_event="sync_time",

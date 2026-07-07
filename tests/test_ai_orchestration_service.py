@@ -118,7 +118,7 @@ def test_ai_orchestration_service_rejects_missing_prompt() -> None:
     try:
         service.queue_generation("stream1", {"prompt": ""})
     except _AutoGenerationPromptMissing as exc:
-        assert "Prompt is required" in str(exc)
+        assert "Enter a prompt to generate an image." in str(exc)
     else:
         raise AssertionError("expected _AutoGenerationPromptMissing")
 

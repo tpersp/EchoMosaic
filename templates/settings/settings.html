@@ -1608,7 +1608,7 @@
           .then(data => Array.isArray(data.models) ? data.models : [])
           .catch(err => {
             console.error('Failed to fetch Stable Horde models', err);
-            setStatus('Stable Horde model list unavailable', false);
+            setStatus('Model list unavailable', false);
             return [];
           })
           .finally(() => {
