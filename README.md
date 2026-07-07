@@ -217,7 +217,7 @@ git -C /path/to/EchoMosaic rev-parse --is-inside-work-tree
 ## Limitations
 
 - No built-in authentication or multi-user permission model.
-- Eventlet is still in use and emits a deprecation warning; it works today, but it is not a future-proof long-term async stack.
+- Eventlet is still in use and emits a deprecation warning; it works today, but it is not a future-proof long-term async stack. Gunicorn is pinned below 26 because Gunicorn 26 removed the bundled Eventlet worker used by the service file.
 - The update flow assumes the active repo remains a valid git checkout with a working `origin` remote.
 - Media roots are still config-driven rather than managed through a richer storage UI.
 
