@@ -4,6 +4,7 @@ Lightweight helpers to collect system statistics for the dashboard.
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -41,6 +42,42 @@ def _bytes_to_gb(value: float) -> float:
     return round(value / (1024**3), 1)
 
 
+def _bytes_to_mb(value: float) -> float:
+    return round(value / (1024**2), 1)
+
+
+def _read_cgroup_memory() -> Dict[str, Optional[float]]:
+    """Read cgroup v2 memory counters when running in a container/service."""
+
+    result: Dict[str, Optional[float]] = {
+        "cgroup_memory_current_mb": None,
+        "cgroup_memory_limit_mb": None,
+        "cgroup_memory_anon_mb": None,
+        "cgroup_memory_file_mb": None,
+    }
+    try:
+        unified_line = next(
+            line for line in Path("/proc/self/cgroup").read_text(encoding="utf-8").splitlines()
+            if line.startswith("0::")
+        )
+        relative = unified_line.split("::", 1)[1].lstrip("/")
+        root = Path("/sys/fs/cgroup") / relative
+        current = (root / "memory.current").read_text(encoding="utf-8").strip()
+        limit = (root / "memory.max").read_text(encoding="utf-8").strip()
+        result["cgroup_memory_current_mb"] = _bytes_to_mb(float(current))
+        if limit != "max":
+            result["cgroup_memory_limit_mb"] = _bytes_to_mb(float(limit))
+        for line in (root / "memory.stat").read_text(encoding="utf-8").splitlines():
+            key, _, raw_value = line.partition(" ")
+            if key == "anon":
+                result["cgroup_memory_anon_mb"] = _bytes_to_mb(float(raw_value))
+            elif key == "file":
+                result["cgroup_memory_file_mb"] = _bytes_to_mb(float(raw_value))
+    except (OSError, StopIteration, ValueError):
+        pass
+    return result
+
+
 def get_system_stats() -> Dict[str, Any]:
     """
     Gather basic system statistics for the dashboard.
@@ -55,6 +92,11 @@ def get_system_stats() -> Dict[str, Any]:
         "memory_used": None,
         "memory_total": None,
         "memory_percent": None,
+        "process_memory_rss_mb": None,
+        "cgroup_memory_current_mb": None,
+        "cgroup_memory_limit_mb": None,
+        "cgroup_memory_anon_mb": None,
+        "cgroup_memory_file_mb": None,
         "gpu_percent": None,
         "disk_used": None,
         "disk_total": None,
@@ -77,6 +119,12 @@ def get_system_stats() -> Dict[str, Any]:
         stats["memory_percent"] = round(memory.percent, 1)
     except Exception:
         pass
+
+    try:
+        stats["process_memory_rss_mb"] = _bytes_to_mb(psutil.Process(os.getpid()).memory_info().rss)
+    except Exception:
+        pass
+    stats.update(_read_cgroup_memory())
 
     media_path = _detect_media_path()
     if media_path:

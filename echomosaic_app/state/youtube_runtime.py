@@ -23,13 +23,16 @@ class YouTubeRuntime:
     youtube_in_flight_lock: threading.Lock
 
 
-def build_youtube_runtime(*, cache_factory: Callable[[int], Any]) -> YouTubeRuntime:
+def build_youtube_runtime(
+    *, cache_factory: Callable[[int], Any], oembed_cache_size: int = 256,
+    live_probe_cache_size: int = 256, playlist_cache_size: int = 64
+) -> YouTubeRuntime:
     return YouTubeRuntime(
-        youtube_oembed_cache=cache_factory(256),
+        youtube_oembed_cache=cache_factory(max(1, oembed_cache_size)),
         youtube_oembed_cache_lock=threading.Lock(),
-        youtube_live_probe_cache=cache_factory(256),
+        youtube_live_probe_cache=cache_factory(max(1, live_probe_cache_size)),
         youtube_live_probe_cache_lock=threading.Lock(),
-        youtube_playlist_cache=cache_factory(64),
+        youtube_playlist_cache=cache_factory(max(1, playlist_cache_size)),
         youtube_playlist_cache_lock=threading.Lock(),
         youtube_sync_state_lock=threading.Lock(),
         youtube_sync_state={},

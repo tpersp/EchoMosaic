@@ -406,8 +406,34 @@
     note.style.opacity = ok ? 0.85 : 1;
   }
 
+  function formatRuntimeMemory(value) {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? `${parsed.toFixed(1)} MB` : 'Unavailable';
+  }
+
+  function renderRuntimeStatus(settingsData, memoryData) {
+    const runtime = (settingsData && settingsData.effective_runtime) || {};
+    const active = runtime.low_memory_mode === true;
+    const badge = document.getElementById('runtime-profile-badge');
+    if (badge) {
+      badge.textContent = active ? 'Low-memory mode active' : 'Standard mode active';
+      badge.classList.toggle('settings-runtime-badge-active', active);
+    }
+    const setText = (id, value) => {
+      const node = document.getElementById(id);
+      if (node) node.textContent = value;
+    };
+    setText('runtime-hls-workers', runtime.live_hls_max_workers ?? '–');
+    setText('runtime-video-previews', runtime.media_preview_enabled ? `${runtime.media_preview_frames} frames at ${runtime.media_preview_width}px` : 'Disabled');
+    setText('runtime-media-cache', runtime.media_catalog_cache_size ?? '–');
+    setText('runtime-process-memory', formatRuntimeMemory(memoryData && memoryData.process_memory_rss_mb));
+    setText('runtime-anon-memory', formatRuntimeMemory(memoryData && memoryData.cgroup_memory_anon_mb));
+    setText('runtime-file-cache', formatRuntimeMemory(memoryData && memoryData.cgroup_memory_file_mb));
+  }
+
   async function loadMediaSettings() {
     const input = document.getElementById('media-upload-max-mb');
+    const lowMemoryToggle = document.getElementById('low-memory-mode-toggle');
     if (!input) return;
     setMediaSettingsStatus('Loading…');
     try {
@@ -417,6 +443,13 @@
       }
       const data = await res.json();
       input.value = data.media_upload_max_mb || 2048;
+      if (lowMemoryToggle) lowMemoryToggle.checked = data.low_memory_mode === true;
+      let memoryData = {};
+      try {
+        const memoryResponse = await fetch('/api/system_stats', { cache: 'no-store' });
+        if (memoryResponse.ok) memoryData = await memoryResponse.json();
+      } catch (err) {}
+      renderRuntimeStatus(data, memoryData);
       setMediaSettingsStatus('');
     } catch (err) {
       setMediaSettingsStatus('Media settings unavailable.', false);
@@ -425,6 +458,7 @@
 
   async function saveMediaSettings() {
     const input = document.getElementById('media-upload-max-mb');
+    const lowMemoryToggle = document.getElementById('low-memory-mode-toggle');
     if (!input) return;
     const parsed = Number(input.value);
     if (!Number.isFinite(parsed) || parsed < 1) {
@@ -433,6 +467,7 @@
     }
     setMediaSettingsStatus('Saving…');
     input.disabled = true;
+    if (lowMemoryToggle) lowMemoryToggle.disabled = true;
     try {
       const res = await fetch('/api/settings/media', {
         method: 'POST',
@@ -440,18 +475,30 @@
           'Content-Type': 'application/json',
           'X-API-Key': SETTINGS_API_KEY
         },
-        body: JSON.stringify({ media_upload_max_mb: Math.floor(parsed) })
+        body: JSON.stringify({
+          media_upload_max_mb: Math.floor(parsed),
+          low_memory_mode: lowMemoryToggle ? lowMemoryToggle.checked : false,
+          restart: true
+        })
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
         throw new Error(data.error || 'Media settings update failed');
       }
       input.value = data.media_upload_max_mb || Math.floor(parsed);
-      setMediaSettingsStatus(`Upload limit saved at ${input.value} MB.`);
+      if (data.restart_scheduled) {
+        const badge = document.getElementById('runtime-profile-badge');
+        if (badge) badge.textContent = 'Restart pending…';
+        setMediaSettingsStatus('Settings saved. EchoMosaic is restarting; this page will reconnect shortly.');
+        window.setTimeout(() => window.location.reload(), 4000);
+      } else {
+        setMediaSettingsStatus(`Settings saved. Upload limit is ${input.value} MB.`);
+      }
     } catch (err) {
       setMediaSettingsStatus(err.message || 'Media settings update failed.', false);
     } finally {
       input.disabled = false;
+      if (lowMemoryToggle) lowMemoryToggle.disabled = false;
     }
   }
 
@@ -943,10 +990,30 @@
     <section class="settings-card">
       <div class="settings-card-header">
         <div>
-          <p class="settings-kicker">Media Settings</p>
-          <h3>Uploads</h3>
+          <p class="settings-kicker">Runtime</p>
+          <h3>Performance &amp; Uploads</h3>
         </div>
-        <p class="settings-card-copy">Control the maximum size allowed for file and folder uploads in the Media manager.</p>
+        <p class="settings-card-copy">Tune EchoMosaic for the host and control Media manager upload limits.</p>
+      </div>
+      <label class="toggle compact">
+        <input type="checkbox" id="low-memory-mode-toggle">
+        <span class="toggle-switch"></span>
+        <span class="toggle-label">Low-memory mode</span>
+      </label>
+      <p class="settings-card-copy">Recommended for small containers. Reduces background workers and caches and disables animated video previews. Saving a change restarts EchoMosaic.</p>
+      <div class="settings-runtime-status" aria-live="polite">
+        <div class="settings-runtime-status-header">
+          <strong>Effective runtime</strong>
+          <span id="runtime-profile-badge" class="settings-runtime-badge">Loading…</span>
+        </div>
+        <dl class="settings-runtime-grid">
+          <div><dt>HLS workers</dt><dd id="runtime-hls-workers">–</dd></div>
+          <div><dt>Video previews</dt><dd id="runtime-video-previews">–</dd></div>
+          <div><dt>Media cache entries</dt><dd id="runtime-media-cache">–</dd></div>
+          <div><dt>Worker RSS</dt><dd id="runtime-process-memory">–</dd></div>
+          <div><dt>Anonymous memory</dt><dd id="runtime-anon-memory">–</dd></div>
+          <div><dt>Reclaimable file cache</dt><dd id="runtime-file-cache">–</dd></div>
+        </dl>
       </div>
       <div class="settings-inline-form">
         <label class="settings-advanced-field settings-advanced-field-inline" for="media-upload-max-mb">
@@ -956,7 +1023,7 @@
             <span class="settings-inline-suffix">MB</span>
           </div>
         </label>
-        <button id="media-settings-save" type="button">Save Media Setting</button>
+        <button id="media-settings-save" type="button">Save Runtime Settings</button>
       </div>
       <p id="media-settings-note" class="settings-status-line" style="display:none;"></p>
     </section>

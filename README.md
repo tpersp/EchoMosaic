@@ -139,6 +139,7 @@ Key configuration lives in:
 - `settings.json`: streams, tags, groups, presets, sync timers, custom stream order
 
 Important config keys:
+- `LOW_MEMORY_MODE`: opt-in profile for constrained containers; reduces cache/concurrency limits and disables video preview generation
 - `MEDIA_PATHS`: main media roots
 - `AI_MEDIA_PATHS`: AI media roots
 - `INSTALL_DIR`: active repo path used by `update.sh`
@@ -151,6 +152,31 @@ Important config keys:
 - `YOUTUBE_COOKIE_FILE`: optional path to a Netscape-format cookies.txt file for yt-dlp YouTube extraction
 - `YOUTUBE_JS_RUNTIME`: optional yt-dlp JavaScript runtime, for example `node:/usr/bin/node`
 - `YOUTUBE_REMOTE_COMPONENTS`: optional comma-separated yt-dlp remote components, for example `ejs:github`
+
+### Small Proxmox LXC profile
+
+EchoMosaic does not require a full VM. For a small LXC, start with 512 MiB RAM,
+swap enabled, and one worker. Enable the constrained runtime profile in
+`config.json`:
+
+```json
+{
+  "LOW_MEMORY_MODE": true
+}
+```
+
+It can also be enabled under **Settings → General → Performance & Uploads**.
+Saving a changed low-memory setting restarts the configured EchoMosaic service
+so the profile takes effect immediately. The same Settings card shows the
+effective profile, preview and worker limits, process memory, anonymous memory,
+and reclaimable file cache.
+
+The profile keeps the same playback features, lazy-loads heavyweight video and
+YouTube dependencies, uses one HLS resolver worker, reduces in-process cache
+limits and thumbnail sizes, and disables animated video previews. Original
+video playback and static video thumbnails remain available. The system stats
+API reports process RSS plus cgroup anonymous and file-cache memory separately;
+filesystem cache is reclaimable and should not be interpreted as a Python leak.
 
 Notes:
 - Gunicorn should stay on a single worker unless you redesign the shared runtime state and add a proper Socket.IO message queue.

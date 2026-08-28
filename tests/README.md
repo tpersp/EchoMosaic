@@ -83,6 +83,10 @@ It is intentionally lightweight so AI agents can run it quickly before suggestin
   Verifies the extracted stream/playback Socket.IO module registers the expected live events.
 - `test_youtube_sync_socket_handlers.py`
   Verifies the extracted YouTube sync Socket.IO module registers the expected live event.
+- `test_runtime_profile.py`
+  Verifies the opt-in low-memory profile caps expensive workers, caches, and previews without changing defaults.
+- `test_optional_dependencies.py`
+  Verifies heavyweight YouTube extraction support remains unloaded until first use.
 
 These tests do **not** exercise the live installed dev service directly.
 They run against isolated temporary directories so they are safe to execute on the same server where the dev app is installed and running.

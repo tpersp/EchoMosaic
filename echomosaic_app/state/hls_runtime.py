@@ -80,7 +80,7 @@ def build_hls_runtime(
             "jobs_completed": 0,
             "errors": 0,
         },
-        hls_cache=cache_factory(256),
-        hls_jobs=cache_factory(128),
+        hls_cache=cache_factory(max(1, _coerce_int(config.get("HLS_CACHE_SIZE"), 256))),
+        hls_jobs=cache_factory(max(1, _coerce_int(config.get("HLS_JOB_CACHE_SIZE"), 128))),
         hls_executor=hls_executor,
     )

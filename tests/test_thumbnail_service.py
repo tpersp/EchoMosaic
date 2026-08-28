@@ -86,6 +86,7 @@ def _build_service(tmp_path: Path) -> ThumbnailService:
         ImageFont=_ImageFontModule,
         ImageOps=_ImageOpsModule,
         cv2_module=None,
+        cv2_loader=None,
         requests_module=None,
         eventlet_module=type("Eventlet", (), {"spawn": staticmethod(lambda fn: fn())}),
         logger=type("Logger", (), {"debug": lambda *args, **kwargs: None})(),
