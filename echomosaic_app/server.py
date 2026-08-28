@@ -4287,12 +4287,22 @@ def api_media_settings():
     cfg = load_config()
     upload_limit_mb = max(1, _as_int(cfg.get("MEDIA_UPLOAD_MAX_MB"), 2048))
     low_memory_mode = _as_bool(cfg.get("LOW_MEMORY_MODE"), False)
+    effective_runtime = {
+        "low_memory_mode": _as_bool(CONFIG.get("LOW_MEMORY_MODE"), False),
+        "live_hls_max_workers": MAX_HLS_WORKERS,
+        "media_preview_enabled": MEDIA_PREVIEW_ENABLED,
+        "media_preview_frames": MEDIA_PREVIEW_FRAMES,
+        "media_preview_width": MEDIA_PREVIEW_WIDTH,
+        "media_thumb_width": MEDIA_THUMB_WIDTH,
+        "media_catalog_cache_size": IMAGE_CACHE.maxsize,
+    }
     if request.method == "GET":
         return jsonify(
             {
                 "media_upload_max_mb": upload_limit_mb,
                 "media_upload_max_bytes": upload_limit_mb * 1024 * 1024,
                 "low_memory_mode": low_memory_mode,
+                "effective_runtime": effective_runtime,
             }
         )
 
@@ -4335,6 +4345,7 @@ def api_media_settings():
         "low_memory_mode": requested_low_memory_mode,
         "restart_required": restart_required,
         "restart_scheduled": restart_scheduled,
+        "effective_runtime": effective_runtime,
     })
 
 

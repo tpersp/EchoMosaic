@@ -167,7 +167,9 @@ swap enabled, and one worker. Enable the constrained runtime profile in
 
 It can also be enabled under **Settings → General → Performance & Uploads**.
 Saving a changed low-memory setting restarts the configured EchoMosaic service
-so the profile takes effect immediately.
+so the profile takes effect immediately. The same Settings card shows the
+effective profile, preview and worker limits, process memory, anonymous memory,
+and reclaimable file cache.
 
 The profile keeps the same playback features, lazy-loads heavyweight video and
 YouTube dependencies, uses one HLS resolver worker, reduces in-process cache
