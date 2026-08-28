@@ -18,6 +18,7 @@ def create_settings_operations_blueprint(
     settings,
     load_config: Callable[[], Dict[str, Any]],
     media_settings_handler: Callable[[], Any],
+    restart_service_handler: Callable[[], Any],
     default_ai_settings: Callable[[], Dict[str, Any]],
     ai_fallback_defaults: Dict[str, Any],
     post_processors,
@@ -77,6 +78,14 @@ def create_settings_operations_blueprint(
     @blueprint.route("/api/settings/media", methods=["GET", "POST"])
     def media_settings():
         return media_settings_handler()
+
+    @blueprint.route("/api/service/restart", methods=["POST"])
+    def restart_service():
+        cfg = load_config()
+        unauthorized = _require_api_key(cfg)
+        if unauthorized:
+            return unauthorized
+        return restart_service_handler()
 
     @blueprint.route("/settings")
     def app_settings():

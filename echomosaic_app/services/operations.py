@@ -251,17 +251,21 @@ class OperationsService:
             return str(Path(configured).expanduser())
         return Path(__file__).resolve().parents[2].as_posix()
 
-    def restart_configured_service(self, service_name: str) -> None:
-        commands = [
-            ["systemctl", "--user", "restart", service_name],
-            ["sudo", "systemctl", "restart", service_name],
-        ]
-        for command in commands:
-            try:
-                subprocess.Popen(command)
-                return
-            except OSError:
-                continue
+    def restart_configured_service(self, service_name: str, service_scope: Optional[str] = None) -> bool:
+        normalized_scope = str(service_scope or "").strip().lower()
+        if normalized_scope not in {"system", "user"}:
+            system_unit = Path("/etc/systemd/system") / service_name
+            normalized_scope = "system" if system_unit.exists() else "user"
+        command = ["systemctl"]
+        if normalized_scope == "user":
+            command.append("--user")
+        command.extend(["restart", service_name])
+        try:
+            subprocess.Popen(command)
+        except OSError as exc:
+            self.logger.warning("Unable to restart %s service %s: %s", normalized_scope, service_name, exc)
+            return False
+        return True
 
     def _restore_points_root(self, repo_path: str) -> str:
         return os.path.join(repo_path, self.backup_dirname, self.restore_point_dirname)

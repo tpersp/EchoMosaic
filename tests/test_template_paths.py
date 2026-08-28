@@ -18,6 +18,7 @@ def test_feature_template_pages_render() -> None:
     assert b'Save Runtime Settings' in settings_page.data
     assert b'id="runtime-profile-badge"' in settings_page.data
     assert b'Reclaimable file cache' in settings_page.data
+    assert b'id="service-restart-button"' in settings_page.data
     assert debug_page.status_code == 200
 
 
