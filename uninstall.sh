@@ -15,7 +15,7 @@ Options:
   --remove-venv  Also remove the local virtual environment in this repo
   --help         Show this help message
 
-This script removes the systemd --user service created by install.sh.
+This script removes the systemd service created by install.sh.
 It does not delete the repository, config, media folders, or settings data by default.
 EOF
 }
@@ -38,7 +38,20 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-SERVICE_NAME="$(
+run_privileged() {
+  if [ "${EUID}" -eq 0 ]; then
+    "$@"
+    return
+  fi
+  if command -v sudo >/dev/null 2>&1; then
+    sudo "$@"
+    return
+  fi
+  echo "Error: this step requires root privileges, but sudo is not installed." >&2
+  return 1
+}
+
+mapfile -t SERVICE_CONFIG < <(
 python3 - "$SCRIPT_DIR" <<'PY'
 import json
 import sys
@@ -57,17 +70,31 @@ for candidate in (default_path, config_path):
         loaded = {}
     if isinstance(loaded, dict):
         data.update(loaded)
-print(str(data.get("SERVICE_NAME") or "echomosaic.service").strip(), end="")
+print(str(data.get("SERVICE_NAME") or "echomosaic.service").strip())
+print(str(data.get("SERVICE_SCOPE") or "").strip().lower())
 PY
-)"
+)
 
-SERVICE_NAME="${SERVICE_NAME:-echomosaic.service}"
-SERVICE_PATH="$HOME/.config/systemd/user/${SERVICE_NAME}"
+SERVICE_NAME="${SERVICE_CONFIG[0]:-echomosaic.service}"
+SERVICE_SCOPE="${SERVICE_CONFIG[1]:-}"
+if [ "$SERVICE_SCOPE" != "system" ] && [ "$SERVICE_SCOPE" != "user" ]; then
+  if [ -f "/etc/systemd/system/$SERVICE_NAME" ]; then
+    SERVICE_SCOPE="system"
+  else
+    SERVICE_SCOPE="user"
+  fi
+fi
+if [ "$SERVICE_SCOPE" = "system" ]; then
+  SERVICE_PATH="/etc/systemd/system/${SERVICE_NAME}"
+else
+  SERVICE_PATH="$HOME/.config/systemd/user/${SERVICE_NAME}"
+fi
 
 echo "Repository path: $SCRIPT_DIR"
 echo "Service name: ${SERVICE_NAME}"
+echo "Service scope: ${SERVICE_SCOPE}"
 echo
-echo "This will remove the systemd --user service wiring for this EchoMosaic clone."
+echo "This will remove the systemd ${SERVICE_SCOPE} service wiring for this EchoMosaic clone."
 echo "Repo files, config, settings, and media will remain."
 
 read -r -p "Continue? [y/N]: " CONFIRM_UNINSTALL
@@ -76,14 +103,23 @@ if [[ ! "$CONFIRM_UNINSTALL" =~ ^[Yy]$ ]]; then
   exit 1
 fi
 
-if systemctl --user list-unit-files | grep -q "^${SERVICE_NAME}"; then
-  systemctl --user stop "$SERVICE_NAME" || true
-  systemctl --user disable "$SERVICE_NAME" || true
+if [ "$SERVICE_SCOPE" = "system" ]; then
+  if systemctl list-unit-files | grep -q "^${SERVICE_NAME}"; then
+    run_privileged systemctl stop "$SERVICE_NAME" || true
+    run_privileged systemctl disable "$SERVICE_NAME" || true
+  fi
+  run_privileged rm -f "$SERVICE_PATH"
+  run_privileged systemctl daemon-reload
+  run_privileged systemctl reset-failed
+else
+  if systemctl --user list-unit-files | grep -q "^${SERVICE_NAME}"; then
+    systemctl --user stop "$SERVICE_NAME" || true
+    systemctl --user disable "$SERVICE_NAME" || true
+  fi
+  rm -f "$SERVICE_PATH"
+  systemctl --user daemon-reload
+  systemctl --user reset-failed
 fi
-
-rm -f "$SERVICE_PATH"
-systemctl --user daemon-reload
-systemctl --user reset-failed
 
 if [ "$REMOVE_VENV" = true ]; then
   rm -rf "$SCRIPT_DIR/venv"

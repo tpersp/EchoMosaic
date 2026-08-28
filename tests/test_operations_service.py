@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 from pathlib import Path
 
 from echomosaic_app.services.operations import OperationsService, UpdateAlreadyRunningError
@@ -21,6 +22,22 @@ def _service(**overrides):
     }
     params.update(overrides)
     return OperationsService(**params)
+
+
+def test_operations_service_restarts_system_service(monkeypatch) -> None:
+    commands = []
+    monkeypatch.setattr(subprocess, "Popen", lambda command: commands.append(command))
+
+    assert _service().restart_configured_service("echomosaic.service", "system") is True
+    assert commands == [["systemctl", "restart", "echomosaic.service"]]
+
+
+def test_operations_service_restarts_user_service(monkeypatch) -> None:
+    commands = []
+    monkeypatch.setattr(subprocess, "Popen", lambda command: commands.append(command))
+
+    assert _service().restart_configured_service("echomosaic.service", "user") is True
+    assert commands == [["systemctl", "--user", "restart", "echomosaic.service"]]
 
 
 def test_operations_service_prefers_git_repo_from_config(tmp_path: Path) -> None:

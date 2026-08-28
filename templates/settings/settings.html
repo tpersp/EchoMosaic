@@ -511,6 +511,33 @@
 
   document.addEventListener('DOMContentLoaded', initMediaSettingsControls);
 
+  async function restartEchoMosaicService() {
+    const button = document.getElementById('service-restart-button');
+    const status = document.getElementById('service-restart-status');
+    if (!button || !status) return;
+    if (!confirm('Restart EchoMosaic now? Connected viewers may reconnect briefly.')) return;
+    button.disabled = true;
+    status.textContent = 'Scheduling restart…';
+    try {
+      const response = await fetch('/api/service/restart', {
+        method: 'POST',
+        headers: { 'X-API-Key': SETTINGS_API_KEY }
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || 'Restart request failed');
+      status.textContent = 'Restarting… this page will reconnect shortly.';
+      window.setTimeout(() => window.location.reload(), 4000);
+    } catch (err) {
+      status.textContent = err.message || 'Restart request failed.';
+      button.disabled = false;
+    }
+  }
+
+  document.addEventListener('DOMContentLoaded', () => {
+    const button = document.getElementById('service-restart-button');
+    if (button) button.addEventListener('click', restartEchoMosaicService);
+  });
+
   function normalizeLinkText(value) {
     return String(value || '').trim();
   }
@@ -889,6 +916,10 @@
           <span class="settings-meta-value">{{ config.SERVICE_NAME }}</span>
         </div>
         <div class="settings-meta-item">
+          <span class="settings-meta-label">Service Scope</span>
+          <span class="settings-meta-value">{{ config.SERVICE_SCOPE or 'Auto-detected' }}</span>
+        </div>
+        <div class="settings-meta-item">
           <span class="settings-meta-label">Update Channel</span>
           <span class="settings-meta-value">{{ config.UPDATE_CHANNEL or 'branch' }}</span>
         </div>
@@ -896,6 +927,10 @@
           <span class="settings-meta-label">Update Branch</span>
           <span class="settings-meta-value">{{ config.UPDATE_BRANCH }}</span>
         </div>
+      </div>
+      <div class="settings-actions">
+        <button id="service-restart-button" type="button">Restart EchoMosaic</button>
+        <span id="service-restart-status" class="settings-inline-status"></span>
       </div>
     </section>
 

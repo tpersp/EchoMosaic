@@ -3670,6 +3670,7 @@ _settings_operations_blueprint = create_settings_operations_blueprint(
     settings=settings,
     load_config=load_config,
     media_settings_handler=lambda: api_media_settings(),
+    restart_service_handler=lambda: api_service_restart(),
     default_ai_settings=default_ai_settings,
     ai_fallback_defaults=AI_FALLBACK_DEFAULTS,
     post_processors=STABLE_HORDE_POST_PROCESSORS,
@@ -4336,7 +4337,13 @@ def api_media_settings():
     restart_scheduled = False
     if restart_required and restart_requested:
         service_name = str(cfg.get("SERVICE_NAME") or "echomosaic.service").strip()
-        eventlet.spawn_after(0.75, OPERATIONS_SERVICE.restart_configured_service, service_name)
+        service_scope = str(cfg.get("SERVICE_SCOPE") or "").strip().lower() or None
+        eventlet.spawn_after(
+            0.75,
+            OPERATIONS_SERVICE.restart_configured_service,
+            service_name,
+            service_scope,
+        )
         restart_scheduled = True
 
     return jsonify({
@@ -4346,6 +4353,23 @@ def api_media_settings():
         "restart_required": restart_required,
         "restart_scheduled": restart_scheduled,
         "effective_runtime": effective_runtime,
+    })
+
+
+def api_service_restart():
+    cfg = load_config()
+    service_name = str(cfg.get("SERVICE_NAME") or "echomosaic.service").strip()
+    service_scope = str(cfg.get("SERVICE_SCOPE") or "").strip().lower() or None
+    eventlet.spawn_after(
+        0.75,
+        OPERATIONS_SERVICE.restart_configured_service,
+        service_name,
+        service_scope,
+    )
+    return jsonify({
+        "status": "restart_scheduled",
+        "service_name": service_name,
+        "service_scope": service_scope or "auto",
     })
 
 

@@ -1,6 +1,7 @@
 {
   "INSTALL_DIR": "/opt/echomosaic",
   "SERVICE_NAME": "echomosaic.service",
+  "SERVICE_SCOPE": "",
   "UPDATE_CHANNEL": "release",
   "UPDATE_BRANCH": "main",
   "REPO_SLUG": "tpersp/EchoMosaic",

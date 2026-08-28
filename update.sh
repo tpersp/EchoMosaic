@@ -59,6 +59,7 @@ if is_dev_install:
 
 print(get_value("INSTALL_DIR", "/opt/echomosaic"))
 print(get_value("SERVICE_NAME", "echomosaic.service"))
+print(get_value("SERVICE_SCOPE", ""))
 print(channel)
 print(branch)
 print(get_value("REPO_SLUG", "tpersp/EchoMosaic"))
@@ -66,9 +67,10 @@ PY
 )
   INSTALL_DIR="${CONFIG_VALUES[0]:-/opt/echomosaic}"
   SERVICE_NAME="${CONFIG_VALUES[1]:-echomosaic.service}"
-  UPDATE_CHANNEL="${CONFIG_VALUES[2]:-branch}"
-  BRANCH="${CONFIG_VALUES[3]:-main}"
-  REPO_SLUG="${CONFIG_VALUES[4]:-tpersp/EchoMosaic}"
+  SERVICE_SCOPE="${CONFIG_VALUES[2]:-}"
+  UPDATE_CHANNEL="${CONFIG_VALUES[3]:-branch}"
+  BRANCH="${CONFIG_VALUES[4]:-main}"
+  REPO_SLUG="${CONFIG_VALUES[5]:-tpersp/EchoMosaic}"
 else
   if ! command -v jq >/dev/null 2>&1; then
     echo "Error: python or jq is required to read $CONFIG_FILE."
@@ -76,9 +78,19 @@ else
   fi
   INSTALL_DIR=$(jq -r '.INSTALL_DIR' "$CONFIG_FILE")
   SERVICE_NAME=$(jq -r '.SERVICE_NAME' "$CONFIG_FILE")
+  SERVICE_SCOPE=$(jq -r '.SERVICE_SCOPE // ""' "$CONFIG_FILE")
   UPDATE_CHANNEL=$(jq -r '.UPDATE_CHANNEL // "branch"' "$CONFIG_FILE")
   BRANCH=$(jq -r '.UPDATE_BRANCH' "$CONFIG_FILE")
   REPO_SLUG=$(jq -r '.REPO_SLUG // "tpersp/EchoMosaic"' "$CONFIG_FILE")
+fi
+
+SERVICE_SCOPE="$(printf '%s' "$SERVICE_SCOPE" | tr '[:upper:]' '[:lower:]')"
+if [ "$SERVICE_SCOPE" != "system" ] && [ "$SERVICE_SCOPE" != "user" ]; then
+  if [ -f "/etc/systemd/system/$SERVICE_NAME" ]; then
+    SERVICE_SCOPE="system"
+  else
+    SERVICE_SCOPE="user"
+  fi
 fi
 
 INSTALL_BASENAME="$(basename "$INSTALL_DIR" | tr '[:upper:]' '[:lower:]')"
@@ -312,6 +324,10 @@ PY
 fi
 
 echo -e "\nRestarting $SERVICE_NAME..."
-systemctl --user restart "$SERVICE_NAME"
+if [ "$SERVICE_SCOPE" = "system" ]; then
+  systemctl restart "$SERVICE_NAME"
+else
+  systemctl --user restart "$SERVICE_NAME"
+fi
 
 echo -e "\nUpdate complete."

@@ -23,7 +23,7 @@ Python dependencies are listed in `requirements.txt`. Core runtime packages incl
 
 ## Installation
 
-EchoMosaic now runs directly from the cloned repo. The installer creates a local `venv` and a `systemd --user` service that points at that clone.
+EchoMosaic now runs directly from the cloned repo. The installer creates a local `venv` and a systemd service that points at that clone. Root installs use a system service; unprivileged installs use a user service.
 
 ### Stable install
 
@@ -32,6 +32,11 @@ git clone https://github.com/tpersp/EchoMosaic.git
 cd EchoMosaic
 bash install.sh
 ```
+
+The installer can be run directly as `root` on minimal Debian systems; `sudo`
+is not required in that case. When run as an unprivileged user, it uses `sudo`
+for system package and mount operations and reports a clear error if privilege
+escalation is unavailable.
 
 Defaults:
 - port: `5000`
@@ -58,7 +63,7 @@ Defaults:
 - creates a local virtual environment
 - installs Python dependencies
 - optionally configures media paths
-- creates and starts a `systemd --user` service
+- creates and starts a system service when run as root, or a user service otherwise
 
 ### Uninstall
 
@@ -72,7 +77,7 @@ To also remove the local virtual environment:
 bash uninstall.sh --remove-venv
 ```
 
-`uninstall.sh` removes the user service but leaves the repo, config, settings, and media paths in place by default.
+`uninstall.sh` removes the configured system or user service but leaves the repo, config, settings, and media paths in place by default.
 
 ## Migration From `v2026.04.02` And Earlier
 
@@ -143,7 +148,8 @@ Important config keys:
 - `MEDIA_PATHS`: main media roots
 - `AI_MEDIA_PATHS`: AI media roots
 - `INSTALL_DIR`: active repo path used by `update.sh`
-- `SERVICE_NAME`: `systemd --user` service name used by `update.sh`
+- `SERVICE_NAME`: systemd service name used by install, update, uninstall, and Settings controls
+- `SERVICE_SCOPE`: `system` for root installs or `user` for unprivileged installs
 - `UPDATE_CHANNEL`: `release` for stable installs, `branch` for branch-tracking installs
 - `UPDATE_BRANCH`: branch pulled by the update flow
 - `REPO_SLUG`: GitHub repository used for release checks
@@ -167,7 +173,8 @@ swap enabled, and one worker. Enable the constrained runtime profile in
 
 It can also be enabled under **Settings → General → Performance & Uploads**.
 Saving a changed low-memory setting restarts the configured EchoMosaic service
-so the profile takes effect immediately. The same Settings card shows the
+so the profile takes effect immediately. Settings also provides a dedicated
+service restart button. The same Settings card shows the
 effective profile, preview and worker limits, process memory, anonymous memory,
 and reclaimable file cache.
 
@@ -203,9 +210,19 @@ python main.py
 bash update.sh
 ```
 
-`update.sh` reads install metadata from `config.json`, follows the configured release or branch target, backs up user state, updates the repo, reinstalls Python dependencies, and restarts the `systemd --user` service. The Settings page also exposes browser-driven update, rollback, restore point, and history actions.
+`update.sh` reads install metadata from `config.json`, follows the configured release or branch target, backs up user state, updates the repo, reinstalls Python dependencies, and restarts the configured system or user service. The Settings page also exposes browser-driven service restart, update, rollback, restore point, and history actions.
 
 ### Common service commands
+
+For a root install:
+
+```bash
+systemctl status echomosaic.service
+systemctl restart echomosaic.service
+journalctl -u echomosaic.service -n 200 --no-pager
+```
+
+For an unprivileged install:
 
 ```bash
 systemctl --user status echomosaic.service
@@ -215,7 +232,7 @@ journalctl --user -u echomosaic.service -n 200 --no-pager
 
 For dev installs, replace `echomosaic.service` with `echomosaic-dev.service`.
 
-If you are unsure which service name your install uses, check `config.json` for `SERVICE_NAME`.
+If you are unsure which commands apply, check `SERVICE_NAME` and `SERVICE_SCOPE` in `config.json`.
 
 ### Common things to check
 
@@ -227,7 +244,7 @@ git -C /path/to/EchoMosaic rev-parse --is-inside-work-tree
 
 - If the dashboard loads but media is missing, verify `MEDIA_PATHS` and `AI_MEDIA_PATHS` in `config.json`.
 - If viewers do not sync correctly, confirm you are still running a single gunicorn worker.
-- If the update page closes too quickly, inspect the service logs with `journalctl --user -u <service-name> -n 200 --no-pager`.
+- If the update page closes too quickly, inspect the service logs with `journalctl -u <service-name> -n 200 --no-pager` for a system service, or add `--user` for a user service.
 - If uploads or generated media behave strangely after moving installs between hosts, confirm the service is still pointing at the expected repo path and media roots.
 - Health/debug endpoints: `/health`, `/api/system_stats`, `/debug`
 
