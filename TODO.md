@@ -5,7 +5,7 @@ A cleaned-up list of what is still open, what is done, and what was tried and la
 ## Current Priorities
 - [ ] Add a `System Events` panel for recent high-signal app activity.
   Note: this should be a curated in-app event feed, not a raw server log viewer. Good candidates are updates, media/upload failures, broken stream sources, and AI job warnings/errors.
-- [ ] Reduce RAM usage without limiting usability or performance.
+- [ ] Complete and field-test the [low-memory LXC support plan](plans/low-memory-lxc.md).
 
 ## Open Suggestions / Future Ideas
 - [ ] [2025-09-08] Add optional authentication or simple login with a session cache so the dashboard and update endpoints are protected from anyone on the network.

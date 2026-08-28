@@ -88,10 +88,7 @@ except ModuleNotFoundError:  # pragma: no cover - optional dependency handling
 
     Image = ImageDraw = ImageFont = ImageOps = _MissingPillowModule()  # type: ignore[assignment]
 
-try:
-    import cv2  # type: ignore[import]
-except Exception:
-    cv2 = None
+cv2 = None
 
 from werkzeug.http import generate_etag, http_date, quote_etag
 
@@ -131,6 +128,8 @@ from echomosaic_app.routes.ai import create_ai_blueprint
 from echomosaic_app.routes.assets import create_assets_blueprint
 from echomosaic_app.routes.dashboard import create_dashboard_blueprint
 from echomosaic_app.extensions import socketio
+from echomosaic_app.optional_dependencies import LazyYoutubeDL, load_cv2
+from echomosaic_app.runtime_profile import apply_runtime_profile
 from echomosaic_app.routes.diagnostics import create_diagnostics_blueprint
 from echomosaic_app.routes.library import create_library_blueprint
 from echomosaic_app.routes.live import create_live_blueprint
@@ -170,10 +169,7 @@ from timer_manager import TimerManager, default_timer_config, ensure_timer_confi
 import debug_manager
 from job_manager import job_manager
 
-try:
-    from yt_dlp import YoutubeDL  # type: ignore[import]
-except Exception:  # pragma: no cover - yt_dlp is optional at import-time
-    YoutubeDL = None
+YoutubeDL = LazyYoutubeDL
 
 
 def _configure_gunicorn_defaults() -> None:
@@ -694,7 +690,7 @@ SYNC_TIMER_MIN_OFFSET = 0.0
 SYNC_SWITCH_LEAD_SECONDS = 0.25
 SYNC_SUPPORTED_MEDIA_MODES = {MEDIA_MODE_IMAGE}
 
-CONFIG: Dict[str, Any] = config_manager.load_config()
+CONFIG: Dict[str, Any] = apply_runtime_profile(config_manager.load_config())
 MEDIA_RUNTIME = build_media_runtime(
     config=CONFIG,
     media_library_default=MEDIA_LIBRARY_DEFAULT,
@@ -736,7 +732,11 @@ def _require_media_edit() -> None:
         raise MediaManagerError("Media editing is disabled", code="forbidden", status=403)
 
 
-MEDIA_CACHE_RUNTIME = build_media_cache_runtime(cache_factory=lambda maxsize: LRUCache(maxsize=maxsize))
+MEDIA_CACHE_RUNTIME = build_media_cache_runtime(
+    cache_factory=lambda maxsize: LRUCache(maxsize=maxsize),
+    image_cache_size=max(1, _as_int(CONFIG.get("MEDIA_CATALOG_CACHE_SIZE"), 64)),
+    bad_media_cache_size=max(1, _as_int(CONFIG.get("BAD_MEDIA_CACHE_SIZE"), 1024)),
+)
 _BAD_MEDIA_LOG_CACHE = MEDIA_CACHE_RUNTIME.bad_media_log_cache
 
 # Cache image paths per folder so we can serve repeated requests without rescanning the disk.
@@ -916,7 +916,11 @@ def _refresh_embed_metadata(
 ) -> Optional[Dict[str, Any]]:
     return YOUTUBE_EMBED_SERVICE.refresh_embed_metadata(stream_id, conf, force=force)
 IMAGE_CACHE_LOCK = threading.Lock()  # Kept for external callers; LRUCache also has internal lock
-STREAM_RUNTIME = build_stream_runtime(cache_factory=lambda maxsize: LRUCache(maxsize=maxsize))
+STREAM_RUNTIME = build_stream_runtime(
+    cache_factory=lambda maxsize: LRUCache(maxsize=maxsize),
+    resized_lock_cache_size=max(1, _as_int(CONFIG.get("RESIZED_IMAGE_LOCK_CACHE_SIZE"), 512)),
+    video_duration_cache_size=max(1, _as_int(CONFIG.get("VIDEO_DURATION_CACHE_SIZE"), 128)),
+)
 RESIZED_IMAGE_LOCKS = STREAM_RUNTIME.resized_image_locks
 RESIZED_IMAGE_LOCKS_GUARD = STREAM_RUNTIME.resized_image_locks_guard
 STREAM_RUNTIME_STATE = STREAM_RUNTIME.stream_runtime_state
@@ -974,7 +978,12 @@ MAX_HLS_WORKERS = 3
 HLS_ERROR_RETRY_SECS = 30
 
 playback_manager: Optional["StreamPlaybackManager"] = PLAYBACK_RUNTIME.playback_manager
-YOUTUBE_RUNTIME = build_youtube_runtime(cache_factory=lambda maxsize: LRUCache(maxsize=maxsize))
+YOUTUBE_RUNTIME = build_youtube_runtime(
+    cache_factory=lambda maxsize: LRUCache(maxsize=maxsize),
+    oembed_cache_size=max(1, _as_int(CONFIG.get("YOUTUBE_OEMBED_CACHE_SIZE"), 256)),
+    live_probe_cache_size=max(1, _as_int(CONFIG.get("YOUTUBE_LIVE_PROBE_CACHE_SIZE"), 256)),
+    playlist_cache_size=max(1, _as_int(CONFIG.get("YOUTUBE_PLAYLIST_CACHE_SIZE"), 64)),
+)
 YOUTUBE_OEMBED_CACHE = YOUTUBE_RUNTIME.youtube_oembed_cache
 YOUTUBE_OEMBED_CACHE_LOCK = YOUTUBE_RUNTIME.youtube_oembed_cache_lock
 YOUTUBE_LIVE_PROBE_CACHE = YOUTUBE_RUNTIME.youtube_live_probe_cache
@@ -2841,6 +2850,7 @@ THUMBNAIL_SERVICE = ThumbnailService(
     ImageFont=ImageFont,
     ImageOps=ImageOps,
     cv2_module=cv2,
+    cv2_loader=load_cv2,
     requests_module=requests,
     eventlet_module=eventlet,
     logger=logger,
@@ -3077,6 +3087,7 @@ if playback_manager is None:
         resolve_media_path=_resolve_media_path,
         video_duration_cache=_VIDEO_DURATION_CACHE,
         cv2_module=cv2,
+        cv2_loader=load_cv2,
         media_mode_choices=MEDIA_MODE_CHOICES,
         media_mode_image=MEDIA_MODE_IMAGE,
         media_mode_video=MEDIA_MODE_VIDEO,

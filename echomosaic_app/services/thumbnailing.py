@@ -20,6 +20,7 @@ class ThumbnailService:
         ImageFont,
         ImageOps,
         cv2_module,
+        cv2_loader,
         requests_module,
         eventlet_module,
         logger,
@@ -51,6 +52,7 @@ class ThumbnailService:
         self.ImageFont = ImageFont
         self.ImageOps = ImageOps
         self.cv2 = cv2_module
+        self.cv2_loader = cv2_loader
         self.requests = requests_module
         self.eventlet = eventlet_module
         self.logger = logger
@@ -124,13 +126,17 @@ class ThumbnailService:
         return self.generate_placeholder_thumbnail("Image")
 
     def create_video_thumbnail(self, media_path: Path):
-        if self.cv2 is None:
+        cv2 = self.cv2
+        if cv2 is None and self.cv2_loader is not None:
+            cv2 = self.cv2_loader()
+            self.cv2 = cv2
+        if cv2 is None:
             return None
-        capture = self.cv2.VideoCapture(str(media_path))
+        capture = cv2.VideoCapture(str(media_path))
         if not capture.isOpened():
             return None
         try:
-            frame_count = capture.get(self.cv2.CAP_PROP_FRAME_COUNT) or 0
+            frame_count = capture.get(cv2.CAP_PROP_FRAME_COUNT) or 0
             target_frame: Optional[int] = None
             if frame_count and frame_count > 0:
                 start = int(max(0, frame_count * 0.15))
@@ -139,20 +145,20 @@ class ThumbnailService:
                     end = start + 1
                 try:
                     target_frame = random.randint(start, max(start + 1, end - 1))
-                    capture.set(self.cv2.CAP_PROP_POS_FRAMES, float(target_frame))
+                    capture.set(cv2.CAP_PROP_POS_FRAMES, float(target_frame))
                 except Exception:
                     target_frame = None
             if target_frame is None:
                 try:
-                    duration_ms = capture.get(self.cv2.CAP_PROP_POS_MSEC) or 0
+                    duration_ms = capture.get(cv2.CAP_PROP_POS_MSEC) or 0
                     if duration_ms > 0:
-                        capture.set(self.cv2.CAP_PROP_POS_MSEC, duration_ms * 0.5)
+                        capture.set(cv2.CAP_PROP_POS_MSEC, duration_ms * 0.5)
                 except Exception:
                     pass
             success, frame = capture.read()
             if (not success or frame is None) and frame_count and frame_count > 0:
                 try:
-                    capture.set(self.cv2.CAP_PROP_POS_FRAMES, max(0.0, float(frame_count) * 0.5))
+                    capture.set(cv2.CAP_PROP_POS_FRAMES, max(0.0, float(frame_count) * 0.5))
                     success, frame = capture.read()
                 except Exception:
                     pass
@@ -161,7 +167,7 @@ class ThumbnailService:
         if not success or frame is None:
             return None
         try:
-            rgb_frame = self.cv2.cvtColor(frame, self.cv2.COLOR_BGR2RGB)
+            rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         except Exception:
             rgb_frame = frame[:, :, ::-1]
         image = self.Image.fromarray(rgb_frame)

@@ -342,6 +342,7 @@ class StreamPlaybackManager:
         resolve_media_path,
         video_duration_cache,
         cv2_module,
+        cv2_loader,
         media_mode_choices,
         media_mode_image,
         media_mode_video,
@@ -370,6 +371,7 @@ class StreamPlaybackManager:
         self.resolve_media_path = resolve_media_path
         self.video_duration_cache = video_duration_cache
         self.cv2_module = cv2_module
+        self.cv2_loader = cv2_loader
         self.media_mode_choices = media_mode_choices
         self.media_mode_image = media_mode_image
         self.media_mode_video = media_mode_video
@@ -710,7 +712,13 @@ class StreamPlaybackManager:
         if not rel_path:
             return None
         absolute = self.resolve_media_path(rel_path)
-        if not absolute or self.cv2_module is None:
+        if not absolute:
+            return None
+        cv2 = self.cv2_module
+        if cv2 is None and self.cv2_loader is not None:
+            cv2 = self.cv2_loader()
+            self.cv2_module = cv2
+        if cv2 is None:
             return None
         try:
             mtime_ns = absolute.stat().st_mtime_ns
@@ -720,19 +728,19 @@ class StreamPlaybackManager:
         cached = self.video_duration_cache.get(cache_key)
         if cached is not None:
             return cached if cached > 0 else None
-        capture = self.cv2_module.VideoCapture(str(absolute))
+        capture = cv2.VideoCapture(str(absolute))
         if not capture.isOpened():
             capture.release()
             self.video_duration_cache[cache_key] = -1.0
             return None
         duration = None
         try:
-            fps = capture.get(self.cv2_module.CAP_PROP_FPS) or 0.0
-            frame_count = capture.get(self.cv2_module.CAP_PROP_FRAME_COUNT) or 0.0
+            fps = capture.get(cv2.CAP_PROP_FPS) or 0.0
+            frame_count = capture.get(cv2.CAP_PROP_FRAME_COUNT) or 0.0
             if fps > 0 and frame_count > 0:
                 duration = frame_count / fps
             else:
-                milliseconds = capture.get(self.cv2_module.CAP_PROP_POS_MSEC) or 0.0
+                milliseconds = capture.get(cv2.CAP_PROP_POS_MSEC) or 0.0
                 if milliseconds > 0:
                     duration = milliseconds / 1000.0
         except Exception:
