@@ -4286,11 +4286,13 @@ def api_media_settings():
 
     cfg = load_config()
     upload_limit_mb = max(1, _as_int(cfg.get("MEDIA_UPLOAD_MAX_MB"), 2048))
+    low_memory_mode = _as_bool(cfg.get("LOW_MEMORY_MODE"), False)
     if request.method == "GET":
         return jsonify(
             {
                 "media_upload_max_mb": upload_limit_mb,
                 "media_upload_max_bytes": upload_limit_mb * 1024 * 1024,
+                "low_memory_mode": low_memory_mode,
             }
         )
 
@@ -4300,7 +4302,11 @@ def api_media_settings():
 
     payload = request.get_json(silent=True) or {}
     requested = max(1, _as_int(payload.get("media_upload_max_mb"), upload_limit_mb))
+    requested_low_memory_mode = _as_bool(payload.get("low_memory_mode"), low_memory_mode)
+    restart_requested = _as_bool(payload.get("restart"), False)
+    restart_required = requested_low_memory_mode != low_memory_mode
     cfg["MEDIA_UPLOAD_MAX_MB"] = requested
+    cfg["LOW_MEMORY_MODE"] = requested_low_memory_mode
     try:
         config_manager.save_config(cfg)
     except Exception:
@@ -4308,6 +4314,7 @@ def api_media_settings():
         return jsonify({"error": "Unable to save setting"}), 500
 
     CONFIG["MEDIA_UPLOAD_MAX_MB"] = requested
+    CONFIG["LOW_MEMORY_MODE"] = requested_low_memory_mode
     MEDIA_UPLOAD_MAX_MB = requested
     MEDIA_UPLOAD_MAX_BYTES = requested * 1024 * 1024
     try:
@@ -4316,12 +4323,19 @@ def api_media_settings():
         logger.exception("Failed to apply media upload setting to runtime")
         return jsonify({"error": "Unable to apply setting"}), 500
 
-    return jsonify(
-        {
-            "media_upload_max_mb": requested,
-            "media_upload_max_bytes": MEDIA_UPLOAD_MAX_BYTES,
-        }
-    )
+    restart_scheduled = False
+    if restart_required and restart_requested:
+        service_name = str(cfg.get("SERVICE_NAME") or "echomosaic.service").strip()
+        eventlet.spawn_after(0.75, OPERATIONS_SERVICE.restart_configured_service, service_name)
+        restart_scheduled = True
+
+    return jsonify({
+        "media_upload_max_mb": requested,
+        "media_upload_max_bytes": MEDIA_UPLOAD_MAX_BYTES,
+        "low_memory_mode": requested_low_memory_mode,
+        "restart_required": restart_required,
+        "restart_scheduled": restart_scheduled,
+    })
 
 
 def _sync_timer_payload(timer_id: str, entry: Dict[str, Any]) -> Dict[str, Any]:

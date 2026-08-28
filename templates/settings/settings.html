@@ -408,6 +408,7 @@
 
   async function loadMediaSettings() {
     const input = document.getElementById('media-upload-max-mb');
+    const lowMemoryToggle = document.getElementById('low-memory-mode-toggle');
     if (!input) return;
     setMediaSettingsStatus('Loading…');
     try {
@@ -417,6 +418,7 @@
       }
       const data = await res.json();
       input.value = data.media_upload_max_mb || 2048;
+      if (lowMemoryToggle) lowMemoryToggle.checked = data.low_memory_mode === true;
       setMediaSettingsStatus('');
     } catch (err) {
       setMediaSettingsStatus('Media settings unavailable.', false);
@@ -425,6 +427,7 @@
 
   async function saveMediaSettings() {
     const input = document.getElementById('media-upload-max-mb');
+    const lowMemoryToggle = document.getElementById('low-memory-mode-toggle');
     if (!input) return;
     const parsed = Number(input.value);
     if (!Number.isFinite(parsed) || parsed < 1) {
@@ -433,6 +436,7 @@
     }
     setMediaSettingsStatus('Saving…');
     input.disabled = true;
+    if (lowMemoryToggle) lowMemoryToggle.disabled = true;
     try {
       const res = await fetch('/api/settings/media', {
         method: 'POST',
@@ -440,18 +444,28 @@
           'Content-Type': 'application/json',
           'X-API-Key': SETTINGS_API_KEY
         },
-        body: JSON.stringify({ media_upload_max_mb: Math.floor(parsed) })
+        body: JSON.stringify({
+          media_upload_max_mb: Math.floor(parsed),
+          low_memory_mode: lowMemoryToggle ? lowMemoryToggle.checked : false,
+          restart: true
+        })
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
         throw new Error(data.error || 'Media settings update failed');
       }
       input.value = data.media_upload_max_mb || Math.floor(parsed);
-      setMediaSettingsStatus(`Upload limit saved at ${input.value} MB.`);
+      if (data.restart_scheduled) {
+        setMediaSettingsStatus('Settings saved. EchoMosaic is restarting; this page will reconnect shortly.');
+        window.setTimeout(() => window.location.reload(), 4000);
+      } else {
+        setMediaSettingsStatus(`Settings saved. Upload limit is ${input.value} MB.`);
+      }
     } catch (err) {
       setMediaSettingsStatus(err.message || 'Media settings update failed.', false);
     } finally {
       input.disabled = false;
+      if (lowMemoryToggle) lowMemoryToggle.disabled = false;
     }
   }
 
@@ -943,11 +957,17 @@
     <section class="settings-card">
       <div class="settings-card-header">
         <div>
-          <p class="settings-kicker">Media Settings</p>
-          <h3>Uploads</h3>
+          <p class="settings-kicker">Runtime</p>
+          <h3>Performance &amp; Uploads</h3>
         </div>
-        <p class="settings-card-copy">Control the maximum size allowed for file and folder uploads in the Media manager.</p>
+        <p class="settings-card-copy">Tune EchoMosaic for the host and control Media manager upload limits.</p>
       </div>
+      <label class="toggle compact">
+        <input type="checkbox" id="low-memory-mode-toggle">
+        <span class="toggle-switch"></span>
+        <span class="toggle-label">Low-memory mode</span>
+      </label>
+      <p class="settings-card-copy">Recommended for small containers. Reduces background workers and caches and disables animated video previews. Saving a change restarts EchoMosaic.</p>
       <div class="settings-inline-form">
         <label class="settings-advanced-field settings-advanced-field-inline" for="media-upload-max-mb">
           <span>Max Upload Size</span>
@@ -956,7 +976,7 @@
             <span class="settings-inline-suffix">MB</span>
           </div>
         </label>
-        <button id="media-settings-save" type="button">Save Media Setting</button>
+        <button id="media-settings-save" type="button">Save Runtime Settings</button>
       </div>
       <p id="media-settings-note" class="settings-status-line" style="display:none;"></p>
     </section>
