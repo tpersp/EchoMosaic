@@ -5,6 +5,7 @@ EchoMosaic is a self-hosted Flask + Flask-SocketIO dashboard for building image,
 ## Highlights
 
 - Multi-stream dashboard with live viewer pages and per-stream controls.
+- RTSP/RTSPS CCTV playback through an on-demand FFmpeg-to-HLS bridge (H.264 sources recommended).
 - Shared sidebar UI across Dashboard, Media, Settings, and updater pages.
 - Local media playback for images, GIFs, and video, plus URL/embed, Picsum, and Stable Horde AI modes.
 - Media manager with folder uploads, queue controls, thumbnails, and configurable upload limits.

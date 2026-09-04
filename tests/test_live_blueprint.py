@@ -11,6 +11,7 @@ def test_live_blueprint_registers_expected_routes() -> None:
         create_live_blueprint(
             stream_live_handler=lambda: ("ok", 200),
             stream_live_invalidate_handler=lambda: ("ok", 200),
+            rtsp_asset_handler=lambda stream_id, filename: (f"{stream_id}/{filename}", 200),
             legacy_stream_live_handler=lambda: ("ok", 200),
             test_embed_handler=lambda: ("ok", 200),
         )
@@ -19,5 +20,6 @@ def test_live_blueprint_registers_expected_routes() -> None:
     routes = {rule.rule for rule in app.url_map.iter_rules()}
     assert "/stream/live" in routes
     assert "/stream/live/invalidate" in routes
+    assert "/stream/rtsp/<stream_id>/<filename>" in routes
     assert "/live" in routes
     assert "/test_embed" in routes

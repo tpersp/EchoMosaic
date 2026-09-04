@@ -361,7 +361,7 @@
           <label for="stream-url-{{ stream_id }}">URL</label>
           <div>
             <div class="stream-url-controls">
-              <input id="stream-url-{{ stream_id }}" type="text" class="stream-url-input" data-stream="{{ stream_id }}" value="{{ conf.stream_url if conf.stream_url else '' }}" placeholder="https://example.com/">
+              <input id="stream-url-{{ stream_id }}" type="text" class="stream-url-input" data-stream="{{ stream_id }}" value="{{ conf.stream_url if conf.stream_url else '' }}" placeholder="https://, rtsp://, or rtsps://">
               <span class="url-type-badge" aria-live="polite"></span>
               <span class="embed-status-badge" aria-live="polite"></span>
               {% set show_embed_type_badge = embed_type and embed_provider and embed_provider|lower == 'youtube' %}
@@ -3127,6 +3127,7 @@
     const u = (url||'').toLowerCase();
     if (u.includes('youtube.com') || u.includes('youtu.be/')) return 'YouTube';
     if (u.includes('twitch.tv/')) return 'Twitch';
+    if (u.startsWith('rtsp://') || u.startsWith('rtsps://')) return 'RTSP';
     if (u.endsWith('.m3u8') || u.endsWith('.mpd')) return 'HLS';
     if (u.startsWith('http://') || u.startsWith('https://')) return 'Website';
     return '';

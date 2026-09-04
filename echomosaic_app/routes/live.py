@@ -11,6 +11,7 @@ def create_live_blueprint(
     *,
     stream_live_handler: Callable[[], object],
     stream_live_invalidate_handler: Callable[[], object],
+    rtsp_asset_handler: Callable[[str, str], object],
     legacy_stream_live_handler: Callable[[], object],
     test_embed_handler: Callable[[], object],
 ) -> Blueprint:
@@ -23,6 +24,10 @@ def create_live_blueprint(
     @blueprint.route("/stream/live/invalidate", methods=["POST"])
     def stream_live_invalidate():
         return stream_live_invalidate_handler()
+
+    @blueprint.route("/stream/rtsp/<stream_id>/<filename>")
+    def rtsp_asset(stream_id: str, filename: str):
+        return rtsp_asset_handler(stream_id, filename)
 
     @blueprint.route("/live")
     def legacy_stream_live():
