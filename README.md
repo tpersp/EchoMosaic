@@ -5,6 +5,7 @@ EchoMosaic is a self-hosted Flask + Flask-SocketIO dashboard for building image,
 ## Highlights
 
 - Multi-stream dashboard with live viewer pages and per-stream controls.
+- RTSP/RTSPS CCTV playback through an on-demand FFmpeg-to-HLS bridge (H.264 sources recommended).
 - Shared sidebar UI across Dashboard, Media, Settings, and updater pages.
 - Local media playback for images, GIFs, and video, plus URL/embed, Picsum, and Stable Horde AI modes.
 - Media manager with folder uploads, queue controls, thumbnails, and configurable upload limits.
@@ -158,6 +159,15 @@ Important config keys:
 - `YOUTUBE_COOKIE_FILE`: optional path to a Netscape-format cookies.txt file for yt-dlp YouTube extraction
 - `YOUTUBE_JS_RUNTIME`: optional yt-dlp JavaScript runtime, for example `node:/usr/bin/node`
 - `YOUTUBE_REMOTE_COMPONENTS`: optional comma-separated yt-dlp remote components, for example `ejs:github`
+- `RTSP_IDLE_TIMEOUT_SECONDS`: stop an RTSP converter after this many seconds without playlist or segment requests (default `60`)
+- `RTSP_HLS_SEGMENT_SECONDS` / `RTSP_HLS_PLAYLIST_SIZE`: tune CCTV latency; defaults are one-second segments and a three-entry live window
+- `RTSP_RESTART_MAX_DELAY_SECONDS`: maximum automatic reconnection backoff after a camera disconnects (default `30`)
+
+RTSP playback uses H.264 passthrough to avoid transcoding CPU cost. EchoMosaic
+automatically reconnects interrupted feeds and keeps a short, credential-redacted
+FFmpeg error summary for server diagnostics. The browser HLS player is pinned and
+cached locally after its first download, so subsequent service restarts do not
+depend on display-side internet access.
 
 ### Small Proxmox LXC profile
 

@@ -870,7 +870,7 @@ function ensureHlsLibrary() {
   if (!hlsLoaderPromise) {
     hlsLoaderPromise = new Promise((resolve, reject) => {
       const script = document.createElement('script');
-      script.src = 'https://cdn.jsdelivr.net/npm/hls.js@latest';
+      script.src = '/stream/hls-player.js';
       script.async = true;
       script.onload = () => resolve(window.Hls);
       script.onerror = () => reject(new Error('Failed to load hls.js'));
@@ -1364,14 +1364,21 @@ async function render(config) {
           const video = document.createElement('video');
           video.controls = true;
           video.autoplay = true;
+          video.muted = true;
           video.playsInline = true;
           video.preload = 'auto';
           video.style.width = '100%';
           video.style.height = '100%';
+          video.addEventListener('error', () => {
+            console.error('Live video element error', video.error);
+          });
           container.appendChild(video);
 
           if (video.canPlayType('application/vnd.apple.mpegurl')) {
             video.src = data.hls_url;
+            video.addEventListener('loadedmetadata', () => {
+              video.play().catch(err => console.warn('Live stream autoplay was blocked', err));
+            }, { once: true });
           } else {
             try {
               const Hls = await ensureHlsLibrary();
@@ -1379,12 +1386,29 @@ async function render(config) {
                 activeHls = new Hls();
                 activeHls.loadSource(data.hls_url);
                 activeHls.attachMedia(video);
+                activeHls.on(Hls.Events.MANIFEST_PARSED, () => {
+                  video.play().catch(err => console.warn('Live stream autoplay was blocked', err));
+                });
+                activeHls.on(Hls.Events.ERROR, (_event, errorData) => {
+                  if (!errorData || !errorData.fatal) return;
+                  console.error('Fatal HLS playback error', errorData);
+                  if (errorData.type === Hls.ErrorTypes.NETWORK_ERROR) {
+                    activeHls.startLoad();
+                  } else if (errorData.type === Hls.ErrorTypes.MEDIA_ERROR) {
+                    activeHls.recoverMediaError();
+                  } else {
+                    container.textContent = 'Unable to play live stream';
+                    teardownHlsInstance();
+                  }
+                });
               } else {
                 video.src = data.hls_url;
+                video.play().catch(err => console.warn('Live stream autoplay was blocked', err));
               }
             } catch (err) {
               console.error('Failed to initialise hls.js', err);
-              video.src = data.hls_url;
+              container.innerHTML = '';
+              container.textContent = 'Unable to load the live-stream player';
             }
           }
         } else {

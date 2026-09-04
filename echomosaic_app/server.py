@@ -20,6 +20,7 @@ import io
 import hashlib
 import socket
 import sys
+import tempfile
 from copy import deepcopy
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -141,6 +142,7 @@ from echomosaic_app.services.asset_delivery import AssetDeliveryService
 from echomosaic_app.services.auto_schedulers import build_auto_schedulers
 from echomosaic_app.services.groups import GroupService
 from echomosaic_app.services.live_hls import HLSCacheEntry, LiveHLSService
+from echomosaic_app.services.rtsp_hls import RtspHlsService
 from echomosaic_app.services.links_service import GlobalLinksService
 from echomosaic_app.services.media_catalog import MediaCatalogService
 from echomosaic_app.services.media_library import MediaLibraryService
@@ -554,6 +556,13 @@ def _as_bool(value: Any, default: bool = False) -> bool:
 def _as_int(value: Any, default: int) -> int:
     try:
         return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _as_float(value: Any, default: float) -> float:
+    try:
+        return float(value)
     except (TypeError, ValueError):
         return default
 
@@ -2734,6 +2743,16 @@ def _shutdown_hls_executor():
 
 atexit.register(_shutdown_hls_executor)
 
+RTSP_HLS_SERVICE = RtspHlsService(
+    root=Path(tempfile.gettempdir()) / "echomosaic-rtsp-hls",
+    idle_timeout=max(10, _as_int(CONFIG.get("RTSP_IDLE_TIMEOUT_SECONDS"), 60)),
+    segment_seconds=_as_float(CONFIG.get("RTSP_HLS_SEGMENT_SECONDS"), 1.0),
+    playlist_size=_as_int(CONFIG.get("RTSP_HLS_PLAYLIST_SIZE"), 3),
+    restart_max_delay=_as_float(CONFIG.get("RTSP_RESTART_MAX_DELAY_SECONDS"), 30.0),
+)
+RTSP_HLS_SERVICE.start_reaper()
+atexit.register(RTSP_HLS_SERVICE.stop_all)
+
 
 def _relative_image_path(path: Union[Path, str]) -> str:
     try:
@@ -4441,6 +4460,19 @@ def stream_live():
         return jsonify({"error": "No live stream URL configured"}), 404
 
     lowered = stream_url.lower()
+    if RTSP_HLS_SERVICE.is_rtsp_url(stream_url):
+        try:
+            playlist_url = RTSP_HLS_SERVICE.ensure(stream_id, stream_url)
+        except RuntimeError as exc:
+            return jsonify({"error": str(exc)}), 503
+        return jsonify({
+            "embed_type": "hls",
+            "embed_id": None,
+            "hls_url": playlist_url,
+            "original_url": None,
+            "source_type": "rtsp",
+        })
+
     youtube_details = _parse_youtube_url_details(stream_url)
     if youtube_details:
         if override_url is not None:
@@ -4609,7 +4641,69 @@ def stream_live_invalidate():
     if not target_url:
         return jsonify({"error": "No live stream URL provided"}), 400
 
+    if RTSP_HLS_SERVICE.is_rtsp_url(target_url):
+        RTSP_HLS_SERVICE.stop(stream_id)
+        return jsonify({"status": "invalidated", "stream_id": stream_id})
     return jsonify(LIVE_HLS_SERVICE.invalidate_stream(stream_id, target_url))
+
+
+def rtsp_asset(stream_id: str, filename: str):
+    # FFmpeg may need a moment to receive the first keyframe and write the manifest.
+    deadline = time.monotonic() + (5.0 if filename == "index.m3u8" else 0.0)
+    path = RTSP_HLS_SERVICE.asset_path(stream_id, filename)
+    while path is None and time.monotonic() < deadline:
+        time.sleep(0.1)
+        path = RTSP_HLS_SERVICE.asset_path(stream_id, filename)
+    if path is None:
+        diagnostics = RTSP_HLS_SERVICE.diagnostics(stream_id)
+        if diagnostics.get("error"):
+            logger.warning("RTSP converter unavailable for token %s: %s", stream_id, diagnostics["error"])
+        return jsonify({"error": "RTSP stream is not ready"}), 404
+    mimetype = "application/vnd.apple.mpegurl" if filename.endswith(".m3u8") else "video/mp2t"
+    response = send_file(path, mimetype=mimetype, conditional=False)
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+_HLS_PLAYER_SCRIPT_CACHE: Optional[bytes] = None
+_HLS_PLAYER_VERSION = "1.7.2"
+_HLS_PLAYER_CACHE_FILE = (
+    Path(os.environ.get("XDG_CACHE_HOME") or (Path.home() / ".cache"))
+    / "echomosaic"
+    / f"hls-{_HLS_PLAYER_VERSION}.min.js"
+)
+
+
+def hls_player_script():
+    """Serve hls.js through EchoMosaic so display clients need no internet access."""
+    global _HLS_PLAYER_SCRIPT_CACHE
+    if _HLS_PLAYER_SCRIPT_CACHE is None:
+        try:
+            cached = _HLS_PLAYER_CACHE_FILE.read_bytes()
+            if cached:
+                _HLS_PLAYER_SCRIPT_CACHE = cached
+        except OSError:
+            pass
+    if _HLS_PLAYER_SCRIPT_CACHE is None:
+        if requests is None:
+            return Response("// hls.js unavailable\n", status=503, mimetype="application/javascript")
+        try:
+            upstream = requests.get(
+                f"https://cdn.jsdelivr.net/npm/hls.js@{_HLS_PLAYER_VERSION}/dist/hls.min.js",
+                timeout=15,
+            )
+            upstream.raise_for_status()
+            _HLS_PLAYER_SCRIPT_CACHE = bytes(upstream.content)
+            try:
+                _HLS_PLAYER_CACHE_FILE.parent.mkdir(parents=True, exist_ok=True)
+                _HLS_PLAYER_CACHE_FILE.write_bytes(_HLS_PLAYER_SCRIPT_CACHE)
+            except OSError as exc:
+                logger.warning("Unable to persist the hls.js cache: %s", exc)
+        except Exception as exc:
+            logger.warning("Unable to fetch hls.js for local delivery: %s", exc)
+            return Response("// hls.js unavailable\n", status=503, mimetype="application/javascript")
+    response = Response(_HLS_PLAYER_SCRIPT_CACHE, mimetype="application/javascript")
+    response.headers["Cache-Control"] = "public, max-age=86400"
+    return response
 
 
 def legacy_stream_live():
@@ -4654,6 +4748,10 @@ def test_embed():
         parsed = urlparse(url)
     except Exception:
         return jsonify({"status": "not_valid", "note": "Not valid"})
+    if parsed.scheme.lower() in ("rtsp", "rtsps") and parsed.netloc:
+        if not RTSP_HLS_SERVICE.ffmpeg_path:
+            return jsonify({"status": "unreachable", "note": "FFmpeg unavailable", "kind": "rtsp"})
+        return jsonify({"status": "ok", "note": "RTSP", "kind": "rtsp"})
     if not parsed.scheme or not parsed.netloc or parsed.scheme not in ("http", "https"):
         return jsonify({"status": "not_valid", "note": "Not valid"})
 
@@ -4926,6 +5024,8 @@ register_blueprint_with_legacy_aliases(app, _library_blueprint, {
 _live_blueprint = create_live_blueprint(
     stream_live_handler=stream_live,
     stream_live_invalidate_handler=stream_live_invalidate,
+    rtsp_asset_handler=rtsp_asset,
+    hls_player_script_handler=hls_player_script,
     legacy_stream_live_handler=legacy_stream_live,
     test_embed_handler=test_embed,
 )
