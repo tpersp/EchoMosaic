@@ -35,6 +35,13 @@ def test_rtsp_service_reuses_a_live_converter(tmp_path: Path) -> None:
     assert len(calls) == 1
     assert "rtsp://user:secret@camera/live" in calls[0]
 
+    token = first.split("/")[3]
+    playlist = tmp_path / token / "index.m3u8"
+    playlist.write_text("#EXTM3U\n")
+    assert service.asset_path(token, "index.m3u8") == playlist
+    assert service.asset_path("front door", "index.m3u8") is None
+    assert service.asset_path(token, "../settings.json") is None
+
 
 def test_rtsp_service_rejects_other_protocols(tmp_path: Path) -> None:
     service = RtspHlsService(root=tmp_path, ffmpeg_path="ffmpeg")

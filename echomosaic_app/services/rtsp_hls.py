@@ -94,14 +94,17 @@ class RtspHlsService:
             self._sessions[stream_id] = RtspSession(source_url, output_dir, process, now)
             return f"/stream/rtsp/{safe_id}/index.m3u8"
 
-    def asset_path(self, stream_id: str, filename: str) -> Optional[Path]:
+    def asset_path(self, stream_token: str, filename: str) -> Optional[Path]:
         if filename != "index.m3u8" and not (filename.endswith(".ts") and filename[:-3].isdigit()):
             return None
-        safe_id = self._safe_id(stream_id)
+        # The route contains the opaque token returned by ``ensure``. Hashing it
+        # again would point at a different directory and make every asset 404.
+        if len(stream_token) != 20 or any(ch not in "0123456789abcdef" for ch in stream_token):
+            return None
         now = self.clock()
         with self._lock:
             for session in self._sessions.values():
-                if session.output_dir.name == safe_id:
+                if session.output_dir.name == stream_token:
                     session.last_access = now
                     path = session.output_dir / filename
                     return path if path.is_file() else None
