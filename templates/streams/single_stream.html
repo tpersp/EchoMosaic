@@ -870,7 +870,7 @@ function ensureHlsLibrary() {
   if (!hlsLoaderPromise) {
     hlsLoaderPromise = new Promise((resolve, reject) => {
       const script = document.createElement('script');
-      script.src = 'https://cdn.jsdelivr.net/npm/hls.js@latest';
+      script.src = '/stream/hls-player.js';
       script.async = true;
       script.onload = () => resolve(window.Hls);
       script.onerror = () => reject(new Error('Failed to load hls.js'));
@@ -1407,8 +1407,8 @@ async function render(config) {
               }
             } catch (err) {
               console.error('Failed to initialise hls.js', err);
-              video.src = data.hls_url;
-              container.dataset.streamError = 'hls-library';
+              container.innerHTML = '';
+              container.textContent = 'Unable to load the live-stream player';
             }
           }
         } else {

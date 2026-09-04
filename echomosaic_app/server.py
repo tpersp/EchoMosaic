@@ -4651,6 +4651,29 @@ def rtsp_asset(stream_id: str, filename: str):
     response.headers["Cache-Control"] = "no-store"
     return response
 
+_HLS_PLAYER_SCRIPT_CACHE: Optional[bytes] = None
+
+
+def hls_player_script():
+    """Serve hls.js through EchoMosaic so display clients need no internet access."""
+    global _HLS_PLAYER_SCRIPT_CACHE
+    if _HLS_PLAYER_SCRIPT_CACHE is None:
+        if requests is None:
+            return Response("// hls.js unavailable\n", status=503, mimetype="application/javascript")
+        try:
+            upstream = requests.get(
+                "https://cdn.jsdelivr.net/npm/hls.js@latest/dist/hls.min.js",
+                timeout=15,
+            )
+            upstream.raise_for_status()
+            _HLS_PLAYER_SCRIPT_CACHE = bytes(upstream.content)
+        except Exception as exc:
+            logger.warning("Unable to fetch hls.js for local delivery: %s", exc)
+            return Response("// hls.js unavailable\n", status=503, mimetype="application/javascript")
+    response = Response(_HLS_PLAYER_SCRIPT_CACHE, mimetype="application/javascript")
+    response.headers["Cache-Control"] = "public, max-age=86400"
+    return response
+
 
 def legacy_stream_live():
     """Backward compatible alias for /stream/live"""
@@ -4971,6 +4994,7 @@ _live_blueprint = create_live_blueprint(
     stream_live_handler=stream_live,
     stream_live_invalidate_handler=stream_live_invalidate,
     rtsp_asset_handler=rtsp_asset,
+    hls_player_script_handler=hls_player_script,
     legacy_stream_live_handler=legacy_stream_live,
     test_embed_handler=test_embed,
 )
