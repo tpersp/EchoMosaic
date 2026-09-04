@@ -560,6 +560,13 @@ def _as_int(value: Any, default: int) -> int:
         return default
 
 
+def _as_float(value: Any, default: float) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
 def _normalize_extensions(value: Any) -> List[str]:
     if isinstance(value, (list, tuple, set)):
         raw_items = list(value)
@@ -2739,6 +2746,9 @@ atexit.register(_shutdown_hls_executor)
 RTSP_HLS_SERVICE = RtspHlsService(
     root=Path(tempfile.gettempdir()) / "echomosaic-rtsp-hls",
     idle_timeout=max(10, _as_int(CONFIG.get("RTSP_IDLE_TIMEOUT_SECONDS"), 60)),
+    segment_seconds=_as_float(CONFIG.get("RTSP_HLS_SEGMENT_SECONDS"), 1.0),
+    playlist_size=_as_int(CONFIG.get("RTSP_HLS_PLAYLIST_SIZE"), 3),
+    restart_max_delay=_as_float(CONFIG.get("RTSP_RESTART_MAX_DELAY_SECONDS"), 30.0),
 )
 RTSP_HLS_SERVICE.start_reaper()
 atexit.register(RTSP_HLS_SERVICE.stop_all)
@@ -4645,6 +4655,9 @@ def rtsp_asset(stream_id: str, filename: str):
         time.sleep(0.1)
         path = RTSP_HLS_SERVICE.asset_path(stream_id, filename)
     if path is None:
+        diagnostics = RTSP_HLS_SERVICE.diagnostics(stream_id)
+        if diagnostics.get("error"):
+            logger.warning("RTSP converter unavailable for token %s: %s", stream_id, diagnostics["error"])
         return jsonify({"error": "RTSP stream is not ready"}), 404
     mimetype = "application/vnd.apple.mpegurl" if filename.endswith(".m3u8") else "video/mp2t"
     response = send_file(path, mimetype=mimetype, conditional=False)
@@ -4652,21 +4665,39 @@ def rtsp_asset(stream_id: str, filename: str):
     return response
 
 _HLS_PLAYER_SCRIPT_CACHE: Optional[bytes] = None
+_HLS_PLAYER_VERSION = "1.7.2"
+_HLS_PLAYER_CACHE_FILE = (
+    Path(os.environ.get("XDG_CACHE_HOME") or (Path.home() / ".cache"))
+    / "echomosaic"
+    / f"hls-{_HLS_PLAYER_VERSION}.min.js"
+)
 
 
 def hls_player_script():
     """Serve hls.js through EchoMosaic so display clients need no internet access."""
     global _HLS_PLAYER_SCRIPT_CACHE
     if _HLS_PLAYER_SCRIPT_CACHE is None:
+        try:
+            cached = _HLS_PLAYER_CACHE_FILE.read_bytes()
+            if cached:
+                _HLS_PLAYER_SCRIPT_CACHE = cached
+        except OSError:
+            pass
+    if _HLS_PLAYER_SCRIPT_CACHE is None:
         if requests is None:
             return Response("// hls.js unavailable\n", status=503, mimetype="application/javascript")
         try:
             upstream = requests.get(
-                "https://cdn.jsdelivr.net/npm/hls.js@latest/dist/hls.min.js",
+                f"https://cdn.jsdelivr.net/npm/hls.js@{_HLS_PLAYER_VERSION}/dist/hls.min.js",
                 timeout=15,
             )
             upstream.raise_for_status()
             _HLS_PLAYER_SCRIPT_CACHE = bytes(upstream.content)
+            try:
+                _HLS_PLAYER_CACHE_FILE.parent.mkdir(parents=True, exist_ok=True)
+                _HLS_PLAYER_CACHE_FILE.write_bytes(_HLS_PLAYER_SCRIPT_CACHE)
+            except OSError as exc:
+                logger.warning("Unable to persist the hls.js cache: %s", exc)
         except Exception as exc:
             logger.warning("Unable to fetch hls.js for local delivery: %s", exc)
             return Response("// hls.js unavailable\n", status=503, mimetype="application/javascript")

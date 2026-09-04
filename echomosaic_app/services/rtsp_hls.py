@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+import hashlib
+import re
 import shutil
 import subprocess
 import threading
 import time
-import hashlib
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Dict, Optional
@@ -16,8 +17,11 @@ from typing import Callable, Dict, Optional
 class RtspSession:
     source_url: str
     output_dir: Path
-    process: subprocess.Popen
+    process: Optional[subprocess.Popen]
     last_access: float
+    restart_attempts: int = 0
+    next_restart: float = 0.0
+    last_error: str = ""
 
 
 class RtspHlsService:
@@ -33,12 +37,18 @@ class RtspHlsService:
         popen: Callable[..., subprocess.Popen] = subprocess.Popen,
         clock: Callable[[], float] = time.monotonic,
         idle_timeout: float = 60.0,
+        segment_seconds: float = 1.0,
+        playlist_size: int = 3,
+        restart_max_delay: float = 30.0,
     ) -> None:
         self.root = Path(root)
         self.ffmpeg_path = ffmpeg_path or shutil.which("ffmpeg")
         self.popen = popen
         self.clock = clock
         self.idle_timeout = max(10.0, float(idle_timeout))
+        self.segment_seconds = max(0.5, float(segment_seconds))
+        self.playlist_size = max(3, int(playlist_size))
+        self.restart_max_delay = max(2.0, float(restart_max_delay))
         self._lock = threading.RLock()
         self._sessions: Dict[str, RtspSession] = {}
         self._stop_event = threading.Event()
@@ -63,7 +73,8 @@ class RtspHlsService:
             "-rtsp_transport", "tcp", "-i", source_url,
             "-map", "0:v:0", "-map", "0:a:0?",
             "-c:v", "copy", "-c:a", "aac", "-ar", "48000", "-ac", "2",
-            "-f", "hls", "-hls_time", "2", "-hls_list_size", "5",
+            "-f", "hls", "-hls_time", f"{self.segment_seconds:g}",
+            "-hls_list_size", str(self.playlist_size),
             "-hls_flags", "delete_segments+append_list+omit_endlist+independent_segments",
             "-hls_segment_filename", str(output_dir / "%06d.ts"),
             str(output_dir / "index.m3u8"),
@@ -78,21 +89,84 @@ class RtspHlsService:
         with self._lock:
             self._stop_idle_locked(now)
             current = self._sessions.get(stream_id)
-            if current and current.source_url == source_url and current.process.poll() is None:
+            if current and current.source_url == source_url:
                 current.last_access = now
+                if current.process is None or current.process.poll() is not None:
+                    current.next_restart = 0.0
+                    self._restart_locked(stream_id, current, now)
                 return f"/stream/rtsp/{safe_id}/index.m3u8"
             self._stop_locked(stream_id)
             output_dir = self.root / safe_id
             shutil.rmtree(output_dir, ignore_errors=True)
             output_dir.mkdir(parents=True, exist_ok=True)
+            session = RtspSession(source_url, output_dir, None, now)
+            self._sessions[stream_id] = session
+            self._launch_locked(stream_id, session)
+            return f"/stream/rtsp/{safe_id}/index.m3u8"
+
+    def _launch_locked(self, stream_id: str, session: RtspSession) -> None:
+        session.output_dir.mkdir(parents=True, exist_ok=True)
+        for path in session.output_dir.glob("*.ts"):
+            path.unlink(missing_ok=True)
+        (session.output_dir / "index.m3u8").unlink(missing_ok=True)
+        try:
             process = self.popen(
-                self._command(source_url, output_dir),
+                self._command(session.source_url, session.output_dir),
                 stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
+                stderr=subprocess.PIPE,
+                text=True,
+                errors="replace",
                 start_new_session=True,
             )
-            self._sessions[stream_id] = RtspSession(source_url, output_dir, process, now)
-            return f"/stream/rtsp/{safe_id}/index.m3u8"
+        except Exception as exc:
+            session.process = None
+            session.last_error = self._redact(str(exc), session.source_url)
+            session.restart_attempts += 1
+            session.next_restart = self.clock() + self._restart_delay(session.restart_attempts)
+            return
+        session.process = process
+        stderr = getattr(process, "stderr", None)
+        if stderr is not None:
+            threading.Thread(
+                target=self._drain_stderr,
+                args=(stream_id, process, stderr, session.source_url),
+                name=f"rtsp-log-{self._safe_id(stream_id)}",
+                daemon=True,
+            ).start()
+
+    @staticmethod
+    def _redact(message: str, source_url: str) -> str:
+        clean = str(message or "").replace(source_url, "<redacted-rtsp-url>")
+        return re.sub(r"(rtsps?://)[^\s]+", r"\1<redacted>", clean, flags=re.IGNORECASE)[-2000:]
+
+    def _drain_stderr(self, stream_id: str, process, stderr, source_url: str) -> None:
+        recent: list[str] = []
+        try:
+            for line in stderr:
+                line = self._redact(line.strip(), source_url)
+                if line:
+                    recent.append(line)
+                    recent = recent[-8:]
+        finally:
+            try:
+                stderr.close()
+            except Exception:
+                pass
+            if recent:
+                with self._lock:
+                    session = self._sessions.get(stream_id)
+                    if session and session.process is process:
+                        session.last_error = "\n".join(recent)
+
+    def _restart_delay(self, attempts: int) -> float:
+        return min(self.restart_max_delay, float(2 ** min(max(0, attempts - 1), 5)))
+
+    def _restart_locked(self, stream_id: str, session: RtspSession, now: float) -> None:
+        if now < session.next_restart:
+            return
+        session.restart_attempts += 1
+        session.next_restart = now + self._restart_delay(session.restart_attempts)
+        self._launch_locked(stream_id, session)
 
     def asset_path(self, stream_token: str, filename: str) -> Optional[Path]:
         if filename != "index.m3u8" and not (filename.endswith(".ts") and filename[:-3].isdigit()):
@@ -112,14 +186,16 @@ class RtspHlsService:
 
     def _stop_idle_locked(self, now: float) -> None:
         for stream_id, session in list(self._sessions.items()):
-            if now - session.last_access >= self.idle_timeout or session.process.poll() is not None:
+            if now - session.last_access >= self.idle_timeout:
                 self._stop_locked(stream_id)
+            elif session.process is None or session.process.poll() is not None:
+                self._restart_locked(stream_id, session, now)
 
     def _stop_locked(self, stream_id: str) -> None:
         session = self._sessions.pop(stream_id, None)
         if not session:
             return
-        if session.process.poll() is None:
+        if session.process is not None and session.process.poll() is None:
             session.process.terminate()
             try:
                 session.process.wait(timeout=3)
@@ -130,6 +206,18 @@ class RtspHlsService:
     def stop(self, stream_id: str) -> None:
         with self._lock:
             self._stop_locked(stream_id)
+
+    def diagnostics(self, stream_id: str) -> Dict[str, object]:
+        with self._lock:
+            session = self._sessions.get(stream_id)
+            if not session:
+                return {"active": False, "error": ""}
+            running = session.process is not None and session.process.poll() is None
+            return {
+                "active": running,
+                "restart_attempts": session.restart_attempts,
+                "error": session.last_error,
+            }
 
     def stop_all(self) -> None:
         self._stop_event.set()
